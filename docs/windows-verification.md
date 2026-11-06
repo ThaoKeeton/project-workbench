@@ -7,10 +7,10 @@
 | Task 3 Linux Core | 一次完整运行 221 通过、2 项明确 Windows DPAPI 跳过，共 223 项；随后新增 OS 进程用例的最终聚焦运行 12/12 通过 | 聚焦运行包含 6 个实际子进程，验证通用 opt-in Restore、RequiresPluginStart 不恢复、停用后不复活；另含 HostRuntime 持锁/Stop 重试、Apply 顺序、坏元数据独立根及只读凭据状态。未把更新后的完整套件宣称为已重新运行；TRX 在 Task 3 报告 |
 | Task 3 Linux C# reference | App 与独立 NativeFixture 参考编译 0 warnings/errors | `tests/Workbench.NativeReference` 仅为不可运行的类库；InitializeComponent 占位直接抛异常，没有生产入口/资源替代；不验证 SDK 生成 Main、XAML、主 PRI 或实际 WinUI |
 | Task 3 Windows/SDK native（Task 4 BASE） | [42285023349](https://github.com/ThaoKeeton/project-workbench/actions/runs/42285023349)，提交 `27154465c08d132798c8ea7b637f137f7340a90b`：Windows Core 226 通过、原生 14 项、management 10 项、六个连续实际进程 7 项、默认 Windows SDK source/NuGet export 均通过 | 控制器已检查实际报告；该结果只证明 Task 4 之前的 BASE，不是下述新增独立业务包探针的 Windows 执行证据 |
-| Task 4 Linux Core/固定业务包 | 完整运行 234 通过、2 项 Windows DPAPI 明确跳过，共 236 项；两个真实生产 ZIP 的 Store 安装及逐文件 SHA256 校验通过 | 不执行 WinUI 或业务程序集；新参数/脚本报告验证与不可运行的 App C# reference 编译另行记录在 Task 4 报告 |
-| Task 4 Windows 独立业务包 | 当前新增提交仍待控制器运行 CI | 已编写下述实际 shipping App 六进程测试；不得把 Linux、上游 source-linked host 或 Task 3 BASE GREEN 当作通过 |
+| Task 4 当前 Linux Core/固定业务包 | [42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164)，源码 `ccb6ef2`：237 通过、2 项 Windows DPAPI 明确跳过，共 239 项；16 项脚本检查及两个真实生产 ZIP 的逐文件审计通过 | Linux 不执行 WinUI 或业务程序集；参考编译仅为不可运行的类库 |
+| Task 4 当前 Windows/独立业务包 | 同轮源码 `ccb6ef2`：Windows Core 239/239（含两项真实 DPAPI），发布、原生 14 项、management 10 项、六个连续平台重启进程 7 项、SDK 默认 Windows export，以及真实生产业务包六进程 26 项均通过 | Server 2025 上实际运行当前 shipping App；生产 UPCAM 正向自动调度、绑定 key 正向创建/恢复仍缺独立上游模拟验收包，Windows 11 人工验收仍待执行 |
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
-| Linux C# 检查 | 早期手动主程序版本参考编译通过；当前主程序 7 个 C# 文件语法与 XML 检查通过 | 采用标准 App.xaml 后，XAML 编译器必须在 Windows 执行；当前主程序没有 Linux 完整语义编译证据 |
+| Linux C# 检查（历史基线） | 早期手动主程序版本参考编译及 7 个 C# 文件语法/XML 检查通过 | 后续不可运行的 NativeReference 语义编译已单列；生产 XAML/PRI 工具仍必须在 Windows 执行 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
 | Windows Core 测试/发布（历史基线） | [第八轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42209929309)：Windows Core 86/86，自包含主程序与两个独立插件包构建通过；发布的 `Workbench.App.pri` 为 1,352,680 bytes | 提交 `d615fa064c8962ed849b494b8b42d1ca54e67b0a`，使用 `windows-2025` runner |
 | Windows 原生自动冒烟（历史基线） | 同轮 `succeeded=true`、`stage=completed`，原有 11 项检查全部通过：原生启动、占用根失败窗口、实时主题、4 个页面/设置控件、文件命令、停用/重新启用及关闭 | 没有编辑/导航/重复生成回归，不能证明该行为安全；自动检查不代替人工验收 |
@@ -18,6 +18,10 @@
 | Windows 本轮构建 GREEN | [第十二轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42216264601)：Windows Core 86/86，主程序与两个独立插件发布通过，主 PRI 1,352,680 bytes；两个 job 均成功 | 实测代码提交 `a5d9825a9662710ff10dd833e0f9d53cfeaf8cdd`，使用 `windows-2025` runner |
 | Windows 本轮编辑回归 GREEN | 同轮原生进程 exit 0，`succeeded=true`、`stage=completed`、UI 线程 2，全部 13 项通过；最终摘要 100 bytes、CSV 293 bytes | 包含新工厂导航/真实编辑/保存/拒绝覆盖/停用恢复；原有 11 项检查保留 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
+
+当前 [CI 42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164) 的两个 job 均成功，运行源码为 `ccb6ef297ab042e329d60e6c0fda517f8686379c`。业务报告 [artifact 13542102290](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164/artifacts/13542102290) 的 ZIP SHA256 为 `5ae236c2a052fd5b99779d72b38afb603ae2ffd6549dd598583a7b93f706d114`；六阶段实际应用 PID 为 8040、5636、8072、2084、4720、7232，均以 OS exitCode 0 退出，报告确认 WinUI Closed、启动器重新获取 host lease、同一隔离根和固定来源/包哈希。各阶段检查为 5/5/5/3/5/3，共 26 项，11 个保留状态文件哈希在重启和维护后逐项相同。已观察的 UPCAM worker PID 744/5248/2544/976/7716/4188 均结束，实际 exitCode 为 1；这证明进程退役，不证明其协议正常零退出。完整主程序 [artifact 13542301860](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164/artifacts/13542301860) 保持两个示例为默认分发插件，真实业务包仍独立安装。
+
+这轮先实际复现并修正了正常完成任务随后 Stop 仍显示 Completed 的宿主状态竞态，再修正了 UPCAM TabView 替换后探针过早查找尚未呈现控件的就绪条件。业务断言和截止时间保持不变。UPCAM 缺授权回调安全 Faulted 的通过结果不能替代其正向自动任务、恢复绑定 key 和 consent-bound Restore 验证；该验收依赖仍未关闭。没有执行真实 Webhook/HTTP、企业接口或业务发送。
 
 历史基线的 11 项检查没有输入用户编辑，摘要为 235 bytes。第九轮在原来的无文档模型/无覆盖保护实现上出现上述导航断言 RED。第十轮修复模型后仍因原始 LF 字面预期失败；第十一轮增加隔离诊断，确认编辑前后与新工厂文本全文相同、均为 62 字符，唯一差异是输入字面的第 42 位 LF（U+000A）被 WinUI 规范为 CR（U+000D）。TextChanging 已读到完整新文本，随后 TextChanged 的值一致。
 
@@ -79,7 +83,7 @@ dotnet build src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj -c Release \
   -p:WindowsAppSDKSelfContained=false -p:AppxGeneratePriEnabled=false
 ```
 
-## host 0.2 管理与实际进程重启探针（本轮 Windows 待运行）
+## host 0.2 管理与实际进程重启探针（Server 2025 自动验证通过）
 
 构建脚本额外编译 `tests/Workbench.NativeFixture` 到 `artifacts/native/fixtures/runtime/`，只暂存夹具 DLL、deps 与清单。它不进入 `app/Plugins/`，普通启动不会安装、发现、信任或执行它。原有冒烟保留全部 13 项，再增加 Background/Credentials/Package maintenance 初始化导航检查。
 
@@ -114,7 +118,7 @@ pwsh ./scripts/export-sdk.ps1 -ReferenceOnly
 pwsh ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-reference-snapshot
 ```
 
-## Task 4 独立钉钉与 UPCAM 生产包验收（本轮 Windows 待运行）
+## Task 4 独立钉钉与 UPCAM 生产包验收（已实现的六进程范围通过）
 
 此探针运行当前 `artifacts/native/app/Workbench.App.exe`，使用当前 `HostRuntime`、真实 Store 和原生管理界面。它不运行上游 source-linked 旧宿主，不把两个平台样例当作业务插件，也不静态引用业务程序集。固定输入和来源记录见 [integration inputs](../tests/integration/README.md)。
 

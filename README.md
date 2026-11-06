@@ -2,7 +2,7 @@
 
 Windows 原生插件工作台基础版：同一个 WinUI 3 窗口承载独立插件提供的原生页面、设置与异步命令。使用标准 Windows 控件，不嵌入其他应用窗口，不使用 WebView。
 
-当前包含两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出）。示例明确使用预置数据；Teambition、钉钉、Figma、AI 和电脑自动化尚未接入，也不会发送业务消息。
+默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.1 和 UPCAM 0.1.0 已作为独立生产插件包在当前主程序中完成原生页面、模拟业务、生命周期及重启维护测试，需按需安装；固定输入与安装包见 [独立业务插件](tests/integration/README.md)。Figma 和电脑自动化尚未接入。
 
 ## 在 Windows 构建和启动
 
@@ -63,7 +63,7 @@ pwsh -File .\scripts\native-runtime-probe.ps1 -TimeoutSeconds 180
 
 GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbench` 分支提交运行 Linux Core 测试及 Windows Core/发布/原生冒烟。产物 `workbench-win-x64` 是完整应用目录，`native-smoke-report` 是 JSON 报告，另有两平台测试结果。当前开发环境是 Linux；跨目标 C# 编译不证明 Windows 原生启动成功。[Windows 验证记录和待验清单](docs/windows-verification.md) 区分这些证据。
 
-新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证实际原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除；报告在 `artifacts/native/runtime-probes/`。只使用合成数据与凭据，没有业务网络或发送。Server 2025 自动运行仍需本轮 Windows CI，Windows 11 的主题/DPI/选择器/可访问性清单保持待验。
+新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证实际原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除；报告在 `artifacts/native/runtime-probes/`。只使用合成数据与凭据，没有业务网络或发送。[当前 Server 2025 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164) 已通过这些平台检查，以及两个真实生产包的六个连续 OS 进程、26 项业务检查。UPCAM 正向自动调度的专用模拟验收包仍待上游发布，钉钉实际 host secret 值消费仍待业务侧接入；本轮没有真实 Webhook/HTTP/业务发送。Windows 11 的主题/DPI/选择器/可访问性清单保持待验。
 
 独立 SDK 导出：`pwsh ./scripts/export-sdk.ps1`。CI artifact `workbench-sdk-0.2.0` 含固定版本源码、两个 NuGet 包及提交/文件哈希清单；接入步骤见 [插件契约与独立构建](docs/integrations/plugin-contract-v1.md)。
 

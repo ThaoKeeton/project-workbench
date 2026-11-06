@@ -2,7 +2,7 @@
 
 两个 SDK 包固定为 **0.2.0**，API 1、可选运行服务 1 和程序集身份 **1.0.0.0** 保持兼容；文件版本为 0.2.0.0。.NET SDK 固定 10.0.403，Windows App SDK 固定 1.8.260921001，插件目标为 net10.0-windows10.0.19041.0/x64。SDK 源码与包分发现在通过下述可重建快照提供；独立业务 CI 不需要引用主程序或获得其他私有仓库的 token。
 
-后端基线 `82bd958e220aaf94ccdbf1ea68b0ec53b770706a` 已由控制器核验 [CI 42275683088](https://github.com/ThaoKeeton/project-workbench/actions/runs/42275683088)，含 Windows/Linux Core、发布和原有 13 项原生检查。当前新增原生管理/重启检查及 Windows SDK 打包需要本轮 Windows CI；Linux 参考编译或下面的 ReferenceOnly 产物不能代替它，也不代表 Windows 11 人工验收或真实业务授权已经完成。
+当前已核验源码 `ccb6ef297ab042e329d60e6c0fda517f8686379c` 的 [CI 42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164)：Windows Core 239/239、原生 14 项、management 10 项、六个连续平台重启进程 7 项，以及两个独立生产业务包的六进程 26 项检查均通过；Linux Core 为 237 通过、2 项明确 Windows DPAPI 跳过。默认 Windows SDK source/NuGet 导出与完整性检查通过，[SDK artifact 13542805335](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164/artifacts/13542805335) 的 manifest 为 referenceOnly=false、sdkSourcesDirty=false，包含真实 WinUI SDK PRI。UPCAM 正向自动调度的独立模拟验收包仍缺失，钉钉 host secret 值消费仍由业务侧接入；这些未验部分、真实业务接口及 Windows 11 人工验收不包含在上述通过范围。Linux 参考编译或 ReferenceOnly 产物不能替代真实 Windows 证据。
 
 ## 固定 SDK 分发快照与独立构建
 
