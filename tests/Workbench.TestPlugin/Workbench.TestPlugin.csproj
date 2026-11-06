@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <NoWarn>$(NoWarn);CA2255</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../src/Workbench.Sdk/Workbench.Sdk.csproj" />
+    <ProjectReference Include="../Workbench.TestDependency/Workbench.TestDependency.csproj" />
+  </ItemGroup>
+</Project>
