@@ -8,7 +8,7 @@
 | Linux 全解决方案参考编译 | 零警告、零错误 | 通过命令行关闭原生资源步骤；不能用于分发 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
 | Windows Core 测试/发布 | [第二轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42196885706)：Windows Core 86/86 和自包含发布通过；两个独立插件包构建通过 | 构建通过仍不代表原生启动 |
-| Windows 原生自动冒烟 | 第二轮真实进程退出码 -1073741189（0xC000027B），未到冒烟检查；当前为失败，已增加启动阶段/事件诊断等待下一轮 | 初始化失败或没有可用桌面会失败，不能跳过为通过 |
+| Windows 原生自动冒烟 | 第三轮仍退出 0xC000027B；阶段明确停在 XamlControlsResources 构造、尚无窗口。已补齐 Application 元数据提供器，实际 GREEN 待下一轮 Windows 冒烟 | 初始化失败或没有可用桌面会失败，不能跳过为通过 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
 
 ## 干净 Windows 环境

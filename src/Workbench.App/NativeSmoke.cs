@@ -1,5 +1,7 @@
 using System.Text.Json;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 using Workbench.Core;
 using Workbench.WinUI.Sdk;
 
@@ -18,6 +20,12 @@ internal static class NativeSmoke
         }
         window.AssertUiThread();
         Record("WinUI Application.Start and UI synchronization context initialized");
+        Require(Application.Current is IXamlMetadataProvider, "Code-only Application did not expose XAML metadata.");
+        var metadata = (IXamlMetadataProvider)Application.Current;
+        Require(metadata.GetXamlType(typeof(NavigationView)) is not null
+            && metadata.GetXamlType("Microsoft.UI.Xaml.Controls.NavigationView") is not null,
+            "Application could not resolve WinUI control metadata by type and full name.");
+        Record("Application resolved WinUI control XAML metadata by type and full name");
         var manager = window.SmokeManager;
         Require(manager.Plugins.Count == 2, "Smoke must discover exactly the two curated bundled packages.");
         Require(manager.Plugins.All(p => p.Manifest is not null && RunOptions.SampleIds.Contains(p.Manifest.Id)
