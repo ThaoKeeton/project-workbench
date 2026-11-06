@@ -1,0 +1,59 @@
+name: Build and native verification
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  core-linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Core runtime and real filesystem tests
+        run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-linux.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: core-linux-results
+          path: artifacts/tests
+          if-no-files-found: error
+  native-windows:
+    runs-on: windows-2025
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Core runtime and Windows filesystem tests
+        run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-windows.trx" --results-directory artifacts/tests
+      - name: Publish native host and independent plugins
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Real WinUI isolated native smoke
+        shell: pwsh
+        run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: workbench-win-x64
+          path: artifacts/native/app/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: native-smoke-report
+          path: artifacts/native/native-smoke.json
+          if-no-files-found: error
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: core-windows-results
+          path: artifacts/tests
+          if-no-files-found: error

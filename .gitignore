@@ -8,3 +8,6 @@ TestResults/
 *.user
 *.suo
 *.log
+
+# Native Windows tool state produced by Linux reference probes
+**/.mono/

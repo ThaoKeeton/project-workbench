@@ -36,6 +36,7 @@ public sealed class SettingsTests
     [InlineData("a..b")]
     [InlineData("")]
     [InlineData("C:outside")]
+    [InlineData("draft\n")]
     public async Task Setting_keys_cannot_address_a_path(string key)
     {
         using var disk = new TestDirectory();

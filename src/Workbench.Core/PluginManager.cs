@@ -267,11 +267,14 @@ public sealed class PluginManager : IAsyncDisposable
                 return new(false, "Could not save package approval; the plugin was not activated.");
             entry.Update(s => s with { IsTrusted = true });
         }
-        var context = new PluginRegistrationContext(pluginId, GetSettings(pluginId));
-        entry.Context = context;
         var initializing = false;
         try
         {
+            var dataDirectory = FileSystemGuard.ContainedPath(_userRoot, Path.Combine("data", pluginId));
+            Directory.CreateDirectory(dataDirectory);
+            FileSystemGuard.RejectLinks(dataDirectory);
+            var context = new PluginRegistrationContext(pluginId, dataDirectory, GetSettings(pluginId));
+            entry.Context = context;
             entry.LoadContext ??= new PluginLoadContext(entry.Package, _sharedAssemblies, _sharedAssemblyNames);
             entry.Assembly ??= entry.LoadContext.LoadFromAssemblyPath(FileSystemGuard.ContainedPath(entry.Package.Path, entry.Package.Manifest!.EntryAssembly));
             entry.Update(s => s with { IsLoaded = true });

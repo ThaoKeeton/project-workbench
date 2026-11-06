@@ -54,6 +54,13 @@ public sealed class FixturePlugin : IWorkbenchPlugin
         }));
         context.RegisterCommand(new PluginCommand("dependency-context", "Dependency context", _ =>
             Task.FromResult(new PluginCommandResult(true, ReadDependencyContext()))));
+        context.RegisterCommand(new PluginCommand("write-data", "Write scoped data", async token =>
+        {
+            var directory = context.DataDirectory;
+            var path = Path.Combine(directory, "fixture.txt");
+            await File.WriteAllTextAsync(path, context.PluginId, token);
+            return new(true, directory);
+        }));
         switch (_mode)
         {
             case "init-fail": throw new InvalidOperationException("fixture initialization failure");

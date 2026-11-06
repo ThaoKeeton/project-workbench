@@ -16,6 +16,8 @@ public interface IWorkbenchPlugin
 public interface IPluginContext
 {
     string PluginId { get; }
+    /// <summary>Existing per-plugin directory under the selected user root. A storage convention, not a sandbox.</summary>
+    string DataDirectory { get; }
     CancellationToken Lifetime { get; }
     IPluginSettings Settings { get; }
     void RegisterView(IPluginView view);

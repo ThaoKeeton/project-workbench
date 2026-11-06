@@ -12,14 +12,16 @@ internal sealed class PluginRegistrationContext : IPluginContext, IDisposable
     private bool _open = true;
     private bool _active;
 
-    public PluginRegistrationContext(string pluginId, IPluginSettings settings)
+    public PluginRegistrationContext(string pluginId, string dataDirectory, IPluginSettings settings)
     {
         PluginId = pluginId;
+        DataDirectory = dataDirectory;
         Settings = settings;
         Lifetime = _lifetime.Token;
     }
 
     public string PluginId { get; }
+    public string DataDirectory { get; }
     public CancellationToken Lifetime { get; }
     public IPluginSettings Settings { get; }
 

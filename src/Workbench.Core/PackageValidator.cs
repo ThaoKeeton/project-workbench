@@ -27,10 +27,10 @@ internal static partial class PackageValidator
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
     };
 
-    [GeneratedRegex("^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+$")]
+    [GeneratedRegex("^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:\\.[a-z][a-z0-9]*(?:-[a-z0-9]+)*)+\\z")]
     private static partial Regex PluginIdPattern();
 
-    [GeneratedRegex("^[0-9]+\\.[0-9]+\\.[0-9]+$")]
+    [GeneratedRegex("^[0-9]+\\.[0-9]+\\.[0-9]+\\z")]
     private static partial Regex VersionPattern();
 
     internal static bool IsSafePluginId(string? id) => id is { Length: > 0 and <= 128 } && PluginIdPattern().IsMatch(id);

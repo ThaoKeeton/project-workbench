@@ -10,7 +10,7 @@ internal sealed partial class JsonPluginSettings(string directory, Action<Plugin
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Dictionary<string, JsonElement>? _values;
 
-    [GeneratedRegex("^[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*$")]
+    [GeneratedRegex("^[A-Za-z][A-Za-z0-9]*(?:[._-][A-Za-z0-9]+)*\\z")]
     private static partial Regex KeyPattern();
 
     internal static void ValidateKey(string key)
