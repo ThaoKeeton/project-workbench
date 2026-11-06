@@ -1,7 +1,10 @@
 using System.Text.Json;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
+using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Markup;
+using Microsoft.UI.Xaml.Media;
 using Workbench.Core;
 using Workbench.WinUI.Sdk;
 
@@ -10,6 +13,9 @@ namespace Workbench.App;
 /// <summary>Runs only inside the real WinUI process on its UI thread, with isolated local state.</summary>
 internal static class NativeSmoke
 {
+    private const string SummarySavedDraft = "Native smoke user draft: keep these edits.\n已编辑的本地摘要，不得由示例生成覆盖。";
+    private const string SummaryUnsavedDraft = "Native smoke unsaved edit: discard only on explicit disable or process exit.";
+
     public static async Task RunAsync(MainWindow window, RunOptions options)
     {
         List<string> checks = [];
@@ -69,6 +75,8 @@ internal static class NativeSmoke
         };
         Require(files.All(file => File.Exists(file) && new FileInfo(file).Length > 0), "Local commands did not write isolated sample files.");
         Record("Local commands wrote nonempty draft and CSV under isolated DataDirectory paths");
+        await VerifySummaryDraftAsync(window, files[0]);
+        Record("Real Summary editor retained unsaved text through fresh Home/Commands/settings navigation, saved edits and refused destructive regeneration");
         foreach (var id in RunOptions.SampleIds)
         {
             window.SmokeDetach();
@@ -78,9 +86,18 @@ internal static class NativeSmoke
                 && manager.Contributions.Commands.All(c => c.PluginId != id), "Disabled plugin still has registrations.");
             var enabled = await manager.EnableAsync(id);
             Require(enabled.Succeeded, $"Re-enable {id}: {enabled.Message}");
+            if (id == RunOptions.SampleIds[0])
+            {
+                var page = await OpenSummaryAsync(window);
+                Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == SummarySavedDraft,
+                    "Summary re-enable did not reload the saved draft after discarding unsaved session edits.");
+                Require(await File.ReadAllTextAsync(files[0]) == SummarySavedDraft,
+                    "Summary disable/re-enable changed the saved draft file.");
+            }
         }
         await AttachAllViewsAsync(window);
         Record("Detached controls, disabled and re-enabled both samples, then attached fresh native factories");
+        Record("Summary disable discarded only unsaved session edits; re-enable loaded the unchanged saved draft");
         await window.SmokeStopAsync();
         Require(manager.Contributions.Views.Count == 0 && manager.Contributions.Commands.Count == 0, "Shutdown retained active contributions.");
         Require(manager.Plugins.All(p => p.Diagnostics.Count == 0), "Lifecycle produced diagnostics.");
@@ -100,6 +117,93 @@ internal static class NativeSmoke
             completedUtc = DateTimeOffset.UtcNow
         });
         await window.FinishSmokeAsync();
+    }
+
+    private static async Task VerifySummaryDraftAsync(MainWindow window, string path)
+    {
+        var manager = window.SmokeManager;
+        var generatedText = await File.ReadAllTextAsync(path);
+        var page = await OpenSummaryAsync(window);
+        await EditAsync(FindNamed<TextBox>(page, "工作摘要示例草稿"), SummarySavedDraft);
+
+        List<(string Page, string? PluginId, string? ViewId)> routes =
+            [("home", null, null), ("commands", null, null), ("settings", null, null)];
+        routes.AddRange(manager.Contributions.Views
+            .Where(v => v.View is WinUiView { Kind: WinUiViewKind.Settings })
+            .Select(v => ("view", (string?)v.PluginId, (string?)v.View.Id)));
+        foreach (var route in routes)
+        {
+            var previous = page;
+            await window.SmokeNavigateAsync(route.Page, route.PluginId, route.ViewId);
+            page = await OpenSummaryAsync(window);
+            Require(!ReferenceEquals(previous, page), "Summary navigation must create a fresh native view.");
+            Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == SummarySavedDraft,
+                $"Summary unsaved draft was lost after navigating through {route.Page}.");
+        }
+
+        var command = manager.Contributions.Commands.Single(c => c.PluginId == RunOptions.SampleIds[0]);
+        await window.SmokeNavigateAsync("commands");
+        var unsavedGeneration = await manager.ExecuteCommandAsync(command.PluginId, command.Id);
+        Require(!unsavedGeneration.Succeeded && !string.IsNullOrWhiteSpace(unsavedGeneration.Message),
+            "Summary generation must clearly refuse to replace an edited draft.");
+        Require(await File.ReadAllTextAsync(path) == generatedText, "Summary regeneration replaced the existing file before Save.");
+        page = await OpenSummaryAsync(window);
+        Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == SummarySavedDraft,
+            "Summary regeneration replaced unsaved editor text.");
+
+        var status = Descendants<TextBlock>(page).Single(text => text.Text.Contains(path, StringComparison.Ordinal));
+        var saved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var subscription = status.RegisterPropertyChangedCallback(TextBlock.TextProperty, (_, _) => saved.TrySetResult());
+        try
+        {
+            // Invoke the real native button and wait for its async UI result, not a plugin helper.
+            new ButtonAutomationPeer(FindNamed<Button>(page, "保存工作摘要示例草稿")).Invoke();
+            await saved.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        }
+        finally { status.UnregisterPropertyChangedCallback(TextBlock.TextProperty, subscription); }
+        Require(await File.ReadAllTextAsync(path) == SummarySavedDraft, "Summary Save did not persist the edited draft.");
+
+        await window.SmokeNavigateAsync("commands");
+        var savedGeneration = await manager.ExecuteCommandAsync(command.PluginId, command.Id);
+        Require(!savedGeneration.Succeeded && !string.IsNullOrWhiteSpace(savedGeneration.Message),
+            "Summary generation must clearly refuse to replace a saved draft.");
+        Require(await File.ReadAllTextAsync(path) == SummarySavedDraft, "Summary regeneration replaced the user's saved draft file.");
+        page = await OpenSummaryAsync(window);
+        var editor = FindNamed<TextBox>(page, "工作摘要示例草稿");
+        Require(editor.Text == SummarySavedDraft, "Summary regeneration replaced the saved draft model.");
+        // The existing lifecycle round trip below must restore the saved value, not this session-only edit.
+        await EditAsync(editor, SummaryUnsavedDraft);
+    }
+
+    private static Task<FrameworkElement> OpenSummaryAsync(MainWindow window)
+    {
+        var view = window.SmokeManager.Contributions.Views.Single(v => v.PluginId == RunOptions.SampleIds[0]
+            && v.View is WinUiView { Kind: WinUiViewKind.Page });
+        return window.SmokeNavigateAsync("view", view.PluginId, view.View.Id);
+    }
+
+    private static async Task EditAsync(TextBox editor, string text)
+    {
+        var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnChanged(object sender, TextChangedEventArgs args) => changed.TrySetResult();
+        editor.TextChanged += OnChanged;
+        try
+        {
+            editor.Text = text;
+            await changed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        }
+        finally { editor.TextChanged -= OnChanged; }
+    }
+
+    private static T FindNamed<T>(DependencyObject root, string name) where T : DependencyObject =>
+        Descendants<T>(root).SingleOrDefault(element => AutomationProperties.GetName(element) == name)
+        ?? throw new InvalidOperationException($"Native view did not expose {typeof(T).Name} '{name}'.");
+
+    private static IEnumerable<T> Descendants<T>(DependencyObject root) where T : DependencyObject
+    {
+        if (root is T match) yield return match;
+        for (var index = 0; index < VisualTreeHelper.GetChildrenCount(root); index++)
+            foreach (var child in Descendants<T>(VisualTreeHelper.GetChild(root, index))) yield return child;
     }
 
     private static async Task VerifyOccupiedStartupAsync(RunOptions options)
@@ -139,4 +243,26 @@ internal static class NativeSmoke
     {
         if (!condition) throw new InvalidOperationException(message);
     }
+}
+
+internal sealed partial class MainWindow
+{
+    // Native test plumbing uses the ordinary navigation/factory path without caching a control.
+    internal async Task<FrameworkElement> SmokeNavigateAsync(string page, string? pluginId = null, string? viewId = null)
+    {
+        AssertUiThread();
+        Navigate(new(page, pluginId, viewId));
+        var element = _content.Content as FrameworkElement ?? throw new InvalidOperationException("Navigation did not supply a native page.");
+        var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnLoaded(object sender, RoutedEventArgs args) => loaded.TrySetResult();
+        element.Loaded += OnLoaded;
+        try
+        {
+            if (!element.IsLoaded) await loaded.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            if (element.XamlRoot is null) throw new InvalidOperationException("Navigated native page was not attached to the host XamlRoot.");
+            return element;
+        }
+        finally { element.Loaded -= OnLoaded; }
+    }
+
 }
