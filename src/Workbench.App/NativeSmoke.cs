@@ -124,7 +124,10 @@ internal static class NativeSmoke
         var manager = window.SmokeManager;
         var generatedText = await File.ReadAllTextAsync(path);
         var page = await OpenSummaryAsync(window);
-        await EditAsync(FindNamed<TextBox>(page, "工作摘要示例草稿"), SummarySavedDraft);
+        var edited = FindNamed<TextBox>(page, "工作摘要示例草稿");
+        List<string> editEvents = [];
+        await EditAsync(edited, SummarySavedDraft, editEvents);
+        var afterEdit = edited.Text;
 
         List<(string Page, string? PluginId, string? ViewId)> routes =
             [("home", null, null), ("commands", null, null), ("settings", null, null)];
@@ -137,8 +140,12 @@ internal static class NativeSmoke
             await window.SmokeNavigateAsync(route.Page, route.PluginId, route.ViewId);
             page = await OpenSummaryAsync(window);
             Require(!ReferenceEquals(previous, page), "Summary navigation must create a fresh native view.");
-            Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == SummarySavedDraft,
-                $"Summary unsaved draft was lost after navigating through {route.Page}.");
+            var actual = FindNamed<TextBox>(page, "工作摘要示例草稿").Text;
+            Require(actual == SummarySavedDraft,
+                $"Summary unsaved draft was lost after navigating through {route.Page}. "
+                + $"{DescribeText("literal", SummarySavedDraft)}; {DescribeText("after edit", afterEdit)}; "
+                + $"{DescribeText("old.Text now", edited.Text)}; {DescribeText("fresh.Text", actual)}; "
+                + $"{DescribeDifference(SummarySavedDraft, actual)}; events={JsonSerializer.Serialize(editEvents)}");
         }
 
         var command = manager.Contributions.Commands.Single(c => c.PluginId == RunOptions.SampleIds[0]);
@@ -182,17 +189,43 @@ internal static class NativeSmoke
         return window.SmokeNavigateAsync("view", view.PluginId, view.View.Id);
     }
 
-    private static async Task EditAsync(TextBox editor, string text)
+    private static async Task EditAsync(TextBox editor, string text, List<string>? trace = null)
     {
         var changed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        void OnChanged(object sender, TextChangedEventArgs args) => changed.TrySetResult();
+        void OnChanging(TextBox sender, TextBoxTextChangingEventArgs args) =>
+            trace?.Add(DescribeText($"TextChanging(contentChanging={args.IsContentChanging})", editor.Text));
+        void OnChanged(object sender, TextChangedEventArgs args)
+        {
+            trace?.Add(DescribeText("TextChanged", editor.Text));
+            changed.TrySetResult();
+        }
+        editor.TextChanging += OnChanging;
         editor.TextChanged += OnChanged;
         try
         {
+            trace?.Add(DescribeText("before Text setter", editor.Text));
             editor.Text = text;
+            trace?.Add(DescribeText("after Text setter", editor.Text));
             await changed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            trace?.Add(DescribeText("after TextChanged await", editor.Text));
         }
-        finally { editor.TextChanged -= OnChanged; }
+        finally
+        {
+            editor.TextChanging -= OnChanging;
+            editor.TextChanged -= OnChanged;
+        }
+    }
+
+    // Only isolated smoke literals/sample data are included in these failure diagnostics.
+    private static string DescribeText(string label, string text) => $"{label}: length={text.Length}, text={JsonSerializer.Serialize(text)}";
+
+    private static string DescribeDifference(string expected, string actual)
+    {
+        var index = 0;
+        while (index < expected.Length && index < actual.Length && expected[index] == actual[index]) index++;
+        if (index == expected.Length && index == actual.Length) return "no character difference";
+        static string CodeAt(string text, int at) => at < text.Length ? $"U+{(int)text[at]:X4}" : "end";
+        return $"first difference at {index}: expected {CodeAt(expected, index)}, actual {CodeAt(actual, index)}";
     }
 
     private static T FindNamed<T>(DependencyObject root, string name) where T : DependencyObject =>
