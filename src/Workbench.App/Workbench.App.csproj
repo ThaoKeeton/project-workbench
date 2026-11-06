@@ -5,6 +5,8 @@
     <EnableWindowsTargeting>true</EnableWindowsTargeting>
     <UseWinUI>true</UseWinUI>
     <WindowsPackageType>None</WindowsPackageType>
+    <!-- The SDK's PRI generation/merge/publish targets also serve unpackaged apps. -->
+    <EnableMsixTooling>true</EnableMsixTooling>
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
     <PlatformTarget>x64</PlatformTarget>
     <SelfContained>true</SelfContained>

@@ -19,6 +19,12 @@ try {
     $app = Join-Path $repo 'src/Workbench.App/Workbench.App.csproj'
     Invoke-DotNet -Arguments @('restore', $app, '-r', 'win-x64')
     Invoke-DotNet -Arguments @('publish', $app, '--no-restore', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', $appOutput)
+    # The unpackaged host needs its main resource map as well as framework PRI files.
+    $mainPri = Join-Path $appOutput 'Workbench.App.pri'
+    if (-not (Test-Path -LiteralPath $mainPri -PathType Leaf)) { throw "Published host PRI is missing: $mainPri" }
+    $mainPriLength = (Get-Item -LiteralPath $mainPri).Length
+    if ($mainPriLength -eq 0) { throw "Published host PRI is empty: $mainPri" }
+    Write-Host "Published host PRI: $mainPri ($mainPriLength bytes)"
     $samples = @(
         @{ Project = 'Workbench.Summary.Sample'; Id = 'com.projectworkbench.summary' },
         @{ Project = 'Workbench.TestCases.Sample'; Id = 'com.projectworkbench.test-cases' }
