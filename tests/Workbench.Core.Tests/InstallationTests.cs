@@ -88,15 +88,98 @@ public sealed class InstallationTests
         await using var manager = disk.Manager();
         using var cancel = new CancellationTokenSource();
 
-        var installation = manager.InstallAsync(source, cancel.Token);
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        while (!Directory.EnumerateDirectories(disk.Plugins, ".install-*").Any() && !installation.IsCompleted)
-            await Task.Delay(1, deadline.Token);
-        Assert.False(installation.IsCompleted, "The test must cancel a real copy after staging begins.");
-        cancel.Cancel();
+        var paused = new TaskCompletionSource<CopyProgress>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var installation = InstallWithCopyCheckpointAsync(manager, disk, source, cancel.Token, paused, release);
+        try
+        {
+            Assert.Same(paused.Task, await Task.WhenAny(paused.Task, installation).WaitAsync(TimeSpan.FromSeconds(20)));
+            AssertPartialCopy(await paused.Task);
+            Assert.False(installation.IsCompleted, "The test must cancel a real copy after staging begins.");
+            cancel.Cancel();
+        }
+        finally
+        {
+            cancel.Cancel();
+            release.Set();
+            _ = await Record.ExceptionAsync(() => installation);
+        }
 
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => installation);
         Assert.Empty(Directory.EnumerateFileSystemEntries(disk.Plugins));
+    }
+
+    [Fact]
+    public async Task A_copy_observed_in_staging_can_finish_before_late_cancellation()
+    {
+        using var disk = new TestDirectory();
+        var source = disk.Package("com.example.install", external: true);
+        await using (var large = File.Create(Path.Combine(source, "large.bin")))
+            large.SetLength(48 * 1024 * 1024);
+        await using var manager = disk.Manager();
+        using var cancel = new CancellationTokenSource();
+        var paused = new TaskCompletionSource<CopyProgress>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var installation = InstallWithCopyCheckpointAsync(manager, disk, source, cancel.Token, paused, release);
+        var allowCompletion = false;
+        try
+        {
+            Assert.Same(paused.Task, await Task.WhenAny(paused.Task, installation).WaitAsync(TimeSpan.FromSeconds(20)));
+            AssertPartialCopy(await paused.Task);
+            Assert.False(installation.IsCompleted);
+            allowCompletion = true;
+        }
+        finally
+        {
+            if (!allowCompletion) cancel.Cancel();
+            release.Set();
+            if (!allowCompletion) _ = await Record.ExceptionAsync(() => installation);
+        }
+        // Observing staging never reserved a future cancellation window. Once
+        // actual publication completes, a late cancellation must leave it intact.
+        var result = await installation.WaitAsync(TimeSpan.FromSeconds(20));
+        Assert.True(result.Succeeded, result.Message);
+        cancel.Cancel();
+        var target = Path.Combine(disk.Plugins, "com.example.install");
+        Assert.True(Directory.Exists(target));
+        Assert.Equal(48L * 1024 * 1024, new FileInfo(Path.Combine(target, "large.bin")).Length);
+        Assert.Empty(Directory.EnumerateDirectories(disk.Plugins, ".install-*"));
+        var installed = Assert.Single(await manager.DiscoverAsync());
+        Assert.Equal(target, installed.PackagePath);
+        Assert.Equal(PluginState.Disabled, installed.State);
+        Assert.False(installed.IsTrusted);
+    }
+
+    private sealed record CopyProgress(string Stage, int Files, long Bytes, int SourceFiles, long SourceBytes);
+
+    private static void AssertPartialCopy(CopyProgress progress)
+    {
+        Assert.True(Directory.Exists(progress.Stage));
+        Assert.InRange(progress.Files, 1, progress.SourceFiles);
+        Assert.InRange(progress.Bytes, 1, progress.SourceBytes);
+        Assert.True(progress.Files < progress.SourceFiles || progress.Bytes < progress.SourceBytes,
+            "The held production copy must contain real bytes and remain strictly partial.");
+    }
+
+    private static Task<PluginOperationResult> InstallWithCopyCheckpointAsync(PluginManager manager, TestDirectory disk,
+        string source, CancellationToken token, TaskCompletionSource<CopyProgress> paused, ManualResetEventSlim release)
+    {
+        var originals = Directory.GetFiles(source, "*", SearchOption.AllDirectories);
+        var sourceBytes = originals.Sum(path => new FileInfo(path).Length);
+        return TestDispatcher.RunAsync(() => manager.InstallAsync(source, token), () =>
+        {
+            if (paused.Task.IsCompleted) return;
+            var stage = Directory.EnumerateDirectories(disk.Plugins, ".install-*").SingleOrDefault();
+            if (stage is null) return;
+            var copies = Directory.GetFiles(stage, "*", SearchOption.AllDirectories);
+            var copiedBytes = copies.Sum(path => new FileInfo(path).Length);
+            if (copies.Length == 0 || copiedBytes == 0 ||
+                copies.Length >= originals.Length && copiedBytes >= sourceBytes) return;
+            // Hold the actual production copy continuation. An outstanding I/O
+            // may settle, but validation/publication cannot run until released.
+            paused.TrySetResult(new(stage, copies.Length, copiedBytes, originals.Length, sourceBytes));
+            Assert.True(release.Wait(TimeSpan.FromSeconds(20)), "The test did not release its copy checkpoint.");
+        });
     }
 
     [Fact]
