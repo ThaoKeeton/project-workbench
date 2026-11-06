@@ -14,6 +14,7 @@ internal sealed class PluginBackgroundTasks(
     private readonly Dictionary<string, Registration> _tasks = new(StringComparer.Ordinal);
     private bool _open = true;
     private bool _active;
+    private volatile bool _invalidated;
     private volatile PluginStopReason _closeReason;
 
     public void Register(PluginBackgroundTask task)
@@ -38,6 +39,29 @@ internal sealed class PluginBackgroundTasks(
     }
 
     internal void Commit() { lock (_sync) { _open = false; _active = true; } }
+
+    // Revoke permissions without running plugin delegates or cancellation callbacks.
+    // Existing executions remain owned until an explicit stop/shutdown completes.
+    internal void Invalidate()
+    {
+        lock (_sync)
+        {
+            _invalidated = true;
+            _active = false;
+            _open = false;
+            foreach (var task in _tasks.Values) task.Intent = new(false, false);
+        }
+    }
+
+    internal async Task InvalidateAsync(Func<Task> clear, CancellationToken cancellationToken)
+    {
+        Invalidate();
+        // Operations hold this gate only through host persistence/start scheduling,
+        // never while awaiting a delegate, Stop Task or cancellation completion.
+        await _operations.WaitAsync(cancellationToken);
+        try { await clear(); }
+        finally { _operations.Release(); }
+    }
 
     internal async Task<bool> PrepareCommitAsync(CancellationToken cancellationToken)
     {
@@ -189,7 +213,7 @@ internal sealed class PluginBackgroundTasks(
         {
             foreach (var task in _tasks.Values)
             {
-                if (_closeReason != PluginStopReason.HostShutdown)
+                if (!_invalidated && _closeReason != PluginStopReason.HostShutdown)
                     success &= await SaveAsync(task, task.Intent with { DesiredRunning = false }, CancellationToken.None);
                 lock (_sync) stops.Add(BeginStop(task, _closeReason));
             }
@@ -228,13 +252,18 @@ internal sealed class PluginBackgroundTasks(
 
     private async Task<bool> SaveAsync(Registration task, SavedTaskIntent intent, CancellationToken cancellationToken)
     {
+        if (_invalidated) return false;
         try { await persist(task.Definition.Id, intent, cancellationToken); }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)
         {
             diagnostic(new(PluginDiagnosticCode.RuntimeStatePersistenceFailed, "Background task intent could not be saved."));
             return false;
         }
-        lock (_sync) task.Intent = intent;
+        lock (_sync)
+        {
+            if (_invalidated) return false;
+            task.Intent = intent;
+        }
         return true;
     }
 

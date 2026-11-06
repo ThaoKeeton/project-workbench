@@ -257,7 +257,31 @@ public sealed class RuntimeFixturePlugin : IWorkbenchPlugin
         }
         else
         {
-            try { await Task.Delay(Timeout.Infinite, execution.CancellationToken); }
+            try
+            {
+                if (_mode == "retained-context")
+                {
+                    _context.Lifetime.Register(() => settings.SetAsync("retainedLifetimeCanceled", true).GetAwaiter().GetResult());
+                    await settings.SetAsync("retainedContextReady", true);
+                    var handled = 0;
+                    while (true)
+                    {
+                        var request = await settings.GetAsync("contextRequest", 0);
+                        if (request > handled)
+                        {
+                            var operation = await settings.GetAsync("contextOperation", "resume");
+                            var result = operation == "start"
+                                ? await _context.BackgroundTasks.StartAsync("monitor")
+                                : await _context.BackgroundTasks.SetResumeOnStartupAsync("monitor", true);
+                            await settings.SetAsync("contextResult", result.Succeeded);
+                            await settings.SetAsync("contextHandled", request);
+                            handled = request;
+                        }
+                        await Task.Delay(10, execution.CancellationToken);
+                    }
+                }
+                else await Task.Delay(Timeout.Infinite, execution.CancellationToken);
+            }
             catch (OperationCanceledException)
             {
                 await settings.SetAsync("jobStopReason", execution.StopReason.ToString());

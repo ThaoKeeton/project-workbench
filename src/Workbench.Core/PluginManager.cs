@@ -30,7 +30,7 @@ public sealed class PluginManager : IAsyncDisposable
 
     public PluginManager(PluginManagerOptions options) : this(options, new WindowsSecretProtector()) { }
 
-    internal PluginManager(PluginManagerOptions options, ISecretProtector secretProtector)
+    internal PluginManager(PluginManagerOptions options, ISecretProtector secretProtector, PluginRuntimeState? runtimeState = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (options.StopTimeout <= TimeSpan.Zero || options.StopTimeout == Timeout.InfiniteTimeSpan)
@@ -45,7 +45,7 @@ public sealed class PluginManager : IAsyncDisposable
         _pluginsRoot = Path.GetFullPath(options.PluginsRoot);
         _userRoot = Path.GetFullPath(options.UserRoot);
         _stateStore = new(_userRoot);
-        _runtimeState = new(_userRoot);
+        _runtimeState = runtimeState ?? new(_userRoot);
         _discoveryRoots = new[] { _pluginsRoot }.Concat(options.AdditionalDiscoveryRoots.Select(Path.GetFullPath))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         FileSystemGuard.RejectLinks(_pluginsRoot);
@@ -174,7 +174,10 @@ public sealed class PluginManager : IAsyncDisposable
             }
             foreach (var changed in entries.Where(e => e.Package.Manifest is not null
                 && e.Snapshot.Diagnostics.Any(d => d.Code == PluginDiagnosticCode.PackageChanged)))
+            {
                 await ClearTaskIntentAsync(changed, removeConsent: true, cancellationToken);
+                await PersistStateAsync(changed, enabled: false, fingerprint: null, cancellationToken);
+            }
             Volatile.Write(ref _entries, entries.ToArray());
             PublishContributions();
             return Plugins;
@@ -540,6 +543,7 @@ public sealed class PluginManager : IAsyncDisposable
 
     private static void MarkPackageChanged(Entry entry)
     {
+        entry.Context?.BackgroundTasks.Invalidate();
         entry.Update(s => s with { State = s.HasPendingStop ? PluginState.Stopping : PluginState.Failed, IsTrusted = false, DesiredEnabled = false });
         entry.AddDiagnostic(new(PluginDiagnosticCode.PackageChanged,
             "Package contents changed or disappeared. Trust was revoked; loaded assemblies require exit and restart before replacement."));
@@ -579,7 +583,10 @@ public sealed class PluginManager : IAsyncDisposable
     {
         try
         {
-            await _runtimeState.ClearAsync(entry.Package.Manifest!.Id, removeConsent, entry.AddDiagnostic, cancellationToken);
+            Task ClearAsync() => _runtimeState.ClearAsync(entry.Package.Manifest!.Id, removeConsent, entry.AddDiagnostic, cancellationToken);
+            if (removeConsent && entry.Context is { } context)
+                await context.BackgroundTasks.InvalidateAsync(ClearAsync, cancellationToken);
+            else await ClearAsync();
             return true;
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException)

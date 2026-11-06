@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Workbench.Core;
 using Workbench.Sdk;
 using Xunit;
@@ -299,11 +300,134 @@ public sealed class BackgroundTaskTests
         File.Delete(changed);
         await using var restarted = Manager(disk);
         await restarted.DiscoverAsync();
-        await restarted.RestoreEnabledAsync();
+        Assert.Empty(await restarted.RestoreEnabledAsync());
+        Assert.False(Assert.Single(restarted.Plugins).IsTrusted);
+        Assert.True((await restarted.EnableAsync(Id, confirmTrust: true)).Succeeded);
         var snapshot = Assert.Single(restarted.GetBackgroundTaskSnapshots(Id));
         Assert.False(snapshot.DesiredRunning);
         Assert.False(snapshot.ResumeOnStartup);
         Assert.Equal(1, await restarted.GetSettings(Id).GetAsync("jobRuns", 0));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Retained_runtime_cannot_recreate_invalidated_consent_from_queued_or_context_operations(bool disable)
+    {
+        using var disk = Package();
+        var writer = new ControlledRuntimeStateWriter();
+        var manager = new PluginManager(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User },
+            new WindowsSecretProtector(), new PluginRuntimeState(disk.User, writer.WriteAsync));
+        var changedPath = Path.Combine(disk.Plugins, Id, "retained-change.txt");
+        Task? first = null;
+        Task? queued = null;
+        Task? discovering = null;
+        await EnableAsync(manager, "retained-context");
+        var settings = manager.GetSettings(Id);
+        await manager.StartBackgroundTaskAsync(Id, "monitor");
+        await RuntimeTest.WaitAsync(async () => await settings.GetAsync("retainedContextReady", false));
+        Assert.True((await manager.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true)).Succeeded);
+        try
+        {
+            writer.HoldNextWrite();
+            var operationA = manager.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", false);
+            first = operationA;
+            await writer.FirstWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var operationB = manager.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true);
+            queued = operationB;
+            Assert.False(operationB.IsCompleted); // It passed ActiveContext and queued behind A.
+            await File.WriteAllTextAsync(changedPath, "synthetic changed package");
+            var discovery = manager.DiscoverAsync();
+            discovering = discovery;
+            await RuntimeTest.WaitAsync(() => Task.FromResult(!Assert.Single(manager.Plugins).IsTrusted));
+            Assert.True(Assert.Single(manager.Plugins).HasRuntime);
+            Assert.Equal(0, await settings.GetAsync("stopCalls", 0));
+            Assert.False(await settings.GetAsync("retainedLifetimeCanceled", false));
+            writer.ReleaseFirstWrite.TrySetResult();
+            await writer.ClearWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            writer.ReleaseClearWrite.TrySetResult();
+            await discovery;
+            Assert.False((await operationA).Succeeded);
+            var queuedResult = await operationB;
+            Assert.False(queuedResult.Succeeded);
+            var snapshot = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+            Assert.False(snapshot.ResumeOnStartup);
+            Assert.False(snapshot.DesiredRunning);
+            Assert.Equal(PluginBackgroundTaskState.Running, snapshot.State);
+            Assert.Equal(0, await settings.GetAsync("stopCalls", 0));
+            Assert.False(await settings.GetAsync("retainedLifetimeCanceled", false));
+            Assert.False(await settings.GetAsync("jobFinished", false));
+
+            foreach (var (operation, request) in new[] { ("resume", 1), ("start", 2) })
+            {
+                await settings.SetAsync("contextOperation", operation);
+                await settings.SetAsync("contextRequest", request);
+                await RuntimeTest.WaitAsync(async () => await settings.GetAsync("contextHandled", 0) == request);
+                Assert.False(await settings.GetAsync("contextResult", true));
+            }
+            await AssertNoTaskConsentAsync(disk);
+            if (disable) Assert.True((await manager.DisableAsync(Id)).Succeeded);
+            else await manager.ShutdownAsync();
+            await AssertNoTaskConsentAsync(disk); // Cleanup must not repopulate the old fingerprint.
+            Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+            File.Delete(changedPath);
+        }
+        finally
+        {
+            writer.ReleaseFirstWrite.TrySetResult();
+            writer.ReleaseClearWrite.TrySetResult();
+            await Task.WhenAll(new[] { first, queued, discovering }.OfType<Task>()).WaitAsync(TimeSpan.FromSeconds(5));
+            await RuntimeTest.DisposeAsync(manager);
+        }
+
+        await using var restarted = Manager(disk);
+        await restarted.DiscoverAsync();
+        var package = Assert.Single(restarted.Plugins);
+        Assert.False(package.IsTrusted);
+        Assert.False(package.DesiredEnabled);
+        Assert.Empty(await restarted.RestoreEnabledAsync());
+        Assert.Equal(1, await restarted.GetSettings(Id).GetAsync("jobRuns", 0));
+        Assert.False((await restarted.EnableAsync(Id)).Succeeded);
+        Assert.True((await restarted.EnableAsync(Id, confirmTrust: true)).Succeeded);
+        var fresh = Assert.Single(restarted.GetBackgroundTaskSnapshots(Id));
+        Assert.False(fresh.ResumeOnStartup);
+        Assert.False(fresh.DesiredRunning);
+        Assert.Equal(PluginBackgroundTaskState.Stopped, fresh.State);
+    }
+
+    private static async Task AssertNoTaskConsentAsync(TestDirectory disk)
+    {
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(disk.User, "background-tasks.json")));
+        Assert.False(json.RootElement.GetProperty("plugins").TryGetProperty(Id, out _));
+    }
+
+    // The actual store still serializes and atomically writes real files. This
+    // dependency wrapper only controls when its first write and clear may finish.
+    private sealed class ControlledRuntimeStateWriter
+    {
+        private int _holdNext;
+        private bool _holdClear;
+        internal TaskCompletionSource FirstWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseFirstWrite { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ClearWriteEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal TaskCompletionSource ReleaseClearWrite { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        internal void HoldNextWrite() { _holdClear = true; Interlocked.Exchange(ref _holdNext, 1); }
+
+        internal async Task WriteAsync(string path, RuntimeStateDocument document, CancellationToken cancellationToken)
+        {
+            if (Interlocked.Exchange(ref _holdNext, 0) == 1)
+            {
+                FirstWriteEntered.TrySetResult();
+                await ReleaseFirstWrite.Task.WaitAsync(cancellationToken);
+            }
+            if (_holdClear && !document.Plugins.ContainsKey(Id))
+            {
+                _holdClear = false;
+                ClearWriteEntered.TrySetResult();
+                await ReleaseClearWrite.Task.WaitAsync(cancellationToken);
+            }
+            await AtomicJsonFile.WriteAsync(path, document, cancellationToken);
+        }
     }
 
     internal static PluginManager Manager(TestDirectory disk, TimeSpan? stopTimeout = null) => new(new()

@@ -8,7 +8,8 @@ internal sealed record SavedRuntimePlugin(string Fingerprint, Dictionary<string,
 internal sealed record RuntimeStateDocument(int Version, Dictionary<string, SavedRuntimePlugin> Plugins);
 
 /// <summary>Host-owned task intent, separate from plugin preferences and bound to package content.</summary>
-internal sealed class PluginRuntimeState(string userRoot)
+internal sealed class PluginRuntimeState(string userRoot,
+    Func<string, RuntimeStateDocument, CancellationToken, Task>? write = null)
 {
     private readonly string _path = Path.Combine(userRoot, "background-tasks.json");
     private readonly SemaphoreSlim _gate = new(1, 1);
@@ -78,7 +79,9 @@ internal sealed class PluginRuntimeState(string userRoot)
 
     private async Task WriteAsync(Dictionary<string, SavedRuntimePlugin> updated, CancellationToken cancellationToken)
     {
-        await AtomicJsonFile.WriteAsync(_path, new RuntimeStateDocument(1, updated), cancellationToken);
+        var document = new RuntimeStateDocument(1, updated);
+        if (write is null) await AtomicJsonFile.WriteAsync(_path, document, cancellationToken);
+        else await write(_path, document, cancellationToken);
         _plugins = updated;
     }
 
