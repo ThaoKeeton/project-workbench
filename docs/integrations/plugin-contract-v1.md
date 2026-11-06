@@ -2,7 +2,7 @@
 
 两个 SDK 包固定为 **0.2.0**，API 1、可选运行服务 1 和程序集身份 **1.0.0.0** 保持兼容；文件版本为 0.2.0.0。.NET SDK 固定 10.0.403，Windows App SDK 固定 1.8.260921001，插件目标为 net10.0-windows10.0.19041.0/x64。SDK 源码与包分发现在通过下述可重建快照提供；独立业务 CI 不需要引用主程序或获得其他私有仓库的 token。
 
-当前已核验源码 `ccb6ef297ab042e329d60e6c0fda517f8686379c` 的 [CI 42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164)：Windows Core 239/239、原生 14 项、management 10 项、六个连续平台重启进程 7 项，以及钉钉 0.3.1/UPCAM 0.1.0 两个独立生产业务包的六进程 26 项检查均通过；Linux Core 为 237 通过、2 项明确 Windows DPAPI 跳过。默认 Windows SDK source/NuGet 导出与完整性检查通过，[SDK artifact 13542805335](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164/artifacts/13542805335) 的 manifest 为 referenceOnly=false、sdkSourcesDirty=false，包含真实 WinUI SDK PRI。新固定输入钉钉 0.3.2 已实际采用宿主异步凭据批次提供方，新增仅合成模型用途的原生保存、批准并读取 host commit/revision、撤销和删除检查，需由当前提交的联合 Windows CI 验证；模型 key 的值在真正 provider dispatch 前读取，该路径未执行。不能沿用旧版仅声明元数据的结论。UPCAM 正向自动调度所需的独立模拟验收包现已固定（来源 `48e67e8`、CI 42299664328、独立 ID `com.upcam.task-digest.acceptance`）；新增六个隔离进程的正向 Core/Stop/key/Restore 检查仍待当前 shipping App 的 Windows 执行和审查，不能由输入可用性宣告通过。真实业务接口及 Windows 11 人工验收仍不在上述通过范围。Linux 参考编译或 ReferenceOnly 产物不能替代真实 Windows 证据。
+已核验源码 `a54a668d3f2c98fda7ab826ed3cf72b9c64a2b06` 的 [CI 42307917231](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)：Windows Core 267/267（含两项真实合成值 DPAPI）、原生 14 项、management 17 项、六阶段平台重启 7 项，以及两个独立生产业务包的六进程 27 项检查均通过；独立 UPCAM acceptance-ID 二进制在另一个根的后六进程通过 24 项实际自动 Core/Stop/key/Restore/失败处理检查。Linux Core 为 265 通过、2 项明确 Windows DPAPI 跳过。[SDK artifact 13547796386](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547796386) 的 manifest 为 referenceOnly=false、sdkSourcesDirty=false，九份源码、两包及 README 的哈希与默认 Windows 导出一致，WinUI SDK PRI 为 704 bytes。钉钉 0.3.2 使用宿主异步凭据批次提供方；原生合成模型值保存、用途批准并读取 commit/revision、撤销和删除均已执行，真正 provider dispatch 前的模型 key 值读取仍未执行。UPCAM 正向测试固定独立来源 `48e67e8`、CI 42299664328、ID `com.upcam.task-digest.acceptance`，使用上游本地 fake providers；synthetic sent 不证明真实送达。真实业务接口、真实 Webhook/HTTP/发送和 Windows 11 人工验收不在通过范围。Linux 参考编译或 ReferenceOnly 产物不能替代这些 Windows 证据。
 
 ## 固定 SDK 分发快照与独立构建
 
@@ -57,7 +57,7 @@ Linux 可显式执行 `pwsh ./scripts/export-sdk.ps1 -ReferenceOnly`，生成独
 
 `runtime.BackgroundTasks` 登记 `PluginBackgroundTask(id, title, Func<IPluginBackgroundExecution, Task>)`，只在 Initialize 登记，提交后才可启动。`execution.StartReason` 区分 UserRequest/Restore，`execution.CancellationToken` 必须贯穿所有工作；`execution.StopReason` 及 `runtime.StopReason` 区分用户停止、停用、宿主退出和初始化回滚。
 
-钉钉适配应把真实 `MonitorSupervisor.Completion` 纳入平台登记任务并等待 Stop 完成，不使用独立应用的托盘、窗口或第二份常驻程序。Restore 需继续执行业务自己的配置指纹/授权/预算检查；HostShutdown 保留恢复意图，用户停止/停用撤销恢复。平台恢复默认关闭，更新换包后旧任务意图不直接继承。
+钉钉适配应把真实 `MonitorSupervisor.Completion` 纳入平台登记任务并等待 Stop 完成，不使用独立应用的托盘、窗口或第二份常驻程序。Restore 需继续执行业务自己的配置指纹/授权/预算检查；HostShutdown 保留恢复意图；用户停止/停用清除运行意图，单独 Resume 偏好可保留，不能因此自行恢复。平台恢复默认关闭，更新换包后旧任务意图不直接继承。
 
 需要业务页面完成具体范围确认的任务应标记 `RequiresPluginStart = true`：宿主通用 Start/Resume 不代替业务确认，插件拿到有效预览确认后才调用自己的 `context.BackgroundTasks.StartAsync`。目前钉钉 Runtime 的默认策略是停用/退出撤销所有具体权限，不能因为 host 0.2 提供恢复就改成无人值守授权；保留业务自己的更严格策略。
 

@@ -2,7 +2,7 @@
 
 Windows 原生插件工作台基础版：同一个 WinUI 3 窗口承载独立插件提供的原生页面、设置与异步命令。使用标准 Windows 控件，不嵌入其他应用窗口，不使用 WebView。
 
-默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.1 和 UPCAM 0.1.0 已通过当前主程序的原生页面、模拟业务、生命周期及重启维护测试。固定钉钉输入现更新为上游 0.3.2，增加实际宿主凭据批次提供方及合成值原生验收；新版与 UPCAM 的联合 Windows 检查待当前提交 CI，均需按需安装。固定输入与安装包见 [独立业务插件](tests/integration/README.md)。Figma 和电脑自动化尚未接入。
+默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已通过当前发布目录主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。业务包需按需安装，固定输入和安装包见 [独立业务插件](tests/integration/README.md)。Figma 和电脑自动化尚未接入。
 
 ## 在 Windows 构建和启动
 
@@ -63,7 +63,7 @@ pwsh -File .\scripts\native-runtime-probe.ps1 -TimeoutSeconds 180
 
 GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbench` 分支提交运行 Linux Core 测试及 Windows Core/发布/原生冒烟。产物 `workbench-win-x64` 是完整应用目录，`native-smoke-report` 是 JSON 报告，另有两平台测试结果。当前开发环境是 Linux；跨目标 C# 编译不证明 Windows 原生启动成功。[Windows 验证记录和待验清单](docs/windows-verification.md) 区分这些证据。
 
-新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证实际原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除；报告在 `artifacts/native/runtime-probes/`。只使用合成数据与凭据，没有业务网络或发送。[当前 Server 2025 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164) 已通过这些平台检查，以及两个真实生产包的六个连续 OS 进程、26 项业务检查。UPCAM 正向自动调度的专用模拟验收包仍待上游发布，钉钉实际 host secret 值消费仍待业务侧接入；本轮没有真实 Webhook/HTTP/业务发送。Windows 11 的主题/DPI/选择器/可访问性清单保持待验。
+新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除。[当前 Server 2025 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)（源码 `a54a668`）已通过 Windows Core 267 项、原生 14 项、管理 17 项、六阶段平台重启 7 项，以及独立业务插件 12 进程共 51 项检查。后六进程使用不同 ID、不同隔离根的上游模拟验收二进制；实际定时 Core 和本地模拟发送成功不代表真实送达。钉钉仅测试合成模型值保存及 commit/revision 读取，模型 key 值消费与 provider dispatch 未执行。没有真实 Webhook/HTTP/业务发送。Windows 11 的 18 项主题/DPI/选择器/可访问性等人工清单全部待验。完整 [Windows 应用目录](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547711575) 和校验值见 [验证记录](docs/windows-verification.md)。
 
 独立 SDK 导出：`pwsh ./scripts/export-sdk.ps1`。CI artifact `workbench-sdk-0.2.0` 含固定版本源码、两个 NuGet 包及提交/文件哈希清单；接入步骤见 [插件契约与独立构建](docs/integrations/plugin-contract-v1.md)。
 

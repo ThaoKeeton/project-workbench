@@ -7,9 +7,11 @@
 | Task 3 Linux Core | 一次完整运行 221 通过、2 项明确 Windows DPAPI 跳过，共 223 项；随后新增 OS 进程用例的最终聚焦运行 12/12 通过 | 聚焦运行包含 6 个实际子进程，验证通用 opt-in Restore、RequiresPluginStart 不恢复、停用后不复活；另含 HostRuntime 持锁/Stop 重试、Apply 顺序、坏元数据独立根及只读凭据状态。未把更新后的完整套件宣称为已重新运行；TRX 在 Task 3 报告 |
 | Task 3 Linux C# reference | App 与独立 NativeFixture 参考编译 0 warnings/errors | `tests/Workbench.NativeReference` 仅为不可运行的类库；InitializeComponent 占位直接抛异常，没有生产入口/资源替代；不验证 SDK 生成 Main、XAML、主 PRI 或实际 WinUI |
 | Task 3 Windows/SDK native（Task 4 BASE） | [42285023349](https://github.com/ThaoKeeton/project-workbench/actions/runs/42285023349)，提交 `27154465c08d132798c8ea7b637f137f7340a90b`：Windows Core 226 通过、原生 14 项、management 10 项、六个连续实际进程 7 项、默认 Windows SDK source/NuGet export 均通过 | 控制器已检查实际报告；该结果只证明 Task 4 之前的 BASE，不是下述新增独立业务包探针的 Windows 执行证据 |
-| Task 4 当前 Linux Core/固定业务包 | [42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164)，源码 `ccb6ef2`：237 通过、2 项 Windows DPAPI 明确跳过，共 239 项；16 项脚本检查及两个真实生产 ZIP 的逐文件审计通过 | Linux 不执行 WinUI 或业务程序集；参考编译仅为不可运行的类库 |
-| Task 4 当前 Windows/独立业务包 | 同轮源码 `ccb6ef2`：Windows Core 239/239（含两项真实 DPAPI），发布、原生 14 项、management 10 项、六个连续平台重启进程 7 项、SDK 默认 Windows export，以及真实生产业务包六进程 26 项均通过 | Server 2025 上实际运行当前 shipping App；生产 UPCAM 正向自动调度、绑定 key 正向创建/恢复仍缺独立上游模拟验收包，Windows 11 人工验收仍待执行 |
-| Task 4 新钉钉 0.3.2/UPCAM 联合输入 | 钉钉来源 `c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf`、上游成功 CI 42295585483、生产 ZIP SHA256 `38d7a8f30ce6d4d5c6f6e26c757cbb6b9fc9f812546bf1db2ecdbadb9b578200` 已固定；当前 shipping App 新增实际 host-DPAPI 合成模型值原生检查 | 当前提交 Windows 联合验收待运行；上列已通过的 26 项使用旧钉钉 0.3.1，不能代替新版证据。UPCAM 正向 acceptance-ID 包已由独立上游 CI 42299664328 发布并固定；新增六进程正向验收待实际 Windows 运行/审查 |
+| Task 4 历史 Linux Core/旧业务包 | [42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164)，源码 `ccb6ef2`：237 通过、2 项 Windows DPAPI 明确跳过，共 239 项；16 项脚本检查及两个真实生产 ZIP 的逐文件审计通过 | Linux 不执行 WinUI 或业务程序集；参考编译仅为不可运行的类库 |
+| Task 4 历史 Windows/旧业务包 | 同轮源码 `ccb6ef2`：Windows Core 239/239（含两项真实 DPAPI），发布、原生 14 项、management 10 项、六个连续平台重启进程 7 项、SDK 默认 Windows export，以及真实生产业务包六进程 26 项均通过 | 当时使用旧钉钉 0.3.1，且只有生产 UPCAM 缺授权拒绝路径；其结果不代替下列最新源码正向验收 |
+| 当前 Linux Core | [42307917231](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)，源码 `a54a668`：265 通过、2 项明确 Windows DPAPI 跳过，共 267 项；脚本检查通过 | 不执行 WinUI 或 Windows DPAPI |
+| 当前 Windows 平台/SDK | 同轮 `a54a668`：267/267（含两项真实合成值 DPAPI）、发布、原生 14 项、management 17 项、六阶段平台重启 7 项；默认 Windows SDK 导出/完整性通过 | Server 2025 实际 EXE；9 份源码、2 包 README/哈希、真实 SDK PRI 704 bytes；保留独立 Windows 11 人工门槛 |
+| 当前独立业务包/正向验收 | 同轮当前发布目录 EXE：钉钉 0.3.2/UPCAM 0.1.0 的六生产进程 27 项，另一个隔离根的独立 UPCAM acceptance-ID 后六进程 24 项，共 51 项 | 全部实际 WinUI Closed、OS exit0、退出后重获 lease、来源/包哈希/PID 一致；定时 Core 和本地 fake providers 通过，真实送达未测试 |
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux C# 检查（历史基线） | 早期手动主程序版本参考编译及 7 个 C# 文件语法/XML 检查通过 | 后续不可运行的 NativeReference 语义编译已单列；生产 XAML/PRI 工具仍必须在 Windows 执行 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
@@ -20,13 +22,23 @@
 | Windows 本轮编辑回归 GREEN | 同轮原生进程 exit 0，`succeeded=true`、`stage=completed`、UI 线程 2，全部 13 项通过；最终摘要 100 bytes、CSV 293 bytes | 包含新工厂导航/真实编辑/保存/拒绝覆盖/停用恢复；原有 11 项检查保留 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
 
-当前 [CI 42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164) 的两个 job 均成功，运行源码为 `ccb6ef297ab042e329d60e6c0fda517f8686379c`。业务报告 [artifact 13542102290](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164/artifacts/13542102290) 的 ZIP SHA256 为 `5ae236c2a052fd5b99779d72b38afb603ae2ffd6549dd598583a7b93f706d114`；六阶段实际应用 PID 为 8040、5636、8072、2084、4720、7232，均以 OS exitCode 0 退出，报告确认 WinUI Closed、启动器重新获取 host lease、同一隔离根和固定来源/包哈希。各阶段检查为 5/5/5/3/5/3，共 26 项，11 个保留状态文件哈希在重启和维护后逐项相同。已观察的 UPCAM worker PID 744/5248/2544/976/7716/4188 均结束，实际 exitCode 为 1；这证明进程退役，不证明其协议正常零退出。完整主程序 [artifact 13542301860](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164/artifacts/13542301860) 保持两个示例为默认分发插件，真实业务包仍独立安装。
+当前 [CI 42307917231](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231) 的两个 job 均成功，实际运行源码为 `a54a668d3f2c98fda7ab826ed3cf72b9c64a2b06`。生产阶段 seed/restart/update/fault/rollback/remove 的应用 PID 为 3532/6348/1404/8644/6564/9052，检查 6/5/5/3/5/3，共 27 项；独立 acceptance-seed/restore/stopped/config/missing/disabled 的 PID 为 2664/9196/8804/6100/1792/6836，检查 5/5/3/4/4/3，共 24 项。12 个进程均已实际退出，OS exitCode 0、WinUI Closed、启动器重新取得 host lease、来源与哈希核验全部通过。两组使用不同全新 GUID 根，前组及其 worker 全退役后才启动后组。
 
-这轮先实际复现并修正了正常完成任务随后 Stop 仍显示 Completed 的宿主状态竞态，再修正了 UPCAM TabView 替换后探针过早查找尚未呈现控件的就绪条件。业务断言和截止时间保持不变。UPCAM 缺授权回调安全 Faulted 的通过结果不能替代其正向自动任务、恢复绑定 key 和 consent-bound Restore 验证；该验收依赖仍未关闭。没有执行真实 Webhook/HTTP、企业接口或业务发送。
+完整应用 ZIP 已下载核验：90,314,660 bytes，SHA256 `271d2742bb849e334469216526ff0b15c38cb230cb14f42a20184f6145270cc4`，523 个条目 CRC 通过；其中 `Workbench.App.exe` SHA256 为 `c126936e8707cef25878e35edc54b92846023714ee7cb850c5c0e7b56bbfd7d0`，与全部 12 个业务报告一致；主 PRI 为 1,352,680 bytes。默认只分发两个示例，业务插件独立安装。该产物是未签名的完整自包含目录，无安装器或正式 release 部署。
+
+| 本轮产物 | 下载与校验 |
+| --- | --- |
+| 完整 Windows x64 应用 | [13547711575](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547711575)，SHA256 `271d2742bb849e334469216526ff0b15c38cb230cb14f42a20184f6145270cc4` |
+| 12 进程业务报告 | [13547057995](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547057995)，61,637 bytes，SHA256 `ad05df1d141fd01061ccf95f70889b75c3ee7fadc9dc04deb600f96c6c4de850` |
+| 独立 SDK 0.2.0 | [13547796386](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547796386)，45,753 bytes，SHA256 `2ebdee26f619c152f20d3bcc1ce1e09a2d511e7a7d02359a2020af1a7000376e` |
+| 平台管理/重启报告 | [13547561800](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547561800)，9,134 bytes，SHA256 `d86cf83a9f9e01bac6a57e263619eb4765463f6961063a72bd1b5eb26540fa8f` |
+| Windows Core TRX | [13546963320](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13546963320)，65,504 bytes，SHA256 `c760422761bfde3549847f61a51b8d698b749e0e3e0e065cd1f1a257a46cb189` |
+
+此前实际复现并修正正常完成任务 Stop 状态与 UPCAM 控件替换后的探针就绪问题；本轮还修复宿主异常文本边界、保留运行实例的 Stop 入口、已备份但未替换阶段的安全中止，以及两处已被真实 CI 暴露的测试时序问题。当前正向自动验收已执行，不能把生产包缺授权 Faulted 单独当作正向证明。未执行真实 Webhook/HTTP、企业接口或业务发送。
 
 历史基线的 11 项检查没有输入用户编辑，摘要为 235 bytes。第九轮在原来的无文档模型/无覆盖保护实现上出现上述导航断言 RED。第十轮修复模型后仍因原始 LF 字面预期失败；第十一轮增加隔离诊断，确认编辑前后与新工厂文本全文相同、均为 62 字符，唯一差异是输入字面的第 42 位 LF（U+000A）被 WinUI 规范为 CR（U+000D）。TextChanging 已读到完整新文本，随后 TextChanged 的值一致。
 
-因此回归先仅统一 CRLF/CR/LF 核对完整输入内容，再捕获真实 `TextBox.Text`；此后导航、保存文件、重复生成和停用恢复全部按该原生值严格逐字比较。没有 Trim、部分匹配或省略多行内容。第十二轮在该测试边界修正后完成全部 13 项，100-byte 摘要是实际编辑并保存的版本。Windows 证据来自 GitHub `windows-2025` runner，Windows 11 人工清单的 14 项仍全部待验。未连接真实业务系统。
+因此回归先仅统一 CRLF/CR/LF 核对完整输入内容，再捕获真实 `TextBox.Text`；此后导航、保存文件、重复生成和停用恢复全部按该原生值严格逐字比较。没有 Trim、部分匹配或省略多行内容。第十二轮在该测试边界修正后完成全部 13 项，100-byte 摘要是实际编辑并保存的版本。Windows 证据来自 GitHub `windows-2025` runner，Windows 11 人工清单的 18 项仍全部待验。未连接真实业务系统。
 
 ## 干净 Windows 环境
 
@@ -57,7 +69,7 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 6. 再修改摘要但不保存；清除控件，停用并重新启用两个样例，再次附加原生控件；检查注册撤销与恢复，摘要仅恢复已保存版本且文件不变。
 7. 停止插件、清除注册，检查保存的 enabled 偏好仍为 true，写入 JSON 并关闭窗口。
 
-报告包含 `succeeded`、`stage`、`userRoot`、启动阶段/线程/时间、检查列表、文件路径/大小和完成时间；失败包含异常与 HRESULT。当前从 SDK 生成入口进入 Application 构造开始，记录编译后的 Application 资源初始化、窗口和控件阶段；更早的失败由启动器报告和进程诊断定位。进程入口前的模块初始化崩溃可能无法由 EXE 写报告，脚本会补充失败 JSON；即使原生进程已写成功报告，后续退出失败或超时也会把最终 succeeded 改为 false，并保留已有检查与原生阶段。报告不含真实用户设置或业务数据。临时根目录保留用于故障检查，可在进程退出后按报告路径自行删除。超时是失败；脚本为限制测试运行时间而终止测试进程，不表示普通停用可强制取消插件。
+报告包含 `succeeded`、`stage`、`userRoot`、启动阶段/线程/时间、检查列表、文件路径/大小和完成时间；失败仅包含安全错误代码/类别与 HRESULT，不读取异常 Message/ToString。当前从 SDK 生成入口进入 Application 构造开始，记录编译后的 Application 资源初始化、窗口和控件阶段；更早的失败由启动器报告和进程诊断定位。进程入口前的模块初始化崩溃可能无法由 EXE 写报告，脚本会补充失败 JSON；即使原生进程已写成功报告，后续退出失败或超时也会把最终 succeeded 改为 false，并保留已有检查与原生阶段。报告不含真实用户设置或业务数据。临时根目录保留用于故障检查，可在进程退出后按报告路径自行删除。超时是失败；脚本为限制测试运行时间而终止测试进程，不表示普通停用可强制取消插件。
 
 `.github/workflows/build.yml` 在 PR（包括草稿）、`main`/`feat/native-plugin-workbench` push、手动触发时运行：
 
@@ -146,7 +158,22 @@ UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析�
 
 本轮 Linux 只能执行固定包审计/真实 Store 安装、报告与隔离参数测试及不可运行的 C# reference 编译；Windows 原生执行必须以当前提交的实际 CI 结果为准。原有样例 13 项加管理导航、独立平台 fixture 的 runtime probes 均保留，业务结果单独记录。
 
-覆盖边界：新钉钉 0.3.2 登记四项 host secret definitions，并实际采用异步完整批次值提供方；新原生探针仅配置合成模型值和最后提交的 `credentials.commit`，验证取消、保存、模型用途单独批准并读取 host commit/revision、立即撤销保留密文、删除、无授权再保存和空编辑框。批准只读 commit/revision；模型 key 值读取发生在实际 provider dispatch 前，该路径未执行。Webhook 两字段留空，不批准发送用途；批准后先撤销/删除，再运行本地 demo Core，不调用真实模型。该新增范围待新版联合 Windows 报告；旧钉钉 0.3.1 的仅声明结论仍只适用于旧包。UPCAM host secret 只用于程序生成的恢复绑定 key，业务凭据仍使用原 worker DPAPI；生产探针没有自动业务授权，不创建恢复 key。早期完整审计的 107 个 Actions artifacts 和零 releases 中，validation 包只有元数据/报告/截图。新上游 CI 42299664328/artifact 13544710526 已发布不同 ID 的真实 compiled synthetic acceptance 二进制，来源 `48e67e8`，publisher ZIP SHA256 `5d3fa64b1389acad36e425be9b274291315b4f7ed373df2b533ef99cf72e9f9c`。输入缺失依赖已解除，正向自动 Core/key/Restore 仍待当前 Windows 执行和审查，尚不能关闭 I01。两插件均未执行发送、真实 Webhook/HTTP、真实 DWS/Teambition/OpenAI、企业权限或真实凭据测试。代码更新版本（钉钉 0.3.3/0.3.4、UPCAM 0.1.1/0.1.2）及 staged 故障是明确合成的集成输入，不是上游新发布；UserRoot 备份不包含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live Webhook 去重。Windows11 人工清单仍全部待验。
+覆盖边界：钉钉 0.3.2 的四项 host secret definitions 与异步完整批次提供方已接入；本轮原生测试仅配置合成模型值及 `credentials.commit`，实际通过取消、保存、模型用途单独批准并读取 commit/revision、撤销保留密文、删除、无授权再保存和空编辑框检查。批准仅读 commit/revision；真正 provider dispatch 前的模型 key 值读取未执行。Webhook 两字段留空，发送用途未批准；运行 demo Core 前已撤销/删除模型批准。UPCAM 生产路径仍没有自动业务授权；其 host secret 只用于生成的恢复绑定 key，业务凭据由原 worker DPAPI 管理。正向闭环使用独立上游 `48e67e8`/CI 42299664328/artifact 13544710526 的编译模拟变体，publisher ZIP SHA256 `5d3fa64b1389acad36e425be9b274291315b4f7ed373df2b533ef99cf72e9f9c`，与生产插件分开核验。没有真实 DWS/Teambition/OpenAI/Webhook/HTTP、企业凭据或业务消息。钉钉 0.3.3/0.3.4、UPCAM 0.1.1/0.1.2 及 staged 故障只是明确合成的版本/损坏集成输入，未宣称上游新业务发布；UserRoot 备份不含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live 去重。
+
+## 独立 UPCAM 模拟验收（Server 2025 实际六进程通过）
+
+运行器在六个生产进程及其 worker 全部退出后，使用另一个全新 GUID 用户根，依次启动以下真实 shipping App 进程。独立编译 ID 为 `com.upcam.task-digest.acceptance`；原生 CI-synthetic banner、Ready 握手和 profile 标记先于服务动作。与生产插件共享上游 worker 单例，禁止重叠。只调用上游编译变体的本地 fake providers，synthetic sent 不代表真实钉钉送达。
+
+| 阶段 | 已执行断言 |
+| --- | --- |
+| acceptance-seed | 原生确认合成范围/本地模型缓存并保存授权；实际未来到期的 15 秒定时器运行 Core，历史出现一条 fake sent 和虚构摘要；原生 Stop 后观察 16 秒，revision/规范数据库哈希不变，同一空闲 worker 保留；重新明确 Start 并单独开启 Resume |
+| acceptance-restore | 新进程未打开插件页面即恢复 Running；原 DPAPI key 密文/绑定不变、只有一个 worker；实际定时检查继续且不重放已记录时段；host Stop 后再观察 16 秒静默 |
+| acceptance-stopped | 真实重启保持 Stopped，无 worker/backend；即使 Resume 偏好保留也不恢复运行意图；随后明确新 Start 准备下一阶段 |
+| acceptance-config | 启动前只改变本测试根的合成计划；Restore Faulted、16 秒无 Core 进展、不改旧 key/绑定、不补造授权；明确原生 Save 才重新授权 |
+| acceptance-missing | 启动前只删本插件生成的 key；Restore 拒绝、不造 key、不改绑定/数据；明确新 Start 后活动 Disable 等待任务/worker 结束并清 key/绑定/运行意图；重新启用为 Stopped、独立 Resume 偏好仍在，且无 key/绑定/worker |
+| acceptance-disabled | 真实重启不加载该插件代码/任务/worker，不恢复授权；合成历史、数据与设置哈希保留 |
+
+每阶段报告实际 PID、Closed、OS exit0、退出后租约重获、来源和哈希。固定 worker 最终由其自身 `TerminateJobObject(job, 1)` 策略退役，所有已观察 worker 均结束、实际 exit1；没有把它记为优雅 exit0，也没有声称宿主能强制终止任意插件工作。注册任务/生命周期回调/插件 Stop 之外的资源仍由可信插件负责完整收束。
 
 ## Windows 实机人工清单（全部待验）
 
@@ -170,7 +197,3 @@ UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析�
 - [ ] 凭据框每次打开均为空，保存/删除后清空；仅显示“已保存（未验证值）”，错误及日志不包含值；使用合成凭据验收。
 - [ ] ZIP 与文件夹选择器均可取消；更新/回滚/移除提示重启、重新信任和代码/当前数据/外部存储边界；Prepared 可取消，已开始的恢复 journal 不能丢弃。
 - [ ] 关闭等待期间可查看管理状态并重试，不能重新启用或启动新工作；宿主包写入未结束时同样保留锁，Windows 11 多窗口/重复关闭实际交互正常。
-
-新增独立 synthetic acceptance 序列使用 `--business-probe acceptance-seed|acceptance-restore|acceptance-stopped|acceptance-config|acceptance-missing|acceptance-disabled`，在原六个生产进程全部退出之后使用另一个全新 GUID 用户根；两变体共享上游 worker 单例，禁止重叠。真实原生 CI-synthetic banner、Ready 握手和 profile 标记先于服务动作；只调用上游编译变体的本地 fake providers。首阶段等待实际到期的定时 Core 生成一条 synthetic sent history 和虚构摘要，随后对 Running 任务 Stop，跨越真实 15 秒 timer 周期检查 revision/数据库哈希不变。其余真实进程覆盖原 key/binding 恢复、独立 Resume 同意、显式 Stop 阻止恢复、配置改变/缺 key 拒绝且不补造授权、活动停用/worker 退役及禁用重启保留数据。当前为已编写、待 Windows 执行范围；synthetic sent 不代表真实钉钉送达。
-
-UPCAM 固定 worker 的最终 owned retirement 会调用 `TerminateJobObject(job, 1)`；报告保留真实 worker exit 1，不宣称优雅 exit 0。shipping App 仍须 Closed、实际 OS exit 0 和 launcher 重新取得根 lease。
