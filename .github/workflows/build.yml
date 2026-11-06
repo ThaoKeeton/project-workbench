@@ -18,6 +18,9 @@ jobs:
       - name: Smoke report filesystem regressions
         shell: pwsh
         run: ./tests/scripts/NativeSmokeReport.Tests.ps1
+      - name: Debug launch privacy and argument regressions
+        shell: pwsh
+        run: ./tests/scripts/NativeDebugSupport.Tests.ps1
       - name: Core runtime and real filesystem tests
         run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-linux.trx" --results-directory artifacts/tests
       - uses: actions/upload-artifact@v7.0.2
@@ -37,14 +40,22 @@ jobs:
       - name: Smoke report filesystem regressions
         shell: pwsh
         run: ./tests/scripts/NativeSmokeReport.Tests.ps1
+      - name: Debug launch privacy and argument regressions
+        shell: pwsh
+        run: ./tests/scripts/NativeDebugSupport.Tests.ps1
       - name: Core runtime and Windows filesystem tests
         run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-windows.trx" --results-directory artifacts/tests
       - name: Publish native host and independent plugins
         shell: pwsh
         run: ./scripts/build.ps1
       - name: Real WinUI isolated native smoke
+        id: native_smoke
         shell: pwsh
         run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
+      - name: Collect native exception text after smoke failure
+        if: failure() && steps.native_smoke.outcome == 'failure'
+        shell: pwsh
+        run: ./scripts/native-debug.ps1 -TimeoutSeconds 240
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -65,6 +76,12 @@ jobs:
             artifacts/native/native-stdout.log
             artifacts/native/native-stderr.log
             artifacts/native/native-crash-events.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: native-debugger-evidence
+          path: artifacts/native/native-debug/
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7.0.2
         if: always()
