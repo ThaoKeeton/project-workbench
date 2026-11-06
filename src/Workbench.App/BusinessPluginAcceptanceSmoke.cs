@@ -170,10 +170,11 @@ internal sealed partial class BusinessPluginSmoke
                     Require(CaptureWorkers().Length == 0 && !File.Exists(BindingFile) && await BindingHashAsync() is null
                         && Manager.GetBackgroundTaskSnapshots(AcceptanceId).Count == 0 && !Manager.HasPendingStops, "Active native Disable retained worker, work or resume authority.");
                     await TrustAsync(AcceptanceId, true);
-                    AssertAcceptanceStopped(resume: false);
-                    Require(CaptureWorkers().Length == 0, "Re-enable started a worker or restored revoked authority.");
+                    AssertAcceptanceStopped(resume: true);
+                    Require(CaptureWorkers().Length == 0 && !File.Exists(BindingFile) && await BindingHashAsync() is null,
+                        "Re-enable started a worker or recreated the revoked generated key/binding.");
                     await DisableAsync(AcceptanceId);
-                    Record("After explicit new authorization, native Disable joined active scheduler and real worker, removed generated key/binding; re-enable registered Stopped with Resume off, then persisted Disable");
+                    Record("After explicit new authorization, native Disable joined active scheduler and real worker, removed generated key/binding and running intent; re-enable registered Stopped with the separate Resume preference retained, then persisted Disable");
                     break;
                 case "acceptance-disabled":
                     Require(Snapshot(AcceptanceId) is { IsLoaded: false, DesiredEnabled: false, HasRuntime: false }
