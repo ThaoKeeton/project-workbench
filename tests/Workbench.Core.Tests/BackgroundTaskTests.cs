@@ -309,6 +309,145 @@ public sealed class BackgroundTaskTests
         Assert.Equal(1, await restarted.GetSettings(Id).GetAsync("jobRuns", 0));
     }
 
+    [Fact]
+    public async Task Unchanged_rediscovery_preserves_reapproved_package_and_new_resume_consent()
+    {
+        using var disk = Package();
+        await using (var first = Manager(disk))
+        {
+            await EnableAsync(first);
+            await first.StartBackgroundTaskAsync(Id, "monitor");
+            await RuntimeTest.WaitAsync(async () => await first.GetSettings(Id).GetAsync("jobRuns", 0) == 1);
+            Assert.True((await first.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true)).Succeeded);
+        }
+        var oldApproval = await ReadApprovalAsync(disk);
+        await File.WriteAllTextAsync(Path.Combine(disk.Plugins, Id, "reapproved-version.txt"), "synthetic F2 package");
+        await using (var reapproved = Manager(disk))
+        {
+            await reapproved.DiscoverAsync();
+            Assert.Contains(Assert.Single(reapproved.Plugins).Diagnostics, d => d.Code == PluginDiagnosticCode.PackageChanged);
+            Assert.False(Assert.Single(reapproved.Plugins).IsTrusted);
+            Assert.Empty(await reapproved.RestoreEnabledAsync());
+            Assert.True((await reapproved.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            Assert.True((await reapproved.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
+            await RuntimeTest.WaitAsync(async () => await reapproved.GetSettings(Id).GetAsync("jobRuns", 0) == 2);
+            Assert.True((await reapproved.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true)).Succeeded);
+            var newApproval = await ReadApprovalAsync(disk);
+            Assert.True(newApproval.Enabled);
+            Assert.NotEqual(oldApproval.Fingerprint, newApproval.Fingerprint);
+
+            await reapproved.DiscoverAsync(); // No package files changed after approval.
+
+            // Operations must remain usable, not just an Enabled/trusted snapshot.
+            Assert.True((await reapproved.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
+            Assert.True((await reapproved.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true)).Succeeded);
+            var status = Assert.Single(reapproved.Plugins);
+            Assert.Equal(PluginState.Enabled, status.State);
+            Assert.True(status.IsTrusted);
+            Assert.True(status.DesiredEnabled);
+            Assert.True(status.HasRuntime);
+            Assert.Contains(status.Diagnostics, d => d.Code == PluginDiagnosticCode.PackageChanged); // Keep useful history.
+            Assert.Contains(reapproved.Contributions.Commands, command => command.Id == "start-monitor");
+            var task = Assert.Single(reapproved.GetBackgroundTaskSnapshots(Id));
+            Assert.Equal(PluginBackgroundTaskState.Running, task.State);
+            Assert.True(task.ResumeOnStartup);
+            Assert.True(task.DesiredRunning);
+            Assert.Equal(newApproval, await ReadApprovalAsync(disk));
+            using var intent = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(disk.User, "background-tasks.json")));
+            var saved = intent.RootElement.GetProperty("plugins").GetProperty(Id);
+            Assert.Equal(newApproval.Fingerprint, saved.GetProperty("fingerprint").GetString());
+            Assert.True(saved.GetProperty("tasks").GetProperty("monitor").GetProperty("resumeOnStartup").GetBoolean());
+            Assert.True(saved.GetProperty("tasks").GetProperty("monitor").GetProperty("desiredRunning").GetBoolean());
+            Assert.Equal(2, await reapproved.GetSettings(Id).GetAsync("jobRuns", 0));
+            await reapproved.ShutdownAsync();
+            Assert.Equal(newApproval, await ReadApprovalAsync(disk));
+        }
+
+        await using var restarted = Manager(disk);
+        await restarted.DiscoverAsync();
+        Assert.True(Assert.Single(restarted.Plugins).IsTrusted);
+        Assert.True(Assert.Single(restarted.Plugins).DesiredEnabled);
+        Assert.All(await restarted.RestoreEnabledAsync(), result => Assert.True(result.Succeeded, result.Message));
+        await RuntimeTest.WaitAsync(async () => await restarted.GetSettings(Id).GetAsync("jobRuns", 0) == 3
+            && await restarted.GetSettings(Id).GetAsync("startReason", "") == "Restore");
+        var restored = Assert.Single(restarted.GetBackgroundTaskSnapshots(Id));
+        Assert.True(restored.ResumeOnStartup);
+        Assert.True(restored.DesiredRunning);
+        Assert.Equal(PluginBackgroundTaskState.Running, restored.State);
+    }
+
+    private static async Task<(bool Enabled, string? Fingerprint)> ReadApprovalAsync(TestDirectory disk)
+    {
+        using var json = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(disk.User, "plugin-state.json")));
+        var approval = json.RootElement.GetProperty("plugins").GetProperty(Id);
+        return (approval.GetProperty("enabled").GetBoolean(), approval.GetProperty("trustedFingerprint").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Incomplete_package_revocation_retries_before_fresh_approval(bool blockApprovalFile)
+    {
+        using var disk = Package();
+        await using (var first = Manager(disk))
+        {
+            await EnableAsync(first);
+            await first.StartBackgroundTaskAsync(Id, "monitor");
+            await RuntimeTest.WaitAsync(async () => await first.GetSettings(Id).GetAsync("jobRuns", 0) == 1);
+            await first.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true);
+        }
+        await File.WriteAllTextAsync(Path.Combine(disk.Plugins, Id, "pending-version.txt"), "synthetic changed package");
+        var writer = new ControlledRuntimeStateWriter();
+        writer.HoldNextWrite();
+        writer.ReleaseFirstWrite.TrySetResult();
+        var manager = new PluginManager(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User },
+            new WindowsSecretProtector(), new PluginRuntimeState(disk.User, writer.WriteAsync));
+        var blockedPath = Path.Combine(disk.User, blockApprovalFile ? "plugin-state.json" : "background-tasks.json");
+        var backup = Path.Combine(disk.User, "revocation-backup.json");
+        var failureCode = blockApprovalFile ? PluginDiagnosticCode.StatePersistenceFailed : PluginDiagnosticCode.RuntimeStatePersistenceFailed;
+        var discovery = manager.DiscoverAsync();
+        try
+        {
+            await writer.ClearWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            File.Move(blockedPath, backup);
+            Directory.CreateDirectory(blockedPath); // Real atomic replacement must fail.
+            writer.ReleaseClearWrite.TrySetResult();
+            await discovery;
+            Assert.Contains(Assert.Single(manager.Plugins).Diagnostics, diagnostic => diagnostic.Code == failureCode);
+            await manager.DiscoverAsync(); // The files are unchanged, but revocation is still pending.
+            Assert.Equal(2, Assert.Single(manager.Plugins).Diagnostics.Count(diagnostic => diagnostic.Code == failureCode));
+
+            Assert.False((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            Assert.False(Assert.Single(manager.Plugins).IsTrusted);
+            Assert.False(Assert.Single(manager.Plugins).IsLoaded);
+            if (!blockApprovalFile)
+                Assert.Null((await ReadApprovalAsync(disk)).Fingerprint); // No F2 grant before the consent clear succeeds.
+
+            Directory.Delete(blockedPath);
+            File.Move(backup, blockedPath);
+            Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            var task = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+            Assert.False(task.ResumeOnStartup);
+            Assert.False(task.DesiredRunning);
+            Assert.Equal(1, await manager.GetSettings(Id).GetAsync("jobRuns", 0));
+            var approval = await ReadApprovalAsync(disk);
+            Assert.True(approval.Enabled);
+            Assert.NotNull(approval.Fingerprint);
+            await manager.DiscoverAsync();
+            Assert.Equal(approval, await ReadApprovalAsync(disk));
+            Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
+        }
+        finally
+        {
+            writer.ReleaseFirstWrite.TrySetResult();
+            writer.ReleaseClearWrite.TrySetResult();
+            await discovery;
+            if (Directory.Exists(blockedPath)) Directory.Delete(blockedPath);
+            if (File.Exists(backup)) File.Move(backup, blockedPath, overwrite: true);
+            await RuntimeTest.DisposeAsync(manager);
+        }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

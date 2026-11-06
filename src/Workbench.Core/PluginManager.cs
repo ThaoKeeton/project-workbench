@@ -172,12 +172,8 @@ public sealed class PluginManager : IAsyncDisposable
                     entry.AddDiagnostic(new(PluginDiagnosticCode.DuplicatePluginId, $"More than one package declares '{group.Key}'."));
                 }
             }
-            foreach (var changed in entries.Where(e => e.Package.Manifest is not null
-                && e.Snapshot.Diagnostics.Any(d => d.Code == PluginDiagnosticCode.PackageChanged)))
-            {
-                await ClearTaskIntentAsync(changed, removeConsent: true, cancellationToken);
-                await PersistStateAsync(changed, enabled: false, fingerprint: null, cancellationToken);
-            }
+            foreach (var changed in entries.Where(e => e.PackageInvalidationPending))
+                await PersistPackageInvalidationAsync(changed, cancellationToken);
             Volatile.Write(ref _entries, entries.ToArray());
             PublishContributions();
             return Plugins;
@@ -299,10 +295,11 @@ public sealed class PluginManager : IAsyncDisposable
         if (!current.IsValid || current.Fingerprint != entry.Package.Fingerprint)
         {
             MarkPackageChanged(entry);
-            await ClearTaskIntentAsync(entry, removeConsent: true, cancellationToken);
-            await PersistStateAsync(entry, enabled: false, fingerprint: null, cancellationToken);
+            await PersistPackageInvalidationAsync(entry, cancellationToken);
             return new(false, $"Package '{pluginId}' changed after discovery. Rediscover before trusting it; a loaded package requires exit and restart.");
         }
+        if (entry.PackageInvalidationPending && !await PersistPackageInvalidationAsync(entry, cancellationToken))
+            return new(false, "Could not persist changed-package revocation; the plugin was not activated.");
         if (!entry.Snapshot.IsTrusted && !confirmTrust)
         {
             entry.AddDiagnostic(new(PluginDiagnosticCode.Untrusted, $"Plugin '{pluginId}' requires explicit user trust before running in this process."));
@@ -543,6 +540,7 @@ public sealed class PluginManager : IAsyncDisposable
 
     private static void MarkPackageChanged(Entry entry)
     {
+        entry.PackageInvalidationPending = true;
         entry.Context?.BackgroundTasks.Invalidate();
         entry.Update(s => s with { State = s.HasPendingStop ? PluginState.Stopping : PluginState.Failed, IsTrusted = false, DesiredEnabled = false });
         entry.AddDiagnostic(new(PluginDiagnosticCode.PackageChanged,
@@ -559,7 +557,10 @@ public sealed class PluginManager : IAsyncDisposable
             if (string.Equals(fingerprint, entry.Package.Fingerprint, StringComparison.OrdinalIgnoreCase))
                 entry.Update(s => s with { IsTrusted = true, DesiredEnabled = saved.Enabled });
             else
+            {
+                entry.PackageInvalidationPending = true;
                 entry.AddDiagnostic(new(PluginDiagnosticCode.PackageChanged, "Saved trust does not match this package's contents. Review and explicitly trust the changed package before enabling it."));
+            }
         }
         else if (saved?.Enabled == true)
             entry.AddDiagnostic(new(PluginDiagnosticCode.Untrusted, "Saved enabled preference was ignored because this package has no explicit trust approval."));
@@ -596,6 +597,15 @@ public sealed class PluginManager : IAsyncDisposable
         }
     }
 
+    private async Task<bool> PersistPackageInvalidationAsync(Entry entry, CancellationToken cancellationToken)
+    {
+        var cleared = await ClearTaskIntentAsync(entry, removeConsent: true, cancellationToken);
+        var revoked = await PersistStateAsync(entry, enabled: false, fingerprint: null, cancellationToken);
+        // Diagnostics are history. Only unfinished revocation remains actionable.
+        entry.PackageInvalidationPending = !cleared || !revoked;
+        return !entry.PackageInvalidationPending;
+    }
+
     public IPluginSettings GetSettings(string pluginId)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
@@ -627,6 +637,7 @@ public sealed class PluginManager : IAsyncDisposable
         public Task<PluginOperationResult>? StopTask { get; set; }
         public bool FailedInitialization { get; set; }
         public bool PreserveInvalid { get; set; }
+        public bool PackageInvalidationPending { get; set; }
         public PluginSnapshot Snapshot { get { lock (_sync) return _snapshot; } }
         public void Update(Func<PluginSnapshot, PluginSnapshot> update) { lock (_sync) _snapshot = update(_snapshot); }
         public void AddDiagnostic(PluginDiagnostic diagnostic) => Update(s => s with
