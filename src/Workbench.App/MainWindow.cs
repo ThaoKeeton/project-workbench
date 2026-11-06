@@ -16,14 +16,17 @@ internal sealed partial class MainWindow : Window
     private readonly InfoBar _notice;
     private HostRuntime? _runtime;
     private PluginManager Manager => _runtime?.Manager ?? throw new InvalidOperationException("工作台尚未就绪。");
+    private PluginPackageStore Packages => _runtime?.Packages ?? throw new InvalidOperationException("工作台尚未就绪。");
     private bool _refreshing;
     private bool _initialized;
     private Exception? _startupFailure;
     private bool _busy;
+    private bool _initializing;
     private bool _closing;
     private bool _allowClose;
     private bool _stopped;
-    private readonly TaskCompletionSource _closeCompleted = new();
+    private bool _shutdownPending;
+    private TaskCompletionSource<bool> _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
 
     public MainWindow(RunOptions options)
@@ -45,7 +48,7 @@ internal sealed partial class MainWindow : Window
         _body = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
         options.TraceStartup("creating-info-bar");
         _notice = Ui.Named(new InfoBar { IsOpen = false }, "操作结果与错误");
-        Title = options.SmokeTest ? "Project Workbench · isolated native smoke" : "Project Workbench · 原生插件工作台";
+        Title = options.IsIsolated ? "Project Workbench · isolated native probe" : "Project Workbench · 原生插件工作台";
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition());
         _root.Children.Add(_notice);
@@ -70,28 +73,33 @@ internal sealed partial class MainWindow : Window
 
     public async Task InitializeAsync()
     {
+        _initializing = true;
         try
         {
             _options.TraceStartup("opening-host-runtime");
-            _runtime = new HostRuntime(_options);
+            _runtime = new HostRuntime(HostRuntimeOptions.Create(_options));
+            if (_options.RuntimeProbe is not null) await NativeRuntimeProbe.PrepareAsync(_runtime, _options);
             _options.TraceStartup("loading-host-theme");
             LoadTheme();
-            _options.TraceStartup("discovering-packages");
-            await Manager.DiscoverAsync();
-            _options.TraceStartup("restoring-enabled-packages");
-            await Manager.RestoreEnabledAsync();
+            await _runtime.InitializeAsync(_options.TraceStartup);
             RefreshNavigation();
             _initialized = true;
             _navigation.IsSettingsVisible = true;
             _navigation.IsEnabled = true;
             _options.TraceStartup("opening-home-page");
             Navigate(new("home"));
+            if (_runtime.MaintenanceResults.Any(result => !result.Succeeded) || Packages.Diagnostics.Count != 0)
+                Notice("本地包维护需要处理", "已保留维护诊断；未受影响的插件仍可使用。请查看“包维护”。", InfoBarSeverity.Warning);
             _options.TraceStartup("host-initialization-completed");
-            if (_options.SmokeTest) await NativeSmoke.RunAsync(this, _options);
+            _initializing = false;
+            if (_shutdownPending) Navigate(new("background"));
+            else if (_options.RuntimeProbe is not null) await NativeRuntimeProbe.RunAsync(this, _options);
+            else if (_options.SmokeTest) await NativeSmoke.RunAsync(this, _options);
         }
         catch (Exception error)
         {
             _startupFailure = error;
+            _initializing = false;
             _initialized = false;
             _navigation.IsEnabled = false;
             _navigation.IsSettingsVisible = false;
@@ -103,7 +111,7 @@ internal sealed partial class MainWindow : Window
             failure.Children.Add(close);
             _body.Content = ScrollPage(failure); // Independent of Manager, even after partial initialization.
             Notice("启动或原生验证失败", error.Message, InfoBarSeverity.Error);
-            if (_options.SmokeTest)
+            if (_options.IsIsolated)
             {
                 Environment.ExitCode = 1;
                 _options.WriteFailure("initialize-or-native-smoke", error);
@@ -121,6 +129,9 @@ internal sealed partial class MainWindow : Window
             AddNavigation("首页", Symbol.Home, new("home"));
             AddNavigation("插件", Symbol.AllApps, new("plugins"));
             AddNavigation("命令", Symbol.Play, new("commands"));
+            AddNavigation("后台任务", Symbol.Sync, new("background"));
+            AddNavigation("凭据", Symbol.Permissions, new("credentials"));
+            AddNavigation("包维护", Symbol.Download, new("packages"));
             foreach (var item in Manager.Contributions.Views)
             {
                 if (item.View is not WinUiView view) continue;
@@ -153,6 +164,9 @@ internal sealed partial class MainWindow : Window
             {
                 case "plugins": ShowPage(PluginsPage()); break;
                 case "commands": ShowPage(CommandsPage()); break;
+                case "background": ShowPage(BackgroundPage()); break;
+                case "credentials": ShowPage(CredentialPage()); break;
+                case "packages": ShowPage(PackageMaintenancePage()); break;
                 case "settings": ShowPage(SettingsPage()); break;
                 case "view":
                     var registration = Manager.Contributions.Views.SingleOrDefault(v => v.PluginId == target.PluginId && v.View.Id == target.ViewId);
@@ -189,7 +203,7 @@ internal sealed partial class MainWindow : Window
 
     private async Task RunAsync(Func<Task> action)
     {
-        if (!_initialized || _busy || _closing) return;
+        if (!_initialized || _busy || _closing || _shutdownPending) return;
         _busy = true;
         _navigation.IsEnabled = false;
         _content.IsEnabled = false;
@@ -198,7 +212,12 @@ internal sealed partial class MainWindow : Window
         finally
         {
             _busy = false;
-            if (_initialized && !_closing) { _navigation.IsEnabled = true; _content.IsEnabled = true; }
+            if (_initialized && !_closing)
+            {
+                _navigation.IsEnabled = true;
+                _content.IsEnabled = true;
+                if (_shutdownPending) { RefreshNavigation(); Navigate(new("background")); }
+            }
         }
     }
 
@@ -258,37 +277,64 @@ internal sealed partial class MainWindow : Window
     private async Task StopAsync()
     {
         if (_stopped) return;
-        _initialized = false;
+        _shutdownPending = true;
         DetachPluginViews();
         _body.Content = ScrollPage(Ui.Page("正在关闭", "正在等待插件停止。协作式取消无法强制中断不响应的插件。"));
         _navigation.IsEnabled = false;
         if (_runtime is not null)
         {
-            await Manager.ShutdownAsync(); // Preserve desired-enabled preferences on application exit.
+            // Dispose uses HostShutdown and preserves enabled/resume intent. A failure retains ownership.
             await _runtime.DisposeAsync();
         }
+        _initialized = false;
         _stopped = true;
     }
 
-    private async Task CloseAsync()
+    private async Task<bool> CloseAsync()
     {
-        if (_closing) return;
+        if (_closing) return await _closeCompleted.Task;
+        if (_busy || _initializing)
+        {
+            // A package write or startup recovery is known work too. Decline this close until it settles.
+            _shutdownPending = true;
+            ShowCloseRetry("正在等待当前操作完成", "保留用户目录租约。当前操作完成后请重试关闭。不会在写入仍进行时释放存储所有权。");
+            return false;
+        }
         _closing = true;
+        _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
             await StopAsync();
             _allowClose = true;
             Close();
-            _closeCompleted.TrySetResult();
+            _closeCompleted.TrySetResult(true);
+            return true;
         }
         catch (Exception error)
         {
-            Environment.ExitCode = 1;
             _options.WriteFailure("shutdown", error);
-            Notice("关闭失败", error.Message, InfoBarSeverity.Error);
+            // The manager remains queryable. Keep this same host and lease until a safe retry succeeds.
+            _body.Content = _navigation;
+            if (_initialized)
+            {
+                RefreshNavigation();
+                _navigation.IsEnabled = true;
+                _content.IsEnabled = true;
+                Navigate(new("background"));
+            }
+            ShowCloseRetry("仍在等待插件停止", "已保留当前进程和用户目录租约。可查看状态并重试关闭；不会强制结束插件。" + error.Message);
             _closing = false;
-            _closeCompleted.TrySetException(error);
+            _closeCompleted.TrySetResult(false);
+            return false;
         }
+    }
+
+    private void ShowCloseRetry(string title, string message)
+    {
+        var retry = Ui.Named(new Button { Content = "重试关闭" }, "重试安全关闭工作台");
+        retry.Click += async (_, _) => await CloseAsync();
+        _notice.ActionButton = retry;
+        Notice(title, message, InfoBarSeverity.Warning);
     }
 
     internal void AssertUiThread()
@@ -300,6 +346,8 @@ internal sealed partial class MainWindow : Window
     internal PluginManager SmokeManager => Manager;
     internal Exception? SmokeStartupFailure => _startupFailure;
     internal bool SmokeNavigationAvailable => _navigation.IsEnabled || _navigation.IsSettingsVisible;
+    internal bool SmokeShutdownPending => _shutdownPending && !_stopped;
+    internal Task<bool> SmokeCloseAttemptAsync() => CloseAsync();
     internal void SmokeTryStartupNavigation()
     {
         _navigation.SelectedItem = _navigation.SettingsItem;
@@ -360,8 +408,7 @@ internal sealed partial class MainWindow : Window
     internal Task SmokeStopAsync() => StopAsync();
     internal async Task FinishSmokeAsync()
     {
-        if (!_closing) await CloseAsync();
-        else await _closeCompleted.Task;
+        if (!await CloseAsync()) throw new PluginShutdownException();
     }
 
     private sealed record NavigationTarget(string Page, string? PluginId = null, string? ViewId = null);

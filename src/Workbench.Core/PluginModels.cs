@@ -53,6 +53,8 @@ public sealed record PluginSnapshot(
 public sealed record PluginViewRegistration(string PluginId, IPluginView View);
 public sealed record PluginCommandRegistration(string PluginId, string Id, string Title, string? Description);
 public sealed record PluginSettingRegistration(string PluginId, PluginSetting Setting);
+/// <summary>Stored ciphertext presence only, never a claim that a credential is valid or readable.</summary>
+public sealed record PluginSecretSnapshot(string Id, string Title, string? Description, bool? IsConfigured, string? ErrorCode);
 public sealed record PluginContributions(
     IReadOnlyList<PluginViewRegistration> Views,
     IReadOnlyList<PluginCommandRegistration> Commands,

@@ -32,6 +32,38 @@ internal sealed class PluginSecretStore(
         lock (_sync) return Array.AsReadOnly(_definitions.Values.ToArray());
     }
 
+    internal IReadOnlyList<PluginSecretSnapshot> GetSnapshots() => Array.AsReadOnly(GetDefinitions().Select(definition =>
+    {
+        try
+        {
+            var path = SecretPath(definition.Id);
+            // File.Exists suppresses access errors and cannot distinguish missing from unsafe metadata.
+            for (var parent = Path.GetDirectoryName(path); parent is not null; parent = Path.GetDirectoryName(parent))
+            {
+                try
+                {
+                    if ((File.GetAttributes(parent) & FileAttributes.Directory) == 0) throw new IOException();
+                }
+                catch (FileNotFoundException) { }
+                catch (DirectoryNotFoundException) { }
+            }
+            bool stored;
+            try
+            {
+                _ = File.GetAttributes(path);
+                FileSystemGuard.EnsureRegularFile(path);
+                stored = true;
+            }
+            catch (FileNotFoundException) { stored = false; }
+            catch (DirectoryNotFoundException) { stored = false; }
+            return new PluginSecretSnapshot(definition.Id, definition.Title, definition.Description, stored, null);
+        }
+        catch (Exception)
+        {
+            return new PluginSecretSnapshot(definition.Id, definition.Title, definition.Description, null, "SecretMetadataUnavailable");
+        }
+    }).ToArray());
+
     internal void CloseRegistration() { lock (_sync) _open = false; }
     public void Dispose() { lock (_sync) { _open = false; _disposed = true; } }
 

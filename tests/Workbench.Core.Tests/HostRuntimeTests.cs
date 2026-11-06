@@ -1,0 +1,86 @@
+using Workbench.App;
+using Xunit;
+
+namespace Workbench.Core.Tests;
+
+public sealed class HostRuntimeTests
+{
+    private const string Id = "com.example.fixture";
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Failed_disposal_keeps_store_lease_and_same_stop_until_known_work_finishes(bool heldCallback)
+    {
+        using var disk = new TestDirectory();
+        disk.Package(Id, fields: new() { ["entryType"] = "Workbench.TestPlugin.ControlledStopPlugin" });
+        var runtime = new HostRuntime(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User, StopTimeout = TimeSpan.FromMilliseconds(75) });
+        await runtime.InitializeAsync();
+        var manager = runtime.Manager;
+        var settings = manager.GetSettings(Id);
+        await settings.SetAsync("lifetimeCallback", heldCallback);
+        await settings.SetAsync("releaseStop", heldCallback);
+        Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+        try
+        {
+            await Assert.ThrowsAsync<PluginShutdownException>(() => runtime.DisposeAsync().AsTask());
+            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("stopCalls", 0) == 1);
+            Assert.True(manager.HasPendingStops);
+            Assert.True(Assert.Single(manager.Plugins).HasRuntime);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(disk.User); });
+            Assert.False((await manager.EnableAsync(Id)).Succeeded);
+            await Assert.ThrowsAsync<PluginShutdownException>(() => runtime.DisposeAsync().AsTask());
+            Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+            Assert.Equal(1, await settings.GetAsync("instanceCount", 0));
+        }
+        finally
+        {
+            await settings.SetAsync("releaseCancellation", true);
+            await settings.SetAsync("releaseStop", true);
+            await RuntimeTest.WaitAsync(() => Task.FromResult(!manager.HasPendingStops));
+            await runtime.DisposeAsync();
+        }
+        using var nextOwner = HostRuntime.AcquireLease(disk.User);
+    }
+
+    [Fact]
+    public async Task Startup_applies_prepared_update_before_any_discovery_seals_the_root()
+    {
+        using var disk = new TestDirectory();
+        disk.Package(Id);
+        var update = disk.Package(Id, folder: "update", fields: new() { ["version"] = "2.0.0" }, external: true);
+        var options = new PluginManagerOptions { PluginsRoot = disk.Plugins, UserRoot = disk.User };
+        Assert.True((await new PluginPackageStore(options).StageUpdateAsync(Id, update)).Succeeded);
+        await using var runtime = new HostRuntime(options);
+        List<string> stages = [];
+        await runtime.InitializeAsync(stage =>
+        {
+            stages.Add(stage);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(disk.User); });
+        });
+        var package = Assert.Single(runtime.Manager.Plugins);
+        Assert.Equal("2.0.0", package.Manifest!.Version);
+        Assert.False(package.IsLoaded);
+        Assert.False(package.IsTrusted);
+        Assert.False(package.DesiredEnabled);
+        Assert.Equal(new[] { "applying-pending-package-maintenance", "discovering-packages", "restoring-enabled-packages" }, stages);
+    }
+
+    [Fact]
+    public async Task Failed_managed_maintenance_is_reported_without_blocking_unrelated_bundled_root()
+    {
+        using var disk = new TestDirectory();
+        disk.Package(Id);
+        const string bundledId = "com.example.bundled";
+        var bundled = disk.Package(bundledId, external: true);
+        var metadata = Path.Combine(disk.Plugins, ".workbench-packages");
+        Directory.CreateDirectory(metadata);
+        await File.WriteAllTextAsync(Path.Combine(metadata, "pending"), "not a directory");
+        await using var runtime = new HostRuntime(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User, AdditionalDiscoveryRoots = [Path.GetDirectoryName(bundled)!] });
+        await runtime.InitializeAsync();
+        Assert.Contains(runtime.MaintenanceResults, result => !result.Succeeded);
+        Assert.NotEmpty(runtime.Packages.Diagnostics);
+        Assert.True((await runtime.Manager.EnableAsync(bundledId, confirmTrust: true)).Succeeded);
+        Assert.False((await runtime.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+    }
+}

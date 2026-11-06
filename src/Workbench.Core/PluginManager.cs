@@ -69,6 +69,8 @@ public sealed class PluginManager : IAsyncDisposable
         => ActiveContext(pluginId)?.BackgroundTasks.SetResumeOnStartupAsync(id, enabled, cancellationToken) ?? Task.FromResult(TaskUnavailable());
     public IReadOnlyList<PluginSecretDefinition> GetSecretDefinitions(string pluginId)
         => FindEntry(pluginId)?.Context is { IsCommitted: true } context ? context.Secrets.GetDefinitions() : [];
+    public IReadOnlyList<PluginSecretSnapshot> GetSecretSnapshots(string pluginId)
+        => FindEntry(pluginId)?.Context is { IsCommitted: true } context ? context.Secrets.GetSnapshots() : [];
     public bool IsSecretStorageSupported(string pluginId) => ActiveContext(pluginId)?.Secrets.IsSupported == true;
     public Task<string?> ReadSecretAsync(string pluginId, string id, CancellationToken cancellationToken = default)
         => SecretStore(pluginId).ReadAsync(id, cancellationToken);

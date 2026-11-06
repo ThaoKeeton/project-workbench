@@ -141,6 +141,7 @@ Task<PluginTaskOperationResult> StartBackgroundTaskAsync(string pluginId, string
 Task<PluginTaskOperationResult> StopBackgroundTaskAsync(string pluginId, string id, CancellationToken cancellationToken = default);
 Task<PluginTaskOperationResult> SetBackgroundTaskResumeOnStartupAsync(string pluginId, string id, bool enabled, CancellationToken cancellationToken = default);
 IReadOnlyList<PluginSecretDefinition> GetSecretDefinitions(string pluginId);
+IReadOnlyList<PluginSecretSnapshot> GetSecretSnapshots(string pluginId);
 bool IsSecretStorageSupported(string pluginId);
 Task<string?> ReadSecretAsync(string pluginId, string id, CancellationToken cancellationToken = default);
 Task WriteSecretAsync(string pluginId, string id, string value, CancellationToken cancellationToken = default);
@@ -154,3 +155,19 @@ Start/resume and host credential operations require an enabled/trusted plugin.
 The existing `DisableAsync`, `ShutdownAsync`, `DisposeAsync`, `Plugins` and
 `Contributions` remain the lifecycle entry points. `IsLoaded` continues to mean
 an assembly has been loaded; `HasRuntime` describes instance/context ownership.
+
+`PluginSecretSnapshot(Id, Title, Description, bool? IsConfigured, ErrorCode)` is a
+Core host metadata model, with no SDK or API 1 change. `IsConfigured=true` means
+only that a regular ciphertext file exists, even if its bytes cannot be decrypted.
+False means absent; null with constant `SecretMetadataUnavailable` means unsafe
+or inaccessible filesystem metadata. This query never reads or decrypts a value.
+The native Credentials page labels presence as “已保存（未验证值）” and always
+creates an empty PasswordBox; save/delete clear the editor. Actual value reads
+remain explicit plugin operations or isolated synthetic Windows acceptance probes.
+
+Native close first prevents new host actions. If startup or an owned UI/store
+operation is still awaiting I/O it declines close and retains the lease until
+that operation settles. If cooperative plugin disposal times out, Background and
+other management pages remain queryable with mutation controls disabled and a
+Retry close action. The same runtime and Stop task stay owned until completion;
+only a successful manager dispose releases the user-root lease.

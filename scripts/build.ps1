@@ -43,6 +43,17 @@ try {
         }
         Copy-Item (Join-Path $projectDirectory 'plugin.json') $destination
     }
+    # Acceptance fixture stays outside app/Plugins and is never discovered by ordinary startup.
+    $fixtureProject = Join-Path $repo 'tests/Workbench.NativeFixture/Workbench.NativeFixture.csproj'
+    $fixtureBuild = Join-Path $outputRoot 'fixture-build'
+    Invoke-DotNet -Arguments @('restore', $fixtureProject)
+    Invoke-DotNet -Arguments @('build', $fixtureProject, '--no-restore', '-c', $Configuration, '-o', $fixtureBuild)
+    $fixtureOutput = Join-Path $outputRoot 'fixtures/runtime'
+    New-Item $fixtureOutput -ItemType Directory -Force | Out-Null
+    foreach ($name in @('Workbench.NativeFixture.dll', 'Workbench.NativeFixture.deps.json')) {
+        Copy-Item (Join-Path $fixtureBuild $name) $fixtureOutput
+    }
+    Copy-Item (Join-Path $repo 'tests/Workbench.NativeFixture/plugin.json') $fixtureOutput
     if (-not (Test-Path (Join-Path $appOutput 'Workbench.App.exe'))) { throw 'Published executable is missing.' }
     Write-Host "Complete self-contained app directory: $appOutput"
 }

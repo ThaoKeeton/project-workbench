@@ -1,8 +1,47 @@
 # 独立业务插件接入契约
 
-原生基础基线为 `6565180`（API 1、host 0.1）。新增 SDK 0.2.0 的实际源码已在 `4815207ec8d49e8a0fc10ad2e751a7791afe45bc` 构建并通过 [Windows/Linux CI 42262558586](https://github.com/ThaoKeeton/project-workbench/actions/runs/42262558586)：Windows Core 127 项、Linux 125 项及 2 项明确的 Windows 专用跳过，原生检查 13 项。独立插件可以固定此提交的两个 SDK 项目和最近的 Directory.Build.props/global.json，通过源码 ProjectReference 构建；API 1 和程序集身份 1.0.0.0 保持兼容。此证据不是 WinUI SDK nupkg 发布记录。
+两个 SDK 包固定为 **0.2.0**，API 1、可选运行服务 1 和程序集身份 **1.0.0.0** 保持兼容；文件版本为 0.2.0.0。.NET SDK 固定 10.0.403，Windows App SDK 固定 1.8.260921001，插件目标为 net10.0-windows10.0.19041.0/x64。SDK 源码与包分发现在通过下述可重建快照提供；独立业务 CI 不需要引用主程序或获得其他私有仓库的 token。
 
-运行服务已通过独立审查及上述实际 Windows 验证：发现包变更会立即撤销旧对象的新增操作，排空在途意图保存后最终清除授权；历史警告不会撤销后来明确批准的版本。两个真实 DPAPI 测试包含同一 Windows 用户下跨进程读写。包维护、原生管理和业务安装验收仍在继续；上述提交可作为 SDK 编译契约，不能据此宣称整个 host 0.2 已通过最终验收。后续会补充 SDK 分发快照。
+后端基线 `82bd958e220aaf94ccdbf1ea68b0ec53b770706a` 已由控制器核验 [CI 42275683088](https://github.com/ThaoKeeton/project-workbench/actions/runs/42275683088)，含 Windows/Linux Core、发布和原有 13 项原生检查。当前新增原生管理/重启检查及 Windows SDK 打包需要本轮 Windows CI；Linux 参考编译或下面的 ReferenceOnly 产物不能代替它，也不代表 Windows 11 人工验收或真实业务授权已经完成。
+
+## 固定 SDK 分发快照与独立构建
+
+在所选源码提交的 Windows 构建机执行：
+
+```powershell
+pwsh -File ./scripts/export-sdk.ps1
+pwsh -File ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-snapshot
+```
+
+CI artifact `workbench-sdk-0.2.0` 包含 `sdk-snapshot.zip`、`source/`、两个 `.nupkg` 和 `manifest.json`。清单记录完整 sourceCommit、SDK 源码是否有未提交修改、每个源码/包的 SHA256 及上述版本。固定并核对该清单后再进入独立 CI；若 sdkSourcesDirty 为 true，源码以逐文件哈希为准，不能仅凭 sourceCommit 复现。快照仅复制明确列出的两个 SDK 项目、三个契约源文件、Directory.Build.props 和 global.json；不包含 App/Core/Desktop DLL、用户配置、凭据或业务数据。可按相同工具版本从源码重建程序集；ZIP/包哈希用于核对该次分发，不承诺不同打包时间的容器字节相同。
+
+源码方式解压后引用 `source/src/Workbench.Sdk/Workbench.Sdk.csproj` 和 `source/src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj`。NuGet 方式将快照 `packages/` 加入本地源，在独立插件项目固定：
+
+```xml
+<PropertyGroup>
+  <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+  <EnableWindowsTargeting>true</EnableWindowsTargeting>
+  <UseWinUI>true</UseWinUI>
+  <WindowsPackageType>None</WindowsPackageType>
+  <PlatformTarget>x64</PlatformTarget>
+  <EnableDynamicLoading>true</EnableDynamicLoading>
+</PropertyGroup>
+<ItemGroup>
+  <PackageReference Include="Workbench.Sdk" Version="[0.2.0]" />
+  <PackageReference Include="Workbench.WinUI.Sdk" Version="[0.2.0]" />
+  <PackageReference Include="Microsoft.WindowsAppSDK" Version="[1.8.260921001]" />
+</ItemGroup>
+```
+
+```powershell
+dotnet nuget add source C:/verified-sdk/packages --name workbench-sdk-0.2.0
+dotnet restore ./Independent.Plugin.csproj
+dotnet build ./Independent.Plugin.csproj -c Release --no-restore
+```
+
+只暂存自己的插件 DLL、deps、私有依赖和清单；排除两个共享 SDK、WinUI/WinRT/.NET 框架、Desktop 二进制及实际凭据。插件清单仍要求 apiVersion 1；依赖运行服务时 minimumHostVersion 为 0.2.0。业务仓库应保留快照清单、源码提交、包 SHA256 和自身 CI 结果。宿主不静态引用任何真实业务插件。
+
+Linux 可显式执行 `pwsh ./scripts/export-sdk.ps1 -ReferenceOnly`，生成独立命名的 `artifacts/sdk-reference-snapshot/` 和 ZIP；清单 referenceOnly=true。该模式关闭 WinUI XAML/PRI 工具及 PRI 打包，仅证明 SDK C# 参考编译、包身份与快照完整性，不能作为 Windows 原生分发已验证的证据。普通 Windows 导出不使用这些开关。
 
 ## 构建与边界
 

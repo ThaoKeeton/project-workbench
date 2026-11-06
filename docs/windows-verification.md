@@ -4,6 +4,9 @@
 
 | 检查 | 已有证据 | 范围与限制 |
 | --- | --- | --- |
+| Task 3 Linux Core | 一次完整运行 221 通过、2 项明确 Windows DPAPI 跳过，共 223 项；随后新增 OS 进程用例的最终聚焦运行 12/12 通过 | 聚焦运行包含 6 个实际子进程，验证通用 opt-in Restore、RequiresPluginStart 不恢复、停用后不复活；另含 HostRuntime 持锁/Stop 重试、Apply 顺序、坏元数据独立根及只读凭据状态。未把更新后的完整套件宣称为已重新运行；TRX 在 Task 3 报告 |
+| Task 3 Linux C# reference | App 与独立 NativeFixture 参考编译 0 warnings/errors | `tests/Workbench.NativeReference` 仅为不可运行的类库；InitializeComponent 占位直接抛异常，没有生产入口/资源替代；不验证 SDK 生成 Main、XAML、主 PRI 或实际 WinUI |
+| Task 3 Windows/SDK native | 本轮待控制器取得 Windows CI | 原有 13 项保留，新增管理导航检查；另有显式 runtime probes。不得把下述历史 GREEN 当成本轮证据 |
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux C# 检查 | 早期手动主程序版本参考编译通过；当前主程序 7 个 C# 文件语法与 XML 检查通过 | 采用标准 App.xaml 后，XAML 编译器必须在 Windows 执行；当前主程序没有 Linux 完整语义编译证据 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
@@ -74,6 +77,41 @@ dotnet build src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj -c Release \
   -p:WindowsAppSDKSelfContained=false -p:AppxGeneratePriEnabled=false
 ```
 
+## host 0.2 管理与实际进程重启探针（本轮 Windows 待运行）
+
+构建脚本额外编译 `tests/Workbench.NativeFixture` 到 `artifacts/native/fixtures/runtime/`，只暂存夹具 DLL、deps 与清单。它不进入 `app/Plugins/`，普通启动不会安装、发现、信任或执行它。原有冒烟保留全部 13 项，再增加 Background/Credentials/Package maintenance 初始化导航检查。
+
+```powershell
+pwsh ./scripts/native-runtime-probe.ps1 -TimeoutSeconds 180
+pwsh ./scripts/export-sdk.ps1
+pwsh ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-snapshot
+```
+
+runner 为 `management` 建立一个新 GUID 根，并为下列六阶段共享另一个专用 GUID 根；每阶段实际 Start-Process、等待退出成功及报告成功后才启动下一进程。原生 EXE 只接受 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>` 下的 probe-root；非 probe 模式不接受该参数。测试只使用固定的本地夹具与合成 DPAPI 值，无真实业务凭据、网络提供方或消息发送。
+
+| 阶段 | 实际行为与必需断言 |
+| --- | --- |
+| management | 初始化管理导航、默认空 PasswordBox、真实 Save/Read/Delete/重新进入空框；同步前缀后台工作期间 UI dispatcher/导航响应、Stopped/Faulted 状态与安全错误；RequiresPluginStart 禁用通用控件、转到真实插件页面确认；初始化失败撤销贡献；held Stop、Lifetime callback、registered task 三种关闭超时保留同一 Stop/实例/租约、可查询重试，真实结束才释放；宿主异步包操作未结束时拒绝关闭；本地维护元数据损坏不阻断无关 bundled 根 |
+| restart-seed | 明确信任合成插件、保存数据/设置/DPAPI，手动开启 generic worker 恢复，插件页面策略任务仅运行本次确认的工作 |
+| restart-verify | 新进程自动 Restore generic worker；RequiresPluginStart 任务保持 Stopped/Resume=false/DesiredRunning=false，历史运行数不增加；验证页面/设置/数据/DPAPI 后明确停用 |
+| restart-disabled | 第三进程保持停用、无新任务执行；暂存 v2 更新，当前仍 v1 |
+| update-verify | 第四进程在发现前 Apply 到 v2，撤销信任/启用/恢复；重新明确批准后校验当前数据与密文，按 HistoryId 暂存代码回滚 |
+| rollback-verify | 第五进程回到 v1、仍需重新信任；当前数据/凭据保持，暂存移除 |
+| remove-verify | 第六进程移除代码，保留当前 data/settings/secrets/代码历史；generic/guarded 执行计数没有增加 |
+
+报告 `artifacts/native/runtime-probes/<phase>.json` 包括该进程 PID、临时根、检查列表和真实启动顺序；stdout/stderr 与 summary.json 同目录。超时视为失败，runner 保留尚在运行的隔离进程并报告 PID，不以强杀证明停止。CI artifact 为 `native-runtime-probes`。后台/凭据原生行为、Windows 文件锁分支与 DPAPI 只有实际 Windows 运行成功后才算通过。
+
+SDK artifact `workbench-sdk-0.2.0` 另行导出 manifest、两个 0.2.0 nupkg 和固定版本源码；完整重建/消费步骤与 Linux ReferenceOnly 限制见 [独立插件契约](integrations/plugin-contract-v1.md)。Task 3 不导入真实 UPCAM/钉钉包；真实 RequiresPluginStart 监控仍须遵守其业务自己的新预览/停用撤销策略，不能用通用夹具 Restore 结果冒充业务授权。
+
+Linux 参考命令（只编译 C#，不运行应用）：
+
+```sh
+dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release \
+  -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
+pwsh ./scripts/export-sdk.ps1 -ReferenceOnly
+pwsh ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-reference-snapshot
+```
+
 ## Windows 实机人工清单（全部待验）
 
 记录 Windows 版本、架构、DPI、提交 SHA 和观察结果。使用专门的测试 Windows 用户以获得干净的 `%LOCALAPPDATA%/ProjectWorkbench/`，保留实际用户数据。
@@ -92,3 +130,7 @@ dotnet build src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj -c Release \
 - [ ] 键盘 Tab、Shift+Tab、Enter、焦点提示和屏幕阅读器名称可用，文件选择与信任弹窗可取消。
 - [ ] 运行命令异常、损坏设置/用户状态文件时显示对应错误，正常插件仍可使用。
 - [ ] 关闭窗口先等待插件停止，再退出；重入关闭不重复启动停止流程；enabled 偏好不被写成 false。不响应的可信插件不能被普通生命周期机制强制中断。
+- [ ] 后台任务在切换业务页面/设置后继续运行，停止/故障可见；需业务预览的任务只能从所属页面开始，通用恢复不可用。
+- [ ] 凭据框每次打开均为空，保存/删除后清空；仅显示“已保存（未验证值）”，错误及日志不包含值；使用合成凭据验收。
+- [ ] ZIP 与文件夹选择器均可取消；更新/回滚/移除提示重启、重新信任和代码/当前数据/外部存储边界；Prepared 可取消，已开始的恢复 journal 不能丢弃。
+- [ ] 关闭等待期间可查看管理状态并重试，不能重新启用或启动新工作；宿主包写入未结束时同样保留锁，Windows 11 多窗口/重复关闭实际交互正常。

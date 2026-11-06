@@ -50,6 +50,8 @@ internal static class NativeSmoke
         Record("Occupied-store startup shows a manager-independent page, blocks Settings/Home navigation and closes safely");
         await window.SmokeVerifyLiveCardThemesAsync();
         Record("Same native host card re-resolved actual theme and fill/stroke across live Light/Dark/Light changes");
+        foreach (var page in new[] { "background", "credentials", "packages" }) await window.SmokeNavigateAsync(page);
+        Record("Initialized Background, Credentials and Package maintenance navigation attached native host pages");
 
         foreach (var id in RunOptions.SampleIds)
         {

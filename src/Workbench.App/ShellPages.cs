@@ -16,7 +16,8 @@ internal sealed partial class MainWindow
         page.Children.Add(Ui.Text("开始使用", 20));
         page.Children.Add(Ui.Text("打开“插件”，审查本地包并明确确认信任后启用。启用后，原生页面和插件设置会出现在左侧导航。"));
         page.Children.Add(Ui.Text("此版本仅含工作摘要和测试用例两个本地演示。Teambition、钉钉、AI 与电脑自动化尚未接入。示例不读取真实业务数据。"));
-        page.Children.Add(Ui.Text("插件与主程序同进程运行；停用会撤销注册并请求停止，但不会卸载程序集。更新或移除插件前请退出工作台。"));
+        page.Children.Add(Ui.Text("后台任务与凭据可在左侧管理。更新、回滚和移除会暂存到下次启动；当前进程不会卸载或替换已加载程序集。"));
+        if (_shutdownPending) page.Children.Add(Ui.Text("关闭仍在等待已知插件工作结束。管理页面仅供查询，请使用窗口上方“重试关闭”。"));
         AddDiagnostics(page);
         return page;
     }
@@ -25,9 +26,9 @@ internal sealed partial class MainWindow
     {
         var page = Ui.Page("插件", "清单发现与本地安装不会运行插件代码。首次启用需要明确的信任确认。");
         var actions = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 12 };
-        var install = Ui.Named(new Button { Content = "从本地文件夹安装" }, "从本地文件夹安装插件包");
+        var install = Ui.Named(new Button { Content = "从本地文件夹安装", IsEnabled = !_shutdownPending }, "从本地文件夹安装插件包");
         install.Click += async (_, _) => await RunAsync(InstallAsync);
-        var refresh = Ui.Named(new Button { Content = "重新发现" }, "重新发现本地插件包");
+        var refresh = Ui.Named(new Button { Content = "重新发现", IsEnabled = !_shutdownPending }, "重新发现本地插件包");
         refresh.Click += async (_, _) => await RunAsync(async () =>
         {
             DetachPluginViews();
@@ -54,11 +55,12 @@ internal sealed partial class MainWindow
                 var id = manifest.Id;
                 var button = Ui.Named(new Button
                 {
-                    Content = package.State == PluginState.Enabled ? "停用" : "启用",
-                    IsEnabled = package.State != PluginState.Invalid
-                }, $"{(package.State == PluginState.Enabled ? "停用" : "启用")} {manifest.Name}");
-                button.Click += async (_, _) => await RunAsync(() => package.State == PluginState.Enabled ? DisableAsync(id) : EnableAsync(package));
+                    Content = package.State == PluginState.Stopping ? "重试停用" : package.State == PluginState.Enabled ? "停用" : "启用",
+                    IsEnabled = !_shutdownPending && package.State != PluginState.Invalid
+                }, $"{(package.State is PluginState.Enabled or PluginState.Stopping ? "停用" : "启用")} {manifest.Name}");
+                button.Click += async (_, _) => await RunAsync(() => package.State is PluginState.Enabled or PluginState.Stopping ? DisableAsync(id) : EnableAsync(package));
                 body.Children.Add(button);
+                AddPackageActions(body, package);
             }
             page.Children.Add(Ui.Card(body));
         }
@@ -70,7 +72,7 @@ internal sealed partial class MainWindow
         var picker = new FolderPicker(AppWindow.Id) { CommitButtonText = "安装此插件包" };
         var folder = await picker.PickSingleFolderAsync();
         if (folder is null) return;
-        var result = await Manager.InstallAsync(folder.Path);
+        var result = await Packages.InstallAsync(folder.Path);
         if (result.Succeeded)
         {
             DetachPluginViews();
@@ -91,7 +93,7 @@ internal sealed partial class MainWindow
             var body = new StackPanel { Spacing = 10 };
             body.Children.Add(Ui.Text(command.Title, 20));
             body.Children.Add(Ui.Text($"{command.PluginId} / {command.Id}\n{command.Description}"));
-            var button = Ui.Named(new Button { Content = "运行" }, $"运行 {command.Title}");
+            var button = Ui.Named(new Button { Content = "运行", IsEnabled = !_shutdownPending }, $"运行 {command.Title}");
             button.Click += async (_, _) => await RunAsync(async () =>
             {
                 var result = await Manager.ExecuteCommandAsync(command.PluginId, command.Id);
@@ -108,7 +110,8 @@ internal sealed partial class MainWindow
     private StackPanel SettingsPage()
     {
         var page = Ui.Page("工作台设置", "主题作用于同一个窗口内的主程序和原生插件控件。");
-        var theme = Ui.Named(new ComboBox { Header = "应用主题", HorizontalAlignment = HorizontalAlignment.Stretch }, "应用主题");
+        page.Children.Add(Ui.Text("Project Workbench 0.2.0 · API 1 · Runtime services 1"));
+        var theme = Ui.Named(new ComboBox { Header = "应用主题", HorizontalAlignment = HorizontalAlignment.Stretch, IsEnabled = !_shutdownPending }, "应用主题");
         theme.Items.Add("跟随系统"); theme.Items.Add("浅色"); theme.Items.Add("深色");
         theme.SelectedIndex = (int)_root.RequestedTheme;
         theme.SelectionChanged += async (_, _) => await RunAsync(async () =>
@@ -145,7 +148,8 @@ internal sealed partial class MainWindow
 
     private void AddDiagnostics(StackPanel page, bool includePackages = true)
     {
-        var messages = Manager.Diagnostics.Select(d => $"[主程序/{d.Code}] {d.Message}");
+        var messages = Manager.Diagnostics.Select(d => $"[主程序/{d.Code}] {d.Message}")
+            .Concat(Packages.Diagnostics.Select(d => $"[包维护/{d.Code}] {d.Message}"));
         if (includePackages) messages = messages.Concat(Manager.Plugins.SelectMany(p => p.Diagnostics.Select(d => $"[{p.Manifest?.Id ?? p.PackagePath}/{d.Code}] {d.Message}")));
         var lines = messages.Distinct().ToArray();
         if (lines.Length == 0) return;

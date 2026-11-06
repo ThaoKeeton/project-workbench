@@ -8,6 +8,8 @@
 
 两个 SDK 的包版本为 `0.2.0`，文件版本为 `0.2.0.0`，程序集版本保持 `1.0.0.0`。旧的 API 1 和 `IPluginContext` 不变。可选扩展 `WorkbenchRuntimeServices.Version == 1` 提供后台任务和声明式凭据存储；使用它的插件必须声明 `minimumHostVersion: "0.2.0"`。契约、恢复语义、停止所有权和凭据安全边界见 [运行时服务 v1](runtime-services.md)。
 
+独立 CI 可使用 `scripts/export-sdk.ps1` 生成的源码/NuGet 快照；固定完整提交和 manifest.json 的文件哈希。导出命令、版本约束、源码/包引用与排除 Desktop/凭据的构建步骤见 [独立接入与 SDK 分发](integrations/plugin-contract-v1.md#固定-sdk-分发快照与独立构建)。
+
 ```csharp
 public interface IWorkbenchPlugin
 {

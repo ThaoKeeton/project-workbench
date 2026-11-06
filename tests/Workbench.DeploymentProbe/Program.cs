@@ -5,6 +5,12 @@ using Workbench.TestDependency;
 if (args.Length is not (3 or 4))
     throw new ArgumentException("Expected plugins root, user root, plugin ID and optional probe operation.");
 
+if (args.Length == 4 && args[3].StartsWith("host-runtime-", StringComparison.Ordinal))
+{
+    await HostRuntimeRestartProbe.RunAsync(args);
+    return;
+}
+
 if (args.Length == 4 && args[3] == "package-apply")
 {
     var options = new PluginManagerOptions { PluginsRoot = args[0], UserRoot = args[1] };

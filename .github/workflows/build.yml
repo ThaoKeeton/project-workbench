@@ -52,11 +52,33 @@ jobs:
         id: native_smoke
         shell: pwsh
         run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
+      - name: Native runtime management and actual process restarts
+        shell: pwsh
+        run: ./scripts/native-runtime-probe.ps1 -TimeoutSeconds 180
+      - name: Export independent SDK source and NuGet snapshot
+        shell: pwsh
+        run: ./scripts/export-sdk.ps1
+      - name: Verify SDK snapshot integrity and identity
+        shell: pwsh
+        run: ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-snapshot
       - name: Collect native exception text after smoke failure
         id: native_debug
         if: failure() && steps.native_smoke.outcome == 'failure'
         shell: pwsh
         run: ./scripts/native-debug.ps1 -TimeoutSeconds 240
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: native-runtime-probes
+          path: artifacts/native/runtime-probes/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-sdk-0.2.0
+          path: |
+            artifacts/sdk-snapshot/
+            artifacts/sdk-snapshot.zip
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
