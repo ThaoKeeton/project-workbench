@@ -137,6 +137,8 @@ pwsh ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300
 
 业务探针的 `artifacts/native/business-probes/<phase>.json` 和 `summary.json` 由 CI artifact `independent-business-plugin-probes` 收集，包含实际 PID、**实际 OS exitCode**、来源提交/ZIP SHA256、合成更新 ZIP SHA256、当前文件/备份/停止状态、已观察 worker 的实际 PID/exitCode、实际 WinUI Closed 事件和启动器退出后重新获取租约的证据。缺失报告、非零退出、PID/来源不匹配或超时均失败；已有原生成功报告也不能覆盖进程失败。超时保留已知进程所有权并停止后续阶段，不强杀来证明正常停止。
 
+UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析当前 `ContentControl.Content` 的 TabView，明确选择 Profile/Run 页，并等待当前所选内容加载、测量、附着到同一 XamlRoot 且与可视树一致；连续观察必须属于同一当前 host/content，替换后重新解析。期限保持不变。失败诊断仅含有界的控件类型、AutomationID、加载/布局信息；`<phase>.evidence.json` 另保留失败前已完成检查/观察和已见 worker PID，不替代主报告或把失败变成成功，不输出 Text/Password/配置值。
+
 本轮 Linux 只能执行固定包审计/真实 Store 安装、报告与隔离参数测试及不可运行的 C# reference 编译；Windows 原生执行必须以当前提交的实际 CI 结果为准。原有样例 13 项加管理导航、独立平台 fixture 的 runtime probes 均保留，业务结果单独记录。
 
 覆盖边界：钉钉三个 host secret definitions 已登记，但上游明确推迟实际 host value 消费；UPCAM host secret 只用于程序生成的恢复绑定 key，业务凭据仍使用原 worker DPAPI。本探针没有自动业务授权，不创建恢复 key。UPCAM 上游 workflow 没有发布其不同 ID 的 synthetic acceptance 包，因此正向自动业务提供方执行未验；两插件均未执行发送、真实 Webhook/HTTP、真实 DWS/Teambition/OpenAI、企业权限或真实凭据测试。代码更新/故障版本是明确合成的集成输入，不是上游新发布；UserRoot 备份不包含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live Webhook 去重。Windows11 人工清单仍全部待验。

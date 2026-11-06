@@ -51,7 +51,16 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         else Require(File.Exists(marker) && await File.ReadAllTextAsync(marker) == Marker, "Business restart requires its previously seeded isolated root.");
     }
 
-    public static Task RunAsync(MainWindow window, RunOptions options) => new BusinessPluginSmoke(window, options).RunAsync();
+    public static async Task RunAsync(MainWindow window, RunOptions options)
+    {
+        var probe = new BusinessPluginSmoke(window, options);
+        try { await probe.RunAsync(); }
+        catch (Exception error)
+        {
+            probe.WriteFailureEvidence(error);
+            throw;
+        }
+    }
 
     private async Task RunAsync()
     {
@@ -148,7 +157,12 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
                     limits = new[] { "Synthetic manifest/version and staged metadata fault variants are integration inputs, not publisher releases.", "UPCAM positive automatic provider delivery is unexecuted: upstream does not publish its distinct acceptance-ID binary.", "Backups cover host UserRoot only; external canonical state/DWS profiles and arbitrary schema downgrade are not covered.", "Windows11 manual keyboard/theme/DPI/accessibility acceptance remains unexecuted." },
                     startupStages = options.StartupStages, completedUtc = DateTimeOffset.UtcNow });
             }
-            catch (Exception error) { Environment.ExitCode = 1; options.WriteFailure("business-real-close-verification", error); }
+            catch (Exception error)
+            {
+                Environment.ExitCode = 1;
+                WriteFailureEvidence(error);
+                options.WriteFailure("business-real-close-verification", error);
+            }
             finally { foreach (var process in _workers.Values) process.Dispose(); }
         };
         var handle = WinRT.Interop.WindowNative.GetWindowHandle(window);
@@ -255,6 +269,8 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         Require(_workers.Count > 0, "Production UPCAM native view did not start its actual owned worker.");
         if (full)
         {
+            await WaitForUpcamViewAsync(settings, "settings-tabs", 0,
+                content => TryById<Button>(content, "default-profile") is { IsLoaded: true, IsEnabled: true });
             Invoke(ById<Button>(settings, "default-profile"));
             await WaitUntilAsync(() => Find<TextBlock>(settings, "UPCAM operation result").Text.Contains("bind-profile · succeeded"));
             await UpcamReadyAsync(settings);
@@ -265,16 +281,16 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         await UpcamReadyAsync(page);
         Require((await Manager.ExecuteCommandAsync(Upcam, "preview-sample")).Succeeded, "Actual production worker/Core fictional sample failed.");
         // The vendor rebuilds tab bodies on worker results. Always re-resolve controls after the operation.
-        ById<TabView>(page, "digest-tabs").SelectedIndex = 1;
-        await WaitUntilAsync(() => Descendants<TextBox>(page).Any(e => AutomationProperties.GetAutomationId(e) == "diagnostic-output" && e.Text.Length > 50));
+        await WaitForUpcamViewAsync(page, "digest-tabs", 1,
+            content => TryById<TextBox>(content, "diagnostic-output") is { IsLoaded: true } output && output.Text.Length > 50);
         var characters = ById<TextBox>(page, "diagnostic-output").Text.Length;
         var workerIds = CaptureWorkers();
         Require(workerIds.Length > 0, "Sample preview did not use the real production worker.");
         await window.SmokeNavigateAsync("home");
         page = await window.SmokeNavigateAsync("view", Upcam, "digest");
         await UpcamReadyAsync(page);
-        ById<TabView>(page, "digest-tabs").SelectedIndex = 1;
-        await WaitUntilAsync(() => Descendants<TextBox>(page).Any(e => AutomationProperties.GetAutomationId(e) == "diagnostic-output"));
+        await WaitForUpcamViewAsync(page, "digest-tabs", 1,
+            content => TryById<TextBox>(content, "diagnostic-output") is { IsLoaded: true });
         Require(ById<TextBox>(page, "diagnostic-output").Text.Length == characters && CaptureWorkers().SequenceEqual(workerIds), "Page recreation lost real preview output or duplicated workers.");
         if (full)
         {
@@ -474,7 +490,56 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         && page.GetProperty("Ready").GetBoolean() && !page.GetProperty("Busy").GetBoolean());
     private Task DingActionAsync(string action, Func<bool> rendered) => WaitUntilAsync(() => DingObservation().GetProperty("Page") is var page && page.GetProperty("Ready").GetBoolean()
         && page.GetProperty("LastAction").GetString() == action && page.GetProperty("Outcome").GetString() == "completed" && !page.GetProperty("Busy").GetBoolean() && rendered());
-    private static Task UpcamReadyAsync(FrameworkElement page) => WaitUntilAsync(() => Find<TextBlock>(page, "UPCAM backend status").Text == "Ready · local profile", seconds: 60);
+    private static Task UpcamReadyAsync(FrameworkElement page) => WaitForUpcamViewAsync(page,
+        AutomationProperties.GetAutomationId(page) == "settings-page" ? "settings-tabs" : "digest-tabs", seconds: 60);
+
+    private static async Task WaitForUpcamViewAsync(FrameworkElement page, string tabId, int? selectedIndex = null,
+        Func<FrameworkElement, bool>? contentReady = null, int seconds = 20)
+    {
+        TabView? selectionTarget = null;
+        TabView? previousHost = null;
+        FrameworkElement? previousContent = null;
+        try
+        {
+            await WaitUntilAsync(() =>
+            {
+                page.UpdateLayout();
+                var tabs = CurrentLogicalTabs(page, tabId);
+                if (tabs is not null && selectedIndex is int index && !ReferenceEquals(tabs, selectionTarget))
+                {
+                    Require(index >= 0 && index < tabs.TabItems.Count, "Required UPCAM native tab is absent.");
+                    tabs.SelectedIndex = index;
+                    selectionTarget = tabs;
+                }
+                tabs?.ApplyTemplate();
+                page.UpdateLayout();
+                var content = (tabs?.SelectedItem as TabViewItem)?.Content as FrameworkElement;
+                var ready = TryById<TextBlock>(page, "plugin-status")?.Text == "Ready · local profile"
+                    && page.IsLoaded && page.XamlRoot is not null && tabs is { IsLoaded: true, ActualWidth: > 0, ActualHeight: > 0 }
+                    && content is { IsLoaded: true, ActualWidth: > 0, ActualHeight: > 0 }
+                    && ReferenceEquals(CurrentLogicalTabs(page, tabId), tabs) && ReferenceEquals(TryById<TabView>(page, tabId), tabs)
+                    && ReferenceEquals(tabs.XamlRoot, page.XamlRoot) && ReferenceEquals(content.XamlRoot, page.XamlRoot)
+                    && Descendants<FrameworkElement>(tabs).Any(element => ReferenceEquals(element, content))
+                    && (selectedIndex is null || tabs.SelectedIndex == selectedIndex) && (contentReady?.Invoke(content) ?? true);
+                var stable = ready && ReferenceEquals(tabs, previousHost) && ReferenceEquals(content, previousContent);
+                previousHost = ready ? tabs : null;
+                previousContent = ready ? content : null;
+                return stable;
+            }, seconds);
+        }
+        catch (TimeoutException error)
+        {
+            throw new InvalidOperationException($"UPCAM current native tab did not become attached, realized and stable: {tabId}. {ControlMetadata(page)}", error);
+        }
+    }
+
+    private static TabView? CurrentLogicalTabs(DependencyObject page, string tabId)
+    {
+        // Render can replace Content while its visual predecessor is still present. Resolve the current owner first.
+        var hosts = Descendants<ContentControl>(page).Select(owner => owner.Content).OfType<TabView>()
+            .Where(tabs => AutomationProperties.GetAutomationId(tabs) == tabId).Distinct<TabView>(ReferenceEqualityComparer.Instance).ToArray();
+        return hosts.Length == 1 ? hosts[0] : null;
+    }
     private object DingTarget() => ((WinUiView)Manager.Contributions.Views.Single(v => v.PluginId == Ding && v.View.Id == "workspace").View).CreateView.Target ?? throw new InvalidOperationException("Actual DingTalk diagnostic target unavailable.");
     private JsonElement DingObservation() => JsonDocument.Parse((string)_ding!.GetType().GetProperty("ObservationJson")!.GetValue(_ding)!).RootElement.Clone();
     private Task DingTask(string property) => (Task)_ding!.GetType().GetProperty(property)!.GetValue(_ding)!;
@@ -582,10 +647,50 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
             provenance = _inputs, checks = _checks, observations = _observations, startupStages = options.StartupStages });
     }
 
+    private void WriteFailureEvidence(Exception error)
+    {
+        if (options.ReportPath is null) return;
+        try
+        {
+            var evidence = new { succeeded = false, probe = options.BusinessProbe, processId = Environment.ProcessId, userRoot = options.UserRoot,
+                provenance = _inputs, checks = _checks, observations = _observations, observedWorkerProcessIds = _workers.Keys.ToArray(),
+                errorType = error.GetType().Name, errorHResult = $"0x{unchecked((uint)error.HResult):X8}", startupStages = options.StartupStages };
+            File.WriteAllText(Path.ChangeExtension(options.ReportPath, ".evidence.json"), JsonSerializer.Serialize(evidence,
+                new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        }
+        catch { /* Supplemental evidence must not replace the original failing verdict or exception. */ }
+    }
+
     private static string Package(Input input) => Path.Combine(InputsRoot, input.PackageFile);
     private static string UpdatedVersion(Input input, bool fault) => input.PluginId == Ding ? (fault ? "0.3.3" : "0.3.2") : (fault ? "0.1.2" : "0.1.1");
     private static string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
-    private static T ById<T>(DependencyObject root, string id) where T : DependencyObject => Descendants<T>(root).Single(e => AutomationProperties.GetAutomationId(e) == id);
+    private static T? TryById<T>(DependencyObject root, string id) where T : DependencyObject
+    {
+        var matches = Descendants<T>(root).Where(element => AutomationProperties.GetAutomationId(element) == id).ToArray();
+        return matches.Length == 1 ? matches[0] : null;
+    }
+    private static T ById<T>(DependencyObject root, string id) where T : DependencyObject => TryById<T>(root, id)
+        ?? throw new InvalidOperationException($"Required native control is absent or ambiguous: {id}/{typeof(T).Name}. {ControlMetadata(root)}");
+
+    private static string ControlMetadata(DependencyObject root)
+    {
+        // IDs, types and layout/loading only. Never read Text, Name, Header, Password or provider/profile values.
+        static string Id(DependencyObject element)
+        {
+            var id = AutomationProperties.GetAutomationId(element);
+            return id.Length is > 0 and <= 80 && id.All(c => c is >= 'a' and <= 'z' or >= '0' and <= '9' or '-' or '_') ? id : "<other>";
+        }
+        var elements = Descendants<DependencyObject>(root).ToArray();
+        var counts = elements.GroupBy(element => (Id: Id(element), Type: element.GetType().Name))
+            .OrderBy(group => group.Key.Id, StringComparer.Ordinal).ThenBy(group => group.Key.Type, StringComparer.Ordinal)
+            .Take(80).Select(group => $"{group.Key.Id}/{group.Key.Type}={group.Count()}");
+        var logical = elements.OfType<ContentControl>().Select(owner => owner.Content).OfType<TabView>().Select(tabs =>
+        {
+            var content = (tabs.SelectedItem as TabViewItem)?.Content as FrameworkElement;
+            return $"{Id(tabs)}/TabView[loaded={tabs.IsLoaded},index={tabs.SelectedIndex},content={content?.GetType().Name ?? "none"},loaded={content?.IsLoaded == true},measured={content is { ActualWidth: > 0, ActualHeight: > 0 }}]";
+        }).Distinct(StringComparer.Ordinal).Take(12);
+        return $"Control metadata: {string.Join(", ", counts)}; logical tabs: {string.Join(", ", logical)}.";
+    }
     private static void Invoke(Button button)
     {
         Require(button.IsLoaded && button.XamlRoot is not null && button.IsEnabled, "A native action target was detached or disabled.");
