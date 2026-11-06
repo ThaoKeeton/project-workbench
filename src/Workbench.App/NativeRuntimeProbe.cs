@@ -30,18 +30,32 @@ internal static class NativeRuntimeProbe
     public static async Task RunAsync(MainWindow window, RunOptions options)
     {
         List<string> checks = [];
+        var evidence = new NativeProbeEvidence(options.RuntimeProbe, checks);
         void Record(string check)
         {
             checks.Add(check);
             options.WriteReport(new { succeeded = false, stage = options.RuntimeProbe, userRoot = options.UserRoot, checks, startupStages = options.StartupStages });
         }
-        window.AssertUiThread();
-        if (options.RuntimeProbe == "management") await NativeManagementProbe.RunAsync(window, options, Record);
-        else await NativeRestartProbe.RunAsync(window, options, Record);
-        await window.SmokeStopAsync();
-        options.WriteReport(new { succeeded = true, stage = "completed", probe = options.RuntimeProbe, userRoot = options.UserRoot,
-            processId = Environment.ProcessId, checks, startupStages = options.StartupStages, completedUtc = DateTimeOffset.UtcNow });
-        await window.FinishSmokeAsync();
+        await evidence.RunAsync(options.ReportPath, async () =>
+        {
+            evidence.At(NativeProbeCheckpoint.UiThread);
+            window.AssertUiThread();
+            if (options.RuntimeProbe == "management")
+            {
+                evidence.At(NativeProbeCheckpoint.Management);
+                await NativeManagementProbe.RunAsync(window, options, Record);
+            }
+            else await NativeRestartProbe.RunAsync(window, options, Record, evidence);
+            evidence.At(NativeProbeCheckpoint.FinalStop);
+            await window.SmokeStopAsync();
+            evidence.At(NativeProbeCheckpoint.FinalStopCompleted);
+            evidence.At(NativeProbeCheckpoint.FinalReport);
+            options.WriteReport(new { succeeded = true, stage = "completed", probe = options.RuntimeProbe, userRoot = options.UserRoot,
+                processId = Environment.ProcessId, checks, startupStages = options.StartupStages, completedUtc = DateTimeOffset.UtcNow });
+            evidence.At(NativeProbeCheckpoint.FinalClose);
+            await window.FinishSmokeAsync();
+            evidence.At(NativeProbeCheckpoint.Completed);
+        });
     }
 
     internal static void Require(bool condition, string message)
