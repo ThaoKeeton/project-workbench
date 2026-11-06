@@ -75,3 +75,13 @@ single host owns the user store. It does not watch files continuously, lock out
 other processes, or protect against trusted code modifying files concurrently.
 Uncooperative plugin code can block or crash the host. Native UI creation,
 thread dispatch and view disposal belong to the host/UI SDK.
+
+## Plugin data files
+
+`IPluginContext.DataDirectory` is created during activation under
+`<UserRoot>/data/<plugin-id>` with the same containment/reparse-point checks as
+other Core storage. Use it for local drafts and exports rather than deriving a
+real user path; isolated hosts and native smoke supply their own UserRoot. This
+is a storage convention, not a filesystem sandbox. The native host holds an
+exclusive user-root file lease for the manager lifetime because the JSON stores
+assume a single owning host process.

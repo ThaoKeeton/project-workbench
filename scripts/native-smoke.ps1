@@ -3,6 +3,7 @@ param([ValidateRange(10, 600)][int]$TimeoutSeconds = 120)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw 'Native smoke requires a real Windows WinUI runtime.' }
+Import-Module (Join-Path $PSScriptRoot 'NativeSmokeReport.psm1') -Force
 $repo = Split-Path $PSScriptRoot -Parent
 $app = Join-Path $repo 'artifacts/native/app/Workbench.App.exe'
 $report = Join-Path $repo 'artifacts/native/native-smoke.json'
@@ -25,10 +26,7 @@ try {
 catch {
     # Pre-Main module-initializer/WinUI failures may prevent the executable from writing JSON.
     $reason = $_.Exception.Message
-    if (-not (Test-Path $report)) {
-        @{ succeeded = $false; stage = 'native-process-start-or-timeout'; error = $reason; completedUtc = [DateTimeOffset]::UtcNow } |
-            ConvertTo-Json | Set-Content $report -Encoding utf8
-    }
+    Write-NativeSmokeFailure -ReportPath $report -Reason $reason
     Write-Error $reason
     exit 1
 }

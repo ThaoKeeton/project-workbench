@@ -2,7 +2,7 @@ name: Build and native verification
 on:
   pull_request:
   push:
-    branches: [main]
+    branches: [main, feat/native-plugin-workbench]
   workflow_dispatch:
 permissions:
   contents: read
@@ -15,6 +15,9 @@ jobs:
       - uses: actions/setup-dotnet@v6.1.0
         with:
           global-json-file: global.json
+      - name: Smoke report filesystem regressions
+        shell: pwsh
+        run: ./tests/scripts/NativeSmokeReport.Tests.ps1
       - name: Core runtime and real filesystem tests
         run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-linux.trx" --results-directory artifacts/tests
       - uses: actions/upload-artifact@v7.0.2
@@ -31,6 +34,9 @@ jobs:
       - uses: actions/setup-dotnet@v6.1.0
         with:
           global-json-file: global.json
+      - name: Smoke report filesystem regressions
+        shell: pwsh
+        run: ./tests/scripts/NativeSmokeReport.Tests.ps1
       - name: Core runtime and Windows filesystem tests
         run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-windows.trx" --results-directory artifacts/tests
       - name: Publish native host and independent plugins
