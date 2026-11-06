@@ -34,7 +34,7 @@ public enum PluginDiagnosticCode
     InvalidManifest, InvalidPackage, IncompatibleApi, IncompatibleHost, MissingAssembly,
     DuplicatePluginId, Untrusted, PackageChanged, LoadFailed, InitializationFailed,
     StopFailed, CommandFailed, SettingsCorrupt, StateCorrupt, StatePersistenceFailed, InstallationFailed,
-    StopTimedOut, BackgroundTaskFailed, RuntimeStateCorrupt, RuntimeStatePersistenceFailed, SecretStorageFailed
+    StopTimedOut, BackgroundTaskFailed, RuntimeStateCorrupt, RuntimeStatePersistenceFailed, SecretStorageFailed, PackageMaintenanceFailed, PackageMaintenancePending
 }
 
 public sealed record PluginDiagnostic(PluginDiagnosticCode Code, string Message);

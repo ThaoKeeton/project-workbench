@@ -16,6 +16,7 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
         : base($"Workbench:{package.Manifest!.Id}:{Guid.NewGuid():N}", isCollectible: false)
     {
         _packageRoot = package.Path;
+        LoadedPackageRegistry.RecordLoaded(_packageRoot);
         _resolver = new AssemblyDependencyResolver(FileSystemGuard.ContainedPath(package.Path, package.Manifest.EntryAssembly));
         foreach (var assembly in shared.Prepend(typeof(IWorkbenchPlugin).Assembly))
             _shared.Add(assembly.GetName().Name!, assembly);

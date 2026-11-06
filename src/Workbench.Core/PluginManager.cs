@@ -42,11 +42,11 @@ public sealed class PluginManager : IAsyncDisposable
         if (_sharedAssemblyNames.Any(n => string.IsNullOrWhiteSpace(n) || n.Contains('/') || n.Contains('\\') ||
             n.Contains(',') || n.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)))
             throw new ArgumentException("Shared assembly names must be simple assembly names, without a path or extension.", nameof(options));
-        _pluginsRoot = Path.GetFullPath(options.PluginsRoot);
-        _userRoot = Path.GetFullPath(options.UserRoot);
+        _pluginsRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.PluginsRoot));
+        _userRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.UserRoot));
         _stateStore = new(_userRoot);
         _runtimeState = runtimeState ?? new(_userRoot);
-        _discoveryRoots = new[] { _pluginsRoot }.Concat(options.AdditionalDiscoveryRoots.Select(Path.GetFullPath))
+        _discoveryRoots = new[] { _pluginsRoot }.Concat(options.AdditionalDiscoveryRoots.Select(root => Path.TrimEndingDirectorySeparator(Path.GetFullPath(root))))
             .Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
         FileSystemGuard.RejectLinks(_pluginsRoot);
         FileSystemGuard.RejectLinks(_userRoot);
@@ -130,6 +130,13 @@ public sealed class PluginManager : IAsyncDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            foreach (var root in _discoveryRoots)
+            {
+                var packageGate = LoadedPackageRegistry.Gate(root);
+                await packageGate.WaitAsync(cancellationToken);
+                try { LoadedPackageRegistry.SealForDiscovery(root); }
+                finally { packageGate.Release(); }
+            }
             await _stateStore.LoadAsync(cancellationToken);
             List<Entry> entries = [];
             var previous = Volatile.Read(ref _entries);
@@ -140,10 +147,15 @@ public sealed class PluginManager : IAsyncDisposable
                     continue;
                 foreach (var path in Directory.EnumerateDirectories(root).Order(StringComparer.Ordinal))
                 {
+                    if (root.Equals(_pluginsRoot, StringComparison.OrdinalIgnoreCase) &&
+                        Path.GetFileName(path).Equals(PackageJournal.DirectoryName, StringComparison.Ordinal)) continue;
                     var package = await PackageValidator.ValidateAsync(path, _options.HostVersion, cancellationToken);
                     var existing = previous.SingleOrDefault(e => e.Package.Path == package.Path);
                     if (existing is not null && existing.Package.Fingerprint == package.Fingerprint && package.IsValid && existing.Snapshot.State != PluginState.Invalid)
+                    {
+                        RefreshUnownedApproval(existing);
                         entries.Add(existing);
+                    }
                     else if (existing is not null && existing.Snapshot.IsLoaded)
                     {
                         MarkPackageChanged(existing);
@@ -161,6 +173,15 @@ public sealed class PluginManager : IAsyncDisposable
             {
                 MarkPackageChanged(missing);
                 entries.Add(missing);
+            }
+            foreach (var entry in entries.Where(entry => entry.Package.IsValid && entry.Context is null && entry.Instance is null))
+            {
+                if (await PackageJournal.BlocksActivationAsync(Path.GetDirectoryName(entry.Package.Path)!, entry.Package.Manifest!.Id, cancellationToken))
+                {
+                    entry.Update(status => status with { State = PluginState.Invalid, IsTrusted = false, DesiredEnabled = false });
+                    entry.AddDiagnostic(new(PluginDiagnosticCode.PackageMaintenancePending,
+                        "Package maintenance has not committed; finish recovery at startup before activation."));
+                }
             }
             foreach (var group in entries.Where(e => e.Package.Manifest is not null).GroupBy(e => e.Package.Manifest!.Id, StringComparer.Ordinal))
             {
@@ -187,13 +208,25 @@ public sealed class PluginManager : IAsyncDisposable
         ObjectDisposedException.ThrowIf(_disposed, this);
         await _gate.WaitAsync(cancellationToken);
         string? staging = null;
+        var packageGate = LoadedPackageRegistry.Gate(_pluginsRoot);
+        var packageGateHeld = false;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            await packageGate.WaitAsync(cancellationToken);
+            packageGateHeld = true;
+            PackageArchive.CheckBounds(PackageValidator.Inventory(Path.GetFullPath(packageDirectory)),
+                PackageArchive.MaximumFiles, PackageArchive.MaximumFileBytes, PackageArchive.MaximumTotalBytes);
             var package = await PackageValidator.ValidateAsync(packageDirectory, _options.HostVersion, cancellationToken);
             if (!package.IsValid)
                 return new(false, string.Join(" ", package.Diagnostics.Select(d => d.Message)));
             var id = package.Manifest!.Id;
+            var journal = new PackageJournal(_pluginsRoot);
+            if (File.Exists(journal.Root) || File.Exists(journal.PendingRoot))
+                return new(false, "Package maintenance ownership cannot be read safely.");
+            var pendingPath = journal.PendingPath(id);
+            if (File.Exists(pendingPath) || Directory.Exists(pendingPath))
+                return new(false, "This plugin has pending package maintenance.");
             if (Volatile.Read(ref _entries).Any(e => e.Package.Manifest?.Id == id && e.Snapshot.IsLoaded))
                 return new(false, $"Plugin '{id}' has already been loaded. Exit and restart before changing or replacing its package.");
             // Inspect disk as well as the current catalog: installation never needs a
@@ -205,32 +238,30 @@ public sealed class PluginManager : IAsyncDisposable
                     continue;
                 foreach (var path in Directory.EnumerateDirectories(root))
                 {
+                    if (root.Equals(_pluginsRoot, StringComparison.OrdinalIgnoreCase) &&
+                        Path.GetFileName(path).Equals(PackageJournal.DirectoryName, StringComparison.Ordinal)) continue;
                     var existing = await PackageValidator.ValidateAsync(path, _options.HostVersion, cancellationToken);
                     if (existing.Manifest?.Id == id)
                         return new(false, $"Plugin '{id}' already exists. Updates/removal require exit and restart; packages are never replaced.");
                 }
             }
             var target = FileSystemGuard.ContainedPath(_pluginsRoot, id);
+            if (LoadedPackageRegistry.WasLoaded(target))
+                return new(false, "The installation path was loaded in this process; restart before replacing it.");
             if (Directory.Exists(target) || File.Exists(target))
                 return new(false, $"Installation target '{target}' already exists; replacement is not supported.");
             staging = FileSystemGuard.ContainedPath(_pluginsRoot, $".install-{Guid.NewGuid():N}");
             Directory.CreateDirectory(staging);
-            foreach (var file in package.Files)
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                FileSystemGuard.EnsureRegularFile(file.FullPath);
-                var destination = FileSystemGuard.ContainedPath(staging, file.RelativePath);
-                Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
-                await using var source = new FileStream(file.FullPath, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
-                await using var output = new FileStream(destination, FileMode.CreateNew, FileAccess.Write, FileShare.None, 81920, useAsync: true);
-                await source.CopyToAsync(output, cancellationToken);
-            }
+            await PackageArchive.CopyFilesAsync(package.Files, staging, PackageArchive.MaximumFiles,
+                PackageArchive.MaximumFileBytes, PackageArchive.MaximumTotalBytes, cancellationToken);
             // Validate the copy again before making it visible, including its hash.
             var copied = await PackageValidator.ValidateAsync(staging, _options.HostVersion, cancellationToken);
             if (!copied.IsValid || copied.Fingerprint != package.Fingerprint)
                 return new(false, "The package changed while it was being installed; the staged copy was rejected.");
             cancellationToken.ThrowIfCancellationRequested();
-            Directory.Move(staging, target);
+            await _runtimeState.ClearAsync(id, removeConsent: true, _ => { }, cancellationToken);
+            await _stateStore.SaveAsync(id, enabled: false, fingerprint: null, cancellationToken);
+            LoadedPackageRegistry.MoveUnloadedDirectory(staging, target);
             staging = null;
             return new(true, $"Installed '{id}'. It is disabled and requires explicit trust before activation.");
         }
@@ -245,7 +276,11 @@ public sealed class PluginManager : IAsyncDisposable
                 if (staging is not null && Directory.Exists(staging))
                     Directory.Delete(staging, recursive: true);
             }
-            finally { _gate.Release(); }
+            finally
+            {
+                if (packageGateHeld) packageGate.Release();
+                _gate.Release();
+            }
         }
     }
 
@@ -284,6 +319,10 @@ public sealed class PluginManager : IAsyncDisposable
         var entry = FindEntry(pluginId);
         if (entry is null || entry.Snapshot.State == PluginState.Invalid)
             return new(false, $"Plugin '{pluginId}' is absent, invalid or ambiguous.");
+        await _stateStore.LoadAsync(cancellationToken);
+        RefreshUnownedApproval(entry);
+        if (await PackageJournal.BlocksActivationAsync(Path.GetDirectoryName(entry.Package.Path)!, pluginId, cancellationToken))
+            return new(false, "Package maintenance has not committed; startup recovery is required.");
         if (entry.Snapshot.State == PluginState.Enabled)
             return new(true, $"Plugin '{pluginId}' is already enabled.");
         // Rediscovery may invalidate catalog metadata, but it must not execute
@@ -545,6 +584,16 @@ public sealed class PluginManager : IAsyncDisposable
         entry.Update(s => s with { State = s.HasPendingStop ? PluginState.Stopping : PluginState.Failed, IsTrusted = false, DesiredEnabled = false });
         entry.AddDiagnostic(new(PluginDiagnosticCode.PackageChanged,
             "Package contents changed or disappeared. Trust was revoked; loaded assemblies require exit and restart before replacement."));
+    }
+
+    private void RefreshUnownedApproval(Entry entry)
+    {
+        // A separate package-store instance can revoke approval even when a
+        // reinstall returns identical bytes. Refresh only unowned metadata:
+        // discovery never stops or invalidates a retained live runtime here.
+        if (entry.Context is not null || entry.Instance is not null || entry.PackageInvalidationPending) return;
+        entry.Update(status => status with { IsTrusted = false, DesiredEnabled = false });
+        ApplySavedState(entry);
     }
 
     private void ApplySavedState(Entry entry)

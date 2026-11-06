@@ -3,7 +3,27 @@ using Workbench.Core;
 using Workbench.TestDependency;
 
 if (args.Length is not (3 or 4))
-    throw new ArgumentException("Expected plugins root, user root, plugin ID and optional synthetic secret operation.");
+    throw new ArgumentException("Expected plugins root, user root, plugin ID and optional probe operation.");
+
+if (args.Length == 4 && args[3] == "package-apply")
+{
+    var options = new PluginManagerOptions { PluginsRoot = args[0], UserRoot = args[1] };
+    var packages = new PluginPackageStore(options);
+    var results = await packages.ApplyPendingAsync();
+    await using var restarted = new PluginManager(options);
+    var snapshot = (await restarted.DiscoverAsync()).Single(plugin => plugin.Manifest?.Id == args[2]);
+    await restarted.RestoreEnabledAsync();
+    var restored = restarted.Plugins.Single(plugin => plugin.Manifest?.Id == args[2]);
+    Console.WriteLine(JsonSerializer.Serialize(new
+    {
+        Applied = results.Count == 1 && results[0].Succeeded,
+        Trusted = snapshot.IsTrusted,
+        snapshot.DesiredEnabled,
+        Loaded = restored.IsLoaded,
+        Version = snapshot.Manifest!.Version
+    }));
+    return;
+}
 
 var hostMessage = DependencyProbe.GetMessage();
 await using var manager = new PluginManager(new PluginManagerOptions

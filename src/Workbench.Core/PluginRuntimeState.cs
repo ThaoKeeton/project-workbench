@@ -11,9 +11,10 @@ internal sealed record RuntimeStateDocument(int Version, Dictionary<string, Save
 internal sealed class PluginRuntimeState(string userRoot,
     Func<string, RuntimeStateDocument, CancellationToken, Task>? write = null)
 {
-    private readonly string _path = Path.Combine(userRoot, "background-tasks.json");
-    private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly string _path = Path.Combine(Path.GetFullPath(userRoot), "background-tasks.json");
+    private readonly SemaphoreSlim _gate = PluginStateStore.GateForPath(Path.Combine(Path.GetFullPath(userRoot), "background-tasks.json"));
     private Dictionary<string, SavedRuntimePlugin>? _plugins;
+    private bool _readFailed;
     private static readonly JsonSerializerOptions ReadOptions = new(AtomicJsonFile.Options)
     {
         UnmappedMemberHandling = JsonUnmappedMemberHandling.Disallow
@@ -65,9 +66,9 @@ internal sealed class PluginRuntimeState(string userRoot,
         try
         {
             await LoadAsync(diagnostic, cancellationToken);
-            if (!_plugins!.TryGetValue(pluginId, out var plugin)) return;
+            if (!_plugins!.TryGetValue(pluginId, out var plugin) && !_readFailed) return;
             var updated = new Dictionary<string, SavedRuntimePlugin>(_plugins, StringComparer.Ordinal);
-            if (removeConsent) updated.Remove(pluginId);
+            if (removeConsent || plugin is null) updated.Remove(pluginId);
             else updated[pluginId] = plugin with
             {
                 Tasks = plugin.Tasks.ToDictionary(pair => pair.Key, pair => pair.Value with { DesiredRunning = false }, StringComparer.Ordinal)
@@ -87,10 +88,11 @@ internal sealed class PluginRuntimeState(string userRoot,
 
     private async Task LoadAsync(Action<PluginDiagnostic> diagnostic, CancellationToken cancellationToken)
     {
-        if (_plugins is not null) return;
+        _readFailed = false;
         try
         {
             FileSystemGuard.RejectLinks(_path);
+            if (Directory.Exists(_path)) throw new IOException("Background task state is not a regular file.");
             if (!File.Exists(_path)) { _plugins = new(StringComparer.Ordinal); return; }
             FileSystemGuard.EnsureRegularFile(_path);
             await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
@@ -111,6 +113,7 @@ internal sealed class PluginRuntimeState(string userRoot,
         }
         catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException or ArgumentException)
         {
+            _readFailed = true;
             _plugins = new(StringComparer.Ordinal);
             diagnostic(new(PluginDiagnosticCode.RuntimeStateCorrupt, "Background task intent could not be read; automatic resume is disabled."));
         }

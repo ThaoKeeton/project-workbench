@@ -149,7 +149,7 @@ internal static partial class PackageValidator
         }
     }
 
-    private static async Task<string> FingerprintAsync(IReadOnlyList<PackageFile> files, CancellationToken cancellationToken)
+    internal static async Task<string> FingerprintAsync(IReadOnlyList<PackageFile> files, CancellationToken cancellationToken)
     {
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         foreach (var file in files)

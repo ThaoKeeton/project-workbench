@@ -84,7 +84,7 @@ public sealed class InstallationTests
         using var disk = new TestDirectory();
         var source = disk.Package("com.example.install", external: true);
         await using (var large = File.Create(Path.Combine(source, "large.bin")))
-            large.SetLength(128 * 1024 * 1024);
+            large.SetLength(48 * 1024 * 1024);
         await using var manager = disk.Manager();
         using var cancel = new CancellationTokenSource();
 
