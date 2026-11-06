@@ -227,7 +227,13 @@ internal sealed class PluginBackgroundTasks(
     private Task BeginStop(Registration task, PluginStopReason reason)
     {
         if (task.Stop is not null) return task.Stop;
-        if (task.Work is null || task.Work.IsCompleted) return Task.CompletedTask;
+        if (task.Work is null || task.Work.IsCompleted)
+        {
+            // Plugin-owned cleanup can retire the delegate before Stop's intent write finishes.
+            // Explicit Stop still reports clean work stopped; preserve any real fault and its timestamp.
+            task.State = task.ErrorCode is null ? PluginBackgroundTaskState.Stopped : PluginBackgroundTaskState.Faulted;
+            return Task.CompletedTask;
+        }
         if (task.Execution!.StopReason == PluginStopReason.None) task.Execution.SetStopReason(reason);
         task.State = PluginBackgroundTaskState.Stopping;
         var cancel = task.Cancellation!.CancelAsync();

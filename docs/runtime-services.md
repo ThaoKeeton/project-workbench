@@ -45,6 +45,14 @@ through later shutdown retries. Task snapshots contain ID, title, state
 desired running intent, start/finish timestamps and a safe error code. Faults are
 observed as `BackgroundTaskFailed`; they do not propagate to UI or retry in a loop.
 
+An explicit task Stop clears desired running intent. If the delegate has already
+completed cleanly, including completion while Stop's intent write was pending,
+the resulting snapshot is `Stopped`; its actual start/finish timestamps are
+retained. A previously faulted execution remains `Faulted` with its safe error
+code and completion time. Stop does not erase a genuine failure. Natural clean
+completion without explicit Stop remains `Completed`. Separate resume preference
+is preserved, but cleared running intent prevents restoration.
+
 The existing three-argument `PluginBackgroundTask` constructor is unchanged.
 Its optional init property `RequiresPluginStart` defaults to false, and the
 snapshot exposes the same flag. Set it true when starting requires a preview or

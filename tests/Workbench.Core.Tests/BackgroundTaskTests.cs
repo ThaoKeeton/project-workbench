@@ -62,6 +62,92 @@ public sealed class BackgroundTaskTests
         Assert.Equal(1, await manager.GetSettings(Id).GetAsync("jobRuns", 0));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Explicit_Stop_reports_Stopped_when_clean_work_finishes_before_stop_admission(bool finishDuringIntentWrite)
+    {
+        using var disk = Package();
+        var writeEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var releaseWrite = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var holdWrite = false;
+        var runtime = new PluginRuntimeState(disk.User, async (path, document, cancellation) =>
+        {
+            if (holdWrite)
+            {
+                writeEntered.TrySetResult();
+                await releaseWrite.Task.WaitAsync(cancellation);
+            }
+            await AtomicJsonFile.WriteAsync(path, document, cancellation);
+        });
+        await using var manager = new PluginManager(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User }, new WindowsSecretProtector(), runtime);
+        await EnableAsync(manager, "synchronous");
+        Assert.True((await manager.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true)).Succeeded);
+        Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
+        await RuntimeTest.WaitAsync(async () => await manager.GetSettings(Id).GetAsync("jobRuns", 0) == 1);
+        var releaseWork = Path.Combine(disk.User, "data", Id, "release-sync");
+        Task<PluginTaskOperationResult>? stop = null;
+        try
+        {
+            if (!finishDuringIntentWrite)
+            {
+                await File.WriteAllTextAsync(releaseWork, "synthetic plugin-owned loop retired before SDK Stop");
+                await RuntimeTest.WaitAsync(() => Task.FromResult(Assert.Single(manager.GetBackgroundTaskSnapshots(Id)).State == PluginBackgroundTaskState.Completed));
+            }
+            holdWrite = true;
+            stop = manager.StopBackgroundTaskAsync(Id, "monitor");
+            await writeEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            if (finishDuringIntentWrite)
+            {
+                await File.WriteAllTextAsync(releaseWork, "synthetic plugin-owned loop retired during SDK intent persistence");
+                await RuntimeTest.WaitAsync(() => Task.FromResult(Assert.Single(manager.GetBackgroundTaskSnapshots(Id)).State == PluginBackgroundTaskState.Completed));
+            }
+            var completed = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+            Assert.Equal(PluginBackgroundTaskState.Completed, completed.State);
+            Assert.True(completed.DesiredRunning);
+            Assert.False(stop.IsCompleted); // Actual atomic intent persistence is still held.
+            releaseWrite.TrySetResult();
+            Assert.True((await stop.WaitAsync(TimeSpan.FromSeconds(5))).Succeeded);
+            var stopped = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+            Assert.Equal(PluginBackgroundTaskState.Stopped, stopped.State);
+            Assert.False(stopped.DesiredRunning);
+            Assert.True(stopped.ResumeOnStartup); // Explicit Stop revokes running intent, not the separate preference.
+            Assert.Null(stopped.ErrorCode);
+            Assert.Equal(completed.StartedAt, stopped.StartedAt);
+            Assert.Equal(completed.FinishedAt, stopped.FinishedAt); // Retain the actual completion timestamp.
+            Assert.Equal(1, await manager.GetSettings(Id).GetAsync("jobRuns", 0));
+            using var saved = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(disk.User, "background-tasks.json")));
+            var intent = saved.RootElement.GetProperty("plugins").GetProperty(Id).GetProperty("tasks").GetProperty("monitor");
+            Assert.False(intent.GetProperty("desiredRunning").GetBoolean());
+            Assert.True(intent.GetProperty("resumeOnStartup").GetBoolean());
+        }
+        finally
+        {
+            holdWrite = false;
+            releaseWrite.TrySetResult();
+            await File.WriteAllTextAsync(releaseWork, "release actual synthetic work during cleanup");
+            if (stop is not null) await stop.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
+    public async Task Explicit_Stop_of_already_faulted_work_preserves_the_genuine_error_and_completion_time()
+    {
+        using var disk = Package();
+        await using var manager = Manager(disk);
+        await EnableAsync(manager, "fault");
+        Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
+        await RuntimeTest.WaitAsync(() => Task.FromResult(Assert.Single(manager.GetBackgroundTaskSnapshots(Id)).State == PluginBackgroundTaskState.Faulted));
+        var failed = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+        Assert.True((await manager.StopBackgroundTaskAsync(Id, "monitor")).Succeeded);
+        var stopped = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+        Assert.Equal(PluginBackgroundTaskState.Faulted, stopped.State);
+        Assert.Equal("BackgroundTaskFailed", stopped.ErrorCode);
+        Assert.Equal(failed.FinishedAt, stopped.FinishedAt);
+        Assert.False(stopped.DesiredRunning);
+        Assert.Single(Assert.Single(manager.Plugins).Diagnostics, diagnostic => diagnostic.Code == PluginDiagnosticCode.BackgroundTaskFailed);
+    }
+
     [Fact]
     public async Task Synchronous_delegate_prefix_does_not_block_the_start_caller()
     {
