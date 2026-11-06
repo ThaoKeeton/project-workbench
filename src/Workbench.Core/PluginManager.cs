@@ -244,6 +244,11 @@ public sealed class PluginManager : IAsyncDisposable
             return new(false, $"Plugin '{pluginId}' is absent, invalid or ambiguous.");
         if (entry.Snapshot.State == PluginState.Enabled)
             return new(true, $"Plugin '{pluginId}' is already enabled.");
+        // Rediscovery may invalidate catalog metadata, but it must not execute
+        // StopAsync or surrender ownership of an existing runtime. Only an
+        // explicit stop can make these references safe to replace.
+        if (entry.Context is not null || entry.Instance is not null)
+            return new(false, $"Plugin '{pluginId}' still owns a live runtime. Disable it or shut down before enabling another instance.");
         var current = await PackageValidator.ValidateAsync(entry.Package.Path, _options.HostVersion, cancellationToken);
         if (!current.IsValid || current.Fingerprint != entry.Package.Fingerprint)
         {

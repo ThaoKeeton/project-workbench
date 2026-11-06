@@ -6,9 +6,7 @@ namespace Workbench.Core;
 
 internal sealed class PluginLoadContext : AssemblyLoadContext
 {
-    private static readonly HashSet<string> FrameworkNames = Directory.EnumerateFiles(
-        Path.GetDirectoryName(typeof(object).Assembly.Location)!, "*.dll")
-        .Select(Path.GetFileNameWithoutExtension).ToHashSet(StringComparer.OrdinalIgnoreCase)!;
+    private static readonly HashSet<string> FrameworkNames = ReadFrameworkNames();
     private readonly string _packageRoot;
     private readonly AssemblyDependencyResolver _resolver;
     private readonly Dictionary<string, Assembly> _shared = new(StringComparer.OrdinalIgnoreCase);
@@ -47,5 +45,18 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
         var contained = FileSystemGuard.ContainedPath(_packageRoot, Path.GetRelativePath(_packageRoot, path));
         FileSystemGuard.EnsureRegularFile(contained);
         return contained;
+    }
+
+    private static HashSet<string> ReadFrameworkNames()
+    {
+        // This catalog comes from the target framework's SDK reference pack,
+        // never from host-private DLLs colocated with a self-contained CoreLib.
+        using var stream = typeof(PluginLoadContext).Assembly.GetManifestResourceStream("Workbench.Core.FrameworkAssemblies")
+            ?? throw new InvalidOperationException("The .NET framework assembly catalog is missing.");
+        using var reader = new StreamReader(stream);
+        var names = reader.ReadToEnd().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        names.Add(typeof(object).Assembly.GetName().Name!);
+        return names;
     }
 }

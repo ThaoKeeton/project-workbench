@@ -294,6 +294,52 @@ public sealed class LifecycleTests
     }
 
     [Fact]
+    public async Task Temporary_duplicate_discovery_cannot_orphan_a_live_runtime_during_reenable()
+    {
+        using var disk = new TestDirectory();
+        disk.Package(Id);
+        using var marker = disk.WatchActivation();
+        await using var manager = disk.Manager();
+        await manager.DiscoverAsync();
+        Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+        var settings = manager.GetSettings(Id);
+        using var request = new CancellationTokenSource();
+        var command = manager.ExecuteCommandAsync(Id, "wait", request.Token);
+        await WaitForSettingAsync(manager, "commandStarted");
+        File.Delete(marker.Path);
+        try
+        {
+            var duplicate = disk.Package(Id, folder: "temporary-duplicate");
+            var ambiguous = await manager.DiscoverAsync();
+            Assert.All(ambiguous, p => Assert.Equal(PluginState.Invalid, p.State));
+            Assert.False(await settings.GetAsync("stopped", false));
+            Assert.False(command.IsCompleted);
+            Directory.Delete(duplicate, recursive: true);
+            await manager.DiscoverAsync();
+            Assert.False(File.Exists(marker.Path));
+            Assert.False(await settings.GetAsync("stopped", false));
+
+            var reenable = await manager.EnableAsync(Id, confirmTrust: true);
+            await manager.ShutdownAsync();
+
+            var completed = await Task.WhenAny(command, Task.Delay(TimeSpan.FromSeconds(1)));
+            Assert.Same(command, completed);
+            Assert.False((await command).Succeeded);
+            Assert.False(reenable.Succeeded, "An owned live runtime must be stopped before a replacement can be enabled.");
+            Assert.True(await settings.GetAsync("stopped", false));
+            Assert.True(await settings.GetAsync("stopLifetimeCanceled", false));
+            AssertEmpty(manager);
+        }
+        finally
+        {
+            // Keep a buggy/orphaned runtime from leaving this regression's command
+            // alive after the expected RED failure.
+            request.Cancel();
+            await command.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+    }
+
+    [Fact]
     public async Task An_operation_queued_behind_disposal_cannot_install_a_package_after_shutdown()
     {
         using var disk = new TestDirectory();

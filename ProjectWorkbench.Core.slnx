@@ -5,6 +5,8 @@
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj" />
+    <Project Path="tests/Workbench.DeploymentProbe/Workbench.DeploymentProbe.csproj" />
+    <Project Path="tests/Workbench.HostTestDependency/Workbench.HostTestDependency.csproj" />
     <Project Path="tests/Workbench.TestDependency/Workbench.TestDependency.csproj" />
     <Project Path="tests/Workbench.TestPlugin/Workbench.TestPlugin.csproj" />
   </Folder>

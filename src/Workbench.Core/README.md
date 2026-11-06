@@ -30,6 +30,10 @@ JSON-serializable value. Values live in
 `UserRoot/settings/<plugin-id>/settings.json`. Enabled/trusted preferences live in
 `UserRoot/plugin-state.json`. Writes replace an adjacent temporary file atomically.
 
+If rediscovery invalidates a live package, its runtime remains owned for cleanup.
+Scanning does not stop plugin code; re-enable is refused until explicit disable
+or shutdown has stopped that instance.
+
 Each immediate subdirectory of a discovery root is a package containing a
 `plugin.json` like this (all fields required, unknown properties rejected):
 
@@ -55,7 +59,10 @@ regular files and directories; links/reparse points, traversal, Windows device
 names and case-colliding paths are rejected. Local installation stages and
 revalidates a copy before exposing a new ID, and never replaces an existing ID.
 
-`Workbench.Sdk` and .NET framework assemblies share the host identity. The WinUI
+`Workbench.Sdk` and .NET framework assemblies share the host identity. Framework
+names come from the SDK's target-framework reference catalog embedded during the
+Core build, so colocated host-private DLLs in a self-contained deployment do not
+become shared framework assemblies. The WinUI
 host must designate its additional SDK and WinUI/WinRT projection assemblies
 through `SharedAssemblies` (actual host Assembly instances) or
 `SharedAssemblyNames` (simple names resolved in the default load context). Private

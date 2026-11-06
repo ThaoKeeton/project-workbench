@@ -13,11 +13,17 @@
     <ProjectReference Include="../../src/Workbench.Core/Workbench.Core.csproj" />
     <ProjectReference Include="../Workbench.TestDependency/Workbench.TestDependency.csproj" />
     <ProjectReference Include="../Workbench.TestPlugin/Workbench.TestPlugin.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../Workbench.DeploymentProbe/Workbench.DeploymentProbe.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <Target Name="CopyPluginFixture" AfterTargets="Build">
     <ItemGroup>
       <FixtureFiles Include="../Workbench.TestPlugin/bin/$(Configuration)/$(TargetFramework)/Workbench.TestPlugin.dll;../Workbench.TestPlugin/bin/$(Configuration)/$(TargetFramework)/Workbench.TestPlugin.deps.json;../Workbench.TestPlugin/bin/$(Configuration)/$(TargetFramework)/Workbench.TestDependency.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(FixtureFiles)" DestinationFolder="$(OutDir)fixtures" />
+  </Target>
+  <Target Name="PublishDeploymentProbe" AfterTargets="Build">
+    <MSBuild Projects="../Workbench.DeploymentProbe/Workbench.DeploymentProbe.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(TargetDir)deployment-probe/" />
   </Target>
 </Project>
