@@ -216,12 +216,31 @@ public sealed class RuntimeFixturePlugin : IWorkbenchPlugin
         await settings.SetAsync("jobRuns", run);
         await settings.SetAsync("startReason", execution.StartReason.ToString());
         if (_mode == "callback-held")
+        {
+            if (await settings.GetAsync("pauseCallbackRegistration", false))
+            {
+                await settings.SetAsync("callbackRegistrationPaused", true);
+                var cancellationObserved = false;
+                while (!await settings.GetAsync("releaseCallbackRegistration", false))
+                {
+                    if (!cancellationObserved && execution.CancellationToken.IsCancellationRequested)
+                    {
+                        await settings.SetAsync("callbackCancellationObserved", true);
+                        cancellationObserved = true;
+                    }
+                    await Task.Delay(10);
+                }
+            }
+            // Register on an already-canceled token executes this callback inline.
             execution.CancellationToken.Register(() =>
             {
                 settings.SetAsync("jobCallbackStarted", true).GetAwaiter().GetResult();
                 while (!settings.GetAsync("releaseJobCallback", false).GetAwaiter().GetResult()) Thread.Sleep(10);
                 settings.SetAsync("callbackFinalReason", execution.StopReason.ToString()).GetAwaiter().GetResult();
+                settings.SetAsync("jobCallbackFinished", true).GetAwaiter().GetResult();
             });
+            await settings.SetAsync("callbackRegistered", true);
+        }
         if (_mode == "fault") throw new InvalidOperationException("synthetic-secret-never-log");
         if (_mode == "complete") return;
         if (_mode == "synchronous")
@@ -229,12 +248,22 @@ public sealed class RuntimeFixturePlugin : IWorkbenchPlugin
             while (!File.Exists(Path.Combine(_context.DataDirectory, "release-sync"))) Thread.Sleep(10);
             return;
         }
-        try { await Task.Delay(Timeout.Infinite, execution.CancellationToken); }
-        catch (OperationCanceledException)
+        if (_mode == "callback-held")
         {
+            // Independently release the delegate so the test does not depend on
+            // the ordering/scheduling of Task.Delay's own cancellation callback.
+            while (!await settings.GetAsync("releaseCallbackDelegate", false)) await Task.Delay(10);
             await settings.SetAsync("jobStopReason", execution.StopReason.ToString());
-            if (_mode == "held")
-                while (!await settings.GetAsync("releaseJob", false)) await Task.Delay(10);
+        }
+        else
+        {
+            try { await Task.Delay(Timeout.Infinite, execution.CancellationToken); }
+            catch (OperationCanceledException)
+            {
+                await settings.SetAsync("jobStopReason", execution.StopReason.ToString());
+                if (_mode == "held")
+                    while (!await settings.GetAsync("releaseJob", false)) await Task.Delay(10);
+            }
         }
         await settings.SetAsync("jobFinished", true);
         await settings.SetAsync("jobFinalStopReason", execution.StopReason.ToString());

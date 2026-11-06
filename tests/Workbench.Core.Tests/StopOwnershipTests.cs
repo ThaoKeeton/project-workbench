@@ -152,18 +152,29 @@ public sealed class StopOwnershipTests
         await settings.SetAsync("runtimeMode", "callback-held");
         Assert.True((await manager.EnableAsync(runtimeId, confirmTrust: true)).Succeeded);
         await manager.StartBackgroundTaskAsync(runtimeId, "monitor");
-        await RuntimeTest.WaitAsync(async () => await settings.GetAsync("jobRuns", 0) == 1);
         try
         {
-            await Assert.ThrowsAsync<PluginShutdownException>(() => manager.ShutdownAsync());
-            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("jobCallbackStarted", false) && await settings.GetAsync("jobFinished", false));
+            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("callbackRegistered", false));
+            await Assert.ThrowsAsync<PluginShutdownException>(() => manager.ShutdownAsync().WaitAsync(TimeSpan.FromSeconds(1)));
+            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("jobCallbackStarted", false));
+            await settings.SetAsync("releaseCallbackDelegate", true);
+            await RuntimeTest.WaitAsync(() => Task.FromResult(Assert.Single(manager.GetBackgroundTaskSnapshots(runtimeId)).FinishedAt is not null));
+            Assert.True(await settings.GetAsync("jobFinished", false));
+            Assert.False(await settings.GetAsync("jobCallbackFinished", false));
+            var pending = Assert.Single(manager.Plugins);
+            Assert.True(pending.HasRuntime);
+            Assert.True(pending.HasPendingStop);
+            Assert.Equal(PluginBackgroundTaskState.Stopping, Assert.Single(manager.GetBackgroundTaskSnapshots(runtimeId)).State);
             Assert.False((await manager.DisableAsync(runtimeId)).Succeeded);
             await settings.SetAsync("releaseJobCallback", true);
             await RuntimeTest.WaitAsync(() => Task.FromResult(!manager.HasPendingStops));
+            Assert.True(await settings.GetAsync("jobCallbackFinished", false));
             Assert.Equal("PluginDisabled", await settings.GetAsync("callbackFinalReason", ""));
+            Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
         }
         finally
         {
+            await settings.SetAsync("releaseCallbackDelegate", true);
             await settings.SetAsync("releaseJobCallback", true);
             await RuntimeTest.DisposeAsync(manager);
         }
@@ -194,6 +205,51 @@ public sealed class StopOwnershipTests
         finally
         {
             await settings.SetAsync("releaseStop", true);
+            await RuntimeTest.DisposeAsync(manager);
+        }
+    }
+
+    [Fact]
+    public async Task Cancellation_before_callback_registration_keeps_owner_and_reuses_the_bounded_Stop()
+    {
+        using var disk = BackgroundTaskTests.Package();
+        const string runtimeId = "com.example.runtime";
+        var manager = BackgroundTaskTests.Manager(disk, TimeSpan.FromMilliseconds(100));
+        await manager.DiscoverAsync();
+        var settings = manager.GetSettings(runtimeId);
+        await settings.SetAsync("runtimeMode", "callback-held");
+        await settings.SetAsync("pauseCallbackRegistration", true);
+        Assert.True((await manager.EnableAsync(runtimeId, confirmTrust: true)).Succeeded);
+        await manager.StartBackgroundTaskAsync(runtimeId, "monitor");
+        try
+        {
+            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("callbackRegistrationPaused", false));
+            await Assert.ThrowsAsync<PluginShutdownException>(() => manager.ShutdownAsync().WaitAsync(TimeSpan.FromSeconds(1)));
+            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("callbackCancellationObserved", false));
+            await settings.SetAsync("releaseCallbackRegistration", true);
+            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("jobCallbackStarted", false));
+            // The callback is inline in Register, so registration/delegate completion
+            // cannot happen until the callback is released. Ownership must remain.
+            Assert.False(await settings.GetAsync("callbackRegistered", false));
+            Assert.False(await settings.GetAsync("jobFinished", false));
+            Assert.Null(Assert.Single(manager.GetBackgroundTaskSnapshots(runtimeId)).FinishedAt);
+            Assert.True(Assert.Single(manager.Plugins).HasRuntime);
+            Assert.True(manager.HasPendingStops);
+            Assert.False((await manager.DisableAsync(runtimeId).WaitAsync(TimeSpan.FromSeconds(1))).Succeeded);
+            Assert.False((await manager.EnableAsync(runtimeId)).Succeeded);
+            await settings.SetAsync("releaseJobCallback", true);
+            await settings.SetAsync("releaseCallbackDelegate", true);
+            await RuntimeTest.WaitAsync(() => Task.FromResult(!manager.HasPendingStops));
+            Assert.True(await settings.GetAsync("callbackRegistered", false));
+            Assert.True(await settings.GetAsync("jobFinished", false));
+            Assert.Equal("PluginDisabled", await settings.GetAsync("callbackFinalReason", ""));
+            Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+        }
+        finally
+        {
+            await settings.SetAsync("releaseCallbackRegistration", true);
+            await settings.SetAsync("releaseCallbackDelegate", true);
+            await settings.SetAsync("releaseJobCallback", true);
             await RuntimeTest.DisposeAsync(manager);
         }
     }
