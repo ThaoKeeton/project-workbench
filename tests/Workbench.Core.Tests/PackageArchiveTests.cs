@@ -187,17 +187,63 @@ public sealed class PackageArchiveTests
         using var disk = new TestDirectory();
         var source = disk.Package("com.example.archive", external: true);
         for (var i = 0; i < 900; i++) File.WriteAllText(Path.Combine(source, $"asset{i:D4}"), "original");
-        var install = Store(disk).InstallAsync(source);
-        var imports = Path.Combine(disk.Plugins, ".workbench-packages", "imports");
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        while (!Directory.Exists(imports) || !Directory.EnumerateFiles(imports, "*", SearchOption.AllDirectories).Any())
+        var sourceCount = Directory.GetFiles(source).Length;
+        var paused = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var install = ImportWithCheckpointAsync(disk, source, paused, release);
+        try
         {
-            Assert.False(install.IsCompleted, "The test must observe the real staged copy before changing its source.");
-            await Task.Delay(1, deadline.Token);
+            var first = await Task.WhenAny(paused.Task, install).WaitAsync(TimeSpan.FromSeconds(20));
+            Assert.Same(paused.Task, first);
+            Assert.InRange(await paused.Task, 1, sourceCount - 1);
+            Assert.False(install.IsCompleted, "The real copy must remain paused while its source changes.");
+            File.WriteAllText(Path.Combine(source, "added-during-copy"), "changed source");
         }
-        File.WriteAllText(Path.Combine(source, "added-during-copy"), "changed source");
+        finally { release.Set(); }
         Assert.False((await install).Succeeded);
         Assert.False(Directory.Exists(Path.Combine(disk.Plugins, "com.example.archive")));
+    }
+
+    [Fact]
+    public async Task Observing_a_staged_file_does_not_prevent_a_valid_import_from_finishing_before_later_source_changes()
+    {
+        using var disk = new TestDirectory();
+        var source = disk.Package("com.example.archive", external: true);
+        for (var i = 0; i < 900; i++) File.WriteAllText(Path.Combine(source, $"asset{i:D4}"), "original");
+        var paused = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var install = ImportWithCheckpointAsync(disk, source, paused, release);
+        try
+        {
+            Assert.Same(paused.Task, await Task.WhenAny(paused.Task, install).WaitAsync(TimeSpan.FromSeconds(20)));
+            Assert.InRange(await paused.Task, 1, Directory.GetFiles(source).Length - 1);
+            Assert.False(install.IsCompleted);
+        }
+        finally { release.Set(); }
+        // This is a controlled legal interleaving of the old polling fixture:
+        // it saw a stage file, but its writer did not run until import completed.
+        Assert.True((await install).Succeeded);
+        File.WriteAllText(Path.Combine(source, "added-after-copy"), "later source change");
+        var installed = Path.Combine(disk.Plugins, "com.example.archive");
+        Assert.False(File.Exists(Path.Combine(installed, "added-after-copy")));
+        Assert.Equal("original", File.ReadAllText(Path.Combine(installed, "asset0000")));
+    }
+
+    private static Task<PluginOperationResult> ImportWithCheckpointAsync(TestDirectory disk, string source,
+        TaskCompletionSource<int> paused, ManualResetEventSlim release)
+    {
+        var sourceCount = Directory.GetFiles(source).Length;
+        var imports = Path.Combine(disk.Plugins, ".workbench-packages", "imports");
+        return TestDispatcher.RunAsync(() => Store(disk).InstallAsync(source), () =>
+        {
+            if (paused.Task.IsCompleted || !Directory.Exists(imports)) return;
+            var copied = Directory.EnumerateFiles(imports, "*", SearchOption.AllDirectories).Count();
+            if (copied == 0 || copied >= sourceCount) return;
+            // Hold the actual importer dispatcher with only part of its original
+            // file list staged. It cannot finish copying/revalidate/publish until released.
+            paused.TrySetResult(copied);
+            Assert.True(release.Wait(TimeSpan.FromSeconds(20)), "The test did not release its copy checkpoint.");
+        });
     }
 
     internal static PluginPackageStore Store(TestDirectory disk, params string[] bundled) => new(new PluginManagerOptions

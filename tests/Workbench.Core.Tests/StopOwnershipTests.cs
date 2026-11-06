@@ -1,10 +1,13 @@
+using System.Diagnostics;
 using Workbench.Core;
 using Workbench.Sdk;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Workbench.Core.Tests;
 
-public sealed class StopOwnershipTests
+[Collection(BlockingCallbackCollection.Name)]
+public sealed class StopOwnershipTests(ITestOutputHelper output)
 {
     private const string Id = "com.example.fixture";
 
@@ -42,6 +45,7 @@ public sealed class StopOwnershipTests
     [InlineData(true)]
     public async Task Pending_lifetime_callbacks_retain_ownership_across_shutdown_and_dispose_retries(bool dispose)
     {
+        using var workerHeadroom = new CallbackWorkerHeadroom();
         using var disk = new TestDirectory();
         disk.Package(Id, fields: new() { ["entryType"] = "Workbench.TestPlugin.ControlledStopPlugin" });
         var manager = new PluginManager(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User, StopTimeout = TimeSpan.FromMilliseconds(75) });
@@ -51,9 +55,21 @@ public sealed class StopOwnershipTests
         await settings.SetAsync("releaseStop", true);
         Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
         Task CloseAsync() => dispose ? manager.DisposeAsync().AsTask() : manager.ShutdownAsync();
+        async Task CloseWithinBudgetAsync()
+        {
+            var elapsed = Stopwatch.StartNew();
+            var operation = CloseAsync();
+            try { await operation.WaitAsync(TimeSpan.FromSeconds(1)); }
+            finally
+            {
+                ThreadPool.GetAvailableThreads(out var workers, out var io);
+                ThreadPool.GetMinThreads(out var minimumWorkers, out _);
+                output.WriteLine($"Close: elapsedMs={elapsed.ElapsedMilliseconds}, operation={operation.Status}, pending={manager.HasPendingStops}, context={SynchronizationContext.Current?.GetType().FullName}, processors={Environment.ProcessorCount}, threads={ThreadPool.ThreadCount}, minimumWorkers={minimumWorkers}, availableWorkers={workers}, availableIO={io}, queued={ThreadPool.PendingWorkItemCount}");
+            }
+        }
         try
         {
-            await Assert.ThrowsAsync<PluginShutdownException>(() => CloseAsync().WaitAsync(TimeSpan.FromSeconds(1)));
+            await Assert.ThrowsAsync<PluginShutdownException>(CloseWithinBudgetAsync);
             await RuntimeTest.WaitAsync(async () => await settings.GetAsync("callbackStarted", false));
             await RuntimeTest.WaitAsync(async () => await settings.GetAsync("stopCalls", 0) == 1);
             Assert.True(manager.HasPendingStops);
@@ -62,7 +78,7 @@ public sealed class StopOwnershipTests
             Assert.True(pending.HasRuntime);
             Assert.Empty(manager.Contributions.Views);
             Assert.False((await manager.EnableAsync(Id)).Succeeded);
-            await Assert.ThrowsAsync<PluginShutdownException>(() => CloseAsync().WaitAsync(TimeSpan.FromSeconds(1)));
+            await Assert.ThrowsAsync<PluginShutdownException>(CloseWithinBudgetAsync);
             Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
             Assert.False(await settings.GetAsync("callbackFinished", false));
             await settings.SetAsync("releaseCancellation", true);
@@ -144,6 +160,7 @@ public sealed class StopOwnershipTests
     [Fact]
     public async Task Pending_background_cancellation_callback_observes_later_disable_after_delegate_has_completed()
     {
+        using var workerHeadroom = new CallbackWorkerHeadroom();
         using var disk = BackgroundTaskTests.Package();
         const string runtimeId = "com.example.runtime";
         var manager = BackgroundTaskTests.Manager(disk, TimeSpan.FromMilliseconds(100));
@@ -212,6 +229,7 @@ public sealed class StopOwnershipTests
     [Fact]
     public async Task Cancellation_before_callback_registration_keeps_owner_and_reuses_the_bounded_Stop()
     {
+        using var workerHeadroom = new CallbackWorkerHeadroom();
         using var disk = BackgroundTaskTests.Package();
         const string runtimeId = "com.example.runtime";
         var manager = BackgroundTaskTests.Manager(disk, TimeSpan.FromMilliseconds(100));
