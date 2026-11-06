@@ -7,11 +7,15 @@ Import-Module (Join-Path $PSScriptRoot 'NativeSmokeReport.psm1') -Force
 $repo = Split-Path $PSScriptRoot -Parent
 $app = Join-Path $repo 'artifacts/native/app/Workbench.App.exe'
 $report = Join-Path $repo 'artifacts/native/native-smoke.json'
+$stdout = Join-Path $repo 'artifacts/native/native-stdout.log'
+$stderr = Join-Path $repo 'artifacts/native/native-stderr.log'
+$crashEvents = Join-Path $repo 'artifacts/native/native-crash-events.json'
 if (-not (Test-Path $app)) { throw "Build the app first: $app" }
 if (Test-Path $report) { Remove-Item $report -Force }
 $process = $null
+$started = [DateTime]::Now
 try {
-    $process = Start-Process -FilePath $app -ArgumentList @('--smoke-test', '--smoke-report', "`"$report`"") -PassThru
+    $process = Start-Process -FilePath $app -ArgumentList @('--smoke-test', '--smoke-report', "`"$report`"") -PassThru -RedirectStandardOutput $stdout -RedirectStandardError $stderr
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) {
         $process.Kill($true)
         $process.WaitForExit()
@@ -27,6 +31,15 @@ catch {
     # Pre-Main module-initializer/WinUI failures may prevent the executable from writing JSON.
     $reason = $_.Exception.Message
     Write-NativeSmokeFailure -ReportPath $report -Reason $reason
+    try {
+        $events = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; StartTime = $started.AddSeconds(-5) } -ErrorAction Stop |
+            Where-Object { $_.ProviderName -in @('Application Error', 'Windows Error Reporting', '.NET Runtime') -and $_.Message -match 'Workbench\.App' } |
+            Select-Object -First 12 -Property TimeCreated, Id, ProviderName, Message)
+        @{ started = $started; events = $events } | ConvertTo-Json -Depth 8 | Set-Content $crashEvents -Encoding utf8
+    }
+    catch {
+        @{ started = $started; eventReadError = $_.Exception.Message } | ConvertTo-Json | Set-Content $crashEvents -Encoding utf8
+    }
     Write-Error $reason
     exit 1
 }

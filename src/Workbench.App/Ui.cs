@@ -1,11 +1,24 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Markup;
 
 namespace Workbench.App;
 
 internal static class Ui
 {
+    // Fixed host-owned style only. ThemeResource resolves against each card's actual window theme.
+    // Independent plugins remain code-only and do not load external XAML/PRI resources.
+    private static readonly Lazy<Style> CardStyle = new(() => (Style)XamlReader.Load("""
+        <Style xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation" TargetType="Border">
+            <Setter Property="Padding" Value="20" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="BorderThickness" Value="1" />
+            <Setter Property="BorderBrush" Value="{ThemeResource CardStrokeColorDefaultBrush}" />
+            <Setter Property="Background" Value="{ThemeResource CardBackgroundFillColorDefaultBrush}" />
+        </Style>
+        """));
+
     public static TextBlock Text(string text, double size = 14) => new()
     {
         Text = text,
@@ -25,11 +38,7 @@ internal static class Ui
     public static Border Card(UIElement child) => new()
     {
         Child = child,
-        Padding = new Thickness(20),
-        CornerRadius = new CornerRadius(8),
-        BorderThickness = new Thickness(1),
-        BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
-        Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"]
+        Style = CardStyle.Value
     };
 
     public static T Named<T>(T element, string name) where T : DependencyObject

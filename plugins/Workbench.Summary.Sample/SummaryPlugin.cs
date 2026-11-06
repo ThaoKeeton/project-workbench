@@ -61,8 +61,9 @@ public sealed class SummaryPlugin : IWorkbenchPlugin
         var save = Named(new Button { Content = "保存偏好" }, "保存摘要示例偏好");
         save.Click += async (_, _) => await HandleAsync(context, status, async () =>
         {
-            await context.Settings.SetAsync("audience", audience.Text, context.Lifetime);
-            _audience = audience.Text;
+            var value = audience.Text;
+            await context.Settings.SetAsync("audience", value, context.Lifetime);
+            _audience = value;
             status.Text = "偏好已保存。";
         });
         panel.Children.Add(audience); panel.Children.Add(save); panel.Children.Add(status);

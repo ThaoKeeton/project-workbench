@@ -11,19 +11,35 @@ internal sealed class WorkbenchApplication : Application
     public WorkbenchApplication(RunOptions options)
     {
         _options = options;
-        Resources.MergedDictionaries.Add(new XamlControlsResources());
+        _options.TraceStartup("application-constructor-entered");
         UnhandledException += (_, args) =>
         {
             Environment.ExitCode = 1;
-            _options.WriteFailure("unhandled-ui-exception", args.Exception);
+            _options.WriteFailure("unhandled-ui-exception", args.Exception, args.Message);
             // Do not turn an unhandled native/UI failure into a successful smoke result.
         };
+        _options.TraceStartup("adding-xaml-controls-resources");
+        Resources.MergedDictionaries.Add(new XamlControlsResources());
+        _options.TraceStartup("application-resources-ready");
     }
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _window = new MainWindow(_options);
-        _window.Activate();
-        _ = _window.InitializeAsync();
+        try
+        {
+            _options.TraceStartup("launch-callback-entered");
+            _options.TraceStartup("constructing-main-window");
+            _window = new MainWindow(_options);
+            _options.TraceStartup("activating-main-window");
+            _window.Activate();
+            _options.TraceStartup("main-window-activated");
+            _ = _window.InitializeAsync();
+        }
+        catch (Exception error)
+        {
+            Environment.ExitCode = 1;
+            _options.WriteFailure("launch-callback-failed", error);
+            throw;
+        }
     }
 }

@@ -61,7 +61,7 @@ context.RegisterCommand(new PluginCommand("export", "本地导出", async token 
 }));
 ```
 
-主程序在 WinUI UI 线程调用工厂，返回的 `FrameworkElement` 直接附加到同一个窗口。使用代码创建标准控件、继承主题，给可操作控件设置 AutomationProperties.Name，并让布局随窗口尺寸伸缩。v0.1 不加载插件自带 XAML/PRI，不嵌入独立应用窗口，不使用 WebView。
+主程序在 WinUI UI 线程调用工厂，返回的 `FrameworkElement` 直接附加到同一个窗口。使用代码创建标准控件、继承主题，给可操作控件设置 AutomationProperties.Name，并让布局随窗口尺寸伸缩。主程序卡片使用固定的主程序 ThemeResource 样式以跟随各窗口实际主题；这不增加插件资源加载接口。v0.1 不加载插件自带 XAML/PRI，不嵌入独立应用窗口，不使用 WebView。
 
 命令通过 `PluginManager.ExecuteCommandAsync` 运行，令牌链接请求取消与插件 `Lifetime`。命令应返回简洁的可显示结果。异步 UI 事件处理器应捕获异常并显示本地错误，同时尊重 `Lifetime`；不要把未处理的 `async void` 异常抛给主程序。插件创建的后台任务、订阅和资源由插件在停止时清理，不能假定停用会强制终止代码。
 

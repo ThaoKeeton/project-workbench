@@ -71,8 +71,9 @@ public sealed class TestCasesPlugin : IWorkbenchPlugin
             try
             {
                 context.Lifetime.ThrowIfCancellationRequested();
-                await context.Settings.SetAsync("suiteName", name.Text, context.Lifetime);
-                _suiteName = name.Text;
+                var value = name.Text;
+                await context.Settings.SetAsync("suiteName", value, context.Lifetime);
+                _suiteName = value;
                 status.Text = "偏好已保存。";
             }
             catch (OperationCanceledException) { status.Text = "插件已停用，操作已取消。"; }

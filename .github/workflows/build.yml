@@ -60,6 +60,15 @@ jobs:
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
+          name: native-startup-diagnostics
+          path: |
+            artifacts/native/native-stdout.log
+            artifacts/native/native-stderr.log
+            artifacts/native/native-crash-events.json
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
           name: core-windows-results
           path: artifacts/tests
           if-no-files-found: error

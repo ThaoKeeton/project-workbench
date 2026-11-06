@@ -12,12 +12,7 @@ internal sealed class HostRuntime : IAsyncDisposable
 
     public HostRuntime(RunOptions options)
     {
-        RejectLinks(options.UserRoot);
-        Directory.CreateDirectory(options.UserRoot);
-        var lockPath = Path.Combine(options.UserRoot, "host.lock");
-        RejectLinks(lockPath);
-        try { _lease = new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
-        catch (IOException error) { throw new IOException("此用户目录已由另一个工作台实例占用，或无法锁定。请关闭该实例后重试。", error); }
+        _lease = AcquireLease(options.UserRoot);
         try
         {
             var bundled = Path.Combine(AppContext.BaseDirectory, "Plugins");
@@ -47,6 +42,19 @@ internal sealed class HostRuntime : IAsyncDisposable
         catch { _lease.Dispose(); throw; }
     }
 
+    internal static FileStream AcquireLease(string userRoot)
+    {
+        RejectLinks(userRoot);
+        Directory.CreateDirectory(userRoot);
+        var lockPath = Path.Combine(userRoot, "host.lock");
+        RejectLinks(lockPath);
+        try { return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+        catch (IOException error) when (OperatingSystem.IsWindows() && (error.HResult & 0xFFFF) is 32 or 33)
+        {
+            throw new UserStoreInUseException(error);
+        }
+    }
+
     private static void CopySample(string source, string destination)
     {
         RejectLinks(source);
@@ -74,3 +82,6 @@ internal sealed class HostRuntime : IAsyncDisposable
         finally { _lease.Dispose(); }
     }
 }
+
+internal sealed class UserStoreInUseException(IOException inner)
+    : IOException("此用户目录已由另一个工作台实例占用。请关闭该实例后重试。", inner);

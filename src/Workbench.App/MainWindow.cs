@@ -9,23 +9,16 @@ namespace Workbench.App;
 internal sealed partial class MainWindow : Window
 {
     private readonly RunOptions _options;
-    private readonly Grid _root = new();
-    private readonly NavigationView _navigation = Ui.Named(new NavigationView
-    {
-        PaneDisplayMode = NavigationViewPaneDisplayMode.Auto,
-        IsSettingsVisible = true,
-        IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
-        PaneTitle = "Project Workbench"
-    }, "工作台导航");
-    private readonly ContentControl _content = new()
-    {
-        HorizontalContentAlignment = HorizontalAlignment.Stretch,
-        VerticalContentAlignment = VerticalAlignment.Stretch
-    };
-    private readonly InfoBar _notice = Ui.Named(new InfoBar { IsOpen = false }, "操作结果与错误");
+    private readonly Grid _root;
+    private readonly NavigationView _navigation;
+    private readonly ContentControl _content;
+    private readonly ContentControl _body;
+    private readonly InfoBar _notice;
     private HostRuntime? _runtime;
     private PluginManager Manager => _runtime?.Manager ?? throw new InvalidOperationException("工作台尚未就绪。");
     private bool _refreshing;
+    private bool _initialized;
+    private Exception? _startupFailure;
     private bool _busy;
     private bool _closing;
     private bool _allowClose;
@@ -36,39 +29,79 @@ internal sealed partial class MainWindow : Window
     public MainWindow(RunOptions options)
     {
         _options = options;
+        options.TraceStartup("window-constructor-entered");
+        _root = new Grid();
+        options.TraceStartup("creating-navigation-view");
+        _navigation = Ui.Named(new NavigationView
+        {
+            PaneDisplayMode = NavigationViewPaneDisplayMode.Auto,
+            IsSettingsVisible = false,
+            IsEnabled = false,
+            IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
+            PaneTitle = "Project Workbench"
+        }, "工作台导航");
+        options.TraceStartup("creating-content-controls");
+        _content = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        _body = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
+        options.TraceStartup("creating-info-bar");
+        _notice = Ui.Named(new InfoBar { IsOpen = false }, "操作结果与错误");
         Title = options.SmokeTest ? "Project Workbench · isolated native smoke" : "Project Workbench · 原生插件工作台";
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition());
         _root.Children.Add(_notice);
-        Grid.SetRow(_navigation, 1);
-        _root.Children.Add(_navigation);
+        Grid.SetRow(_body, 1);
+        _root.Children.Add(_body);
+        _body.Content = _navigation;
+        _navigation.IsEnabled = false;
+        _navigation.IsSettingsVisible = false;
         _navigation.Content = _content;
         Content = _root;
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 800));
         _navigation.SelectionChanged += (_, args) =>
         {
-            if (_refreshing || _busy || _closing) return;
+            if (!_initialized || _refreshing || _busy || _closing) return;
             if (args.IsSettingsSelected) Navigate(new("settings"));
             else if (args.SelectedItemContainer?.Tag is NavigationTarget target) Navigate(target);
         };
         AppWindow.Closing += OnClosing;
         ShowPage(Ui.Page("正在启动", "读取插件清单与本地设置…"));
+        options.TraceStartup("window-content-ready");
     }
 
     public async Task InitializeAsync()
     {
         try
         {
+            _options.TraceStartup("opening-host-runtime");
             _runtime = new HostRuntime(_options);
+            _options.TraceStartup("loading-host-theme");
             LoadTheme();
+            _options.TraceStartup("discovering-packages");
             await Manager.DiscoverAsync();
+            _options.TraceStartup("restoring-enabled-packages");
             await Manager.RestoreEnabledAsync();
             RefreshNavigation();
+            _initialized = true;
+            _navigation.IsSettingsVisible = true;
+            _navigation.IsEnabled = true;
+            _options.TraceStartup("opening-home-page");
             Navigate(new("home"));
+            _options.TraceStartup("host-initialization-completed");
             if (_options.SmokeTest) await NativeSmoke.RunAsync(this, _options);
         }
         catch (Exception error)
         {
+            _startupFailure = error;
+            _initialized = false;
+            _navigation.IsEnabled = false;
+            _navigation.IsSettingsVisible = false;
+            DetachPluginViews();
+            var failure = Ui.Page("工作台未能启动", error.Message);
+            failure.Children.Add(Ui.Text("请关闭此窗口后重试。若用户目录已被占用，请先关闭另一个工作台实例。"));
+            var close = Ui.Named(new Button { Content = "关闭窗口" }, "关闭未能启动的工作台窗口");
+            close.Click += async (_, _) => await CloseAsync();
+            failure.Children.Add(close);
+            _body.Content = ScrollPage(failure); // Independent of Manager, even after partial initialization.
             Notice("启动或原生验证失败", error.Message, InfoBarSeverity.Error);
             if (_options.SmokeTest)
             {
@@ -113,6 +146,7 @@ internal sealed partial class MainWindow : Window
 
     private void Navigate(NavigationTarget target)
     {
+        if (!_initialized) return;
         try
         {
             switch (target.Page)
@@ -131,12 +165,14 @@ internal sealed partial class MainWindow : Window
         }
         catch (Exception error)
         {
-            ShowPage(HomePage());
+            ShowPage(Ui.Page("无法打开页面", error.Message));
             Notice("无法打开页面", error.Message, InfoBarSeverity.Error);
         }
     }
 
-    private void ShowPage(FrameworkElement page) => _content.Content = new ScrollViewer
+    private void ShowPage(FrameworkElement page) => _content.Content = ScrollPage(page);
+
+    private static ScrollViewer ScrollPage(FrameworkElement page) => new()
     {
         Content = page,
         HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
@@ -153,7 +189,7 @@ internal sealed partial class MainWindow : Window
 
     private async Task RunAsync(Func<Task> action)
     {
-        if (_busy || _closing) return;
+        if (!_initialized || _busy || _closing) return;
         _busy = true;
         _navigation.IsEnabled = false;
         _content.IsEnabled = false;
@@ -162,7 +198,7 @@ internal sealed partial class MainWindow : Window
         finally
         {
             _busy = false;
-            if (!_closing) { _navigation.IsEnabled = true; _content.IsEnabled = true; }
+            if (_initialized && !_closing) { _navigation.IsEnabled = true; _content.IsEnabled = true; }
         }
     }
 
@@ -222,8 +258,9 @@ internal sealed partial class MainWindow : Window
     private async Task StopAsync()
     {
         if (_stopped) return;
+        _initialized = false;
         DetachPluginViews();
-        ShowPage(Ui.Page("正在关闭", "正在等待插件停止。协作式取消无法强制中断不响应的插件。"));
+        _body.Content = ScrollPage(Ui.Page("正在关闭", "正在等待插件停止。协作式取消无法强制中断不响应的插件。"));
         _navigation.IsEnabled = false;
         if (_runtime is not null)
         {
@@ -235,6 +272,7 @@ internal sealed partial class MainWindow : Window
 
     private async Task CloseAsync()
     {
+        if (_closing) return;
         _closing = true;
         try
         {
@@ -260,12 +298,25 @@ internal sealed partial class MainWindow : Window
     }
 
     internal PluginManager SmokeManager => Manager;
+    internal Exception? SmokeStartupFailure => _startupFailure;
+    internal bool SmokeNavigationAvailable => _navigation.IsEnabled || _navigation.IsSettingsVisible;
+    internal void SmokeTryStartupNavigation()
+    {
+        _navigation.SelectedItem = _navigation.SettingsItem;
+        Navigate(new("settings"));
+        Navigate(new("home"));
+    }
     internal void SmokeDetach() => DetachPluginViews();
     internal void SmokeSetTheme(ElementTheme theme) { AssertUiThread(); _root.RequestedTheme = theme; }
     internal async Task SmokeAttachAsync(WinUiView view)
     {
         AssertUiThread();
         var element = view.CreateView() ?? throw new InvalidOperationException("Native factory returned null.");
+        await AttachSmokeElementAsync(element);
+    }
+
+    private async Task AttachSmokeElementAsync(FrameworkElement element)
+    {
         var loaded = new TaskCompletionSource();
         void OnLoaded(object sender, RoutedEventArgs args) => loaded.TrySetResult();
         element.Loaded += OnLoaded;
@@ -276,6 +327,34 @@ internal sealed partial class MainWindow : Window
             if (element.XamlRoot is null) throw new InvalidOperationException("Native view was not attached to the host XamlRoot.");
         }
         finally { element.Loaded -= OnLoaded; }
+    }
+
+    internal async Task SmokeVerifyLiveCardThemesAsync()
+    {
+        AssertUiThread();
+        var card = Ui.Card(Ui.Text("Live host card theme verification"));
+        await AttachSmokeElementAsync(card);
+        async Task<(Windows.UI.Color Fill, Windows.UI.Color Stroke)> ReadThemeAsync(ElementTheme theme)
+        {
+            _root.RequestedTheme = theme;
+            var settled = new TaskCompletionSource();
+            if (!DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low, () => settled.TrySetResult()))
+                throw new InvalidOperationException("Could not queue live theme verification.");
+            await settled.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            card.UpdateLayout();
+            if (card.ActualTheme != theme)
+                throw new InvalidOperationException($"Card actual theme did not become {theme}.");
+            if (card.Background is not Microsoft.UI.Xaml.Media.SolidColorBrush fill
+                || card.BorderBrush is not Microsoft.UI.Xaml.Media.SolidColorBrush stroke)
+                throw new InvalidOperationException("Card theme brushes were not resolved.");
+            return (fill.Color, stroke.Color);
+        }
+        var light = await ReadThemeAsync(ElementTheme.Light);
+        var dark = await ReadThemeAsync(ElementTheme.Dark);
+        var lightAgain = await ReadThemeAsync(ElementTheme.Light);
+        if (light.Fill.Equals(dark.Fill) || light.Stroke.Equals(dark.Stroke) || !light.Equals(lightAgain))
+            throw new InvalidOperationException("The same host card did not re-resolve fill/stroke across Light/Dark/Light.");
+        _root.RequestedTheme = ElementTheme.Default;
     }
 
     internal Task SmokeStopAsync() => StopAsync();

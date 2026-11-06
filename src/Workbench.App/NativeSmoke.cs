@@ -14,7 +14,7 @@ internal static class NativeSmoke
         void Record(string check)
         {
             checks.Add(check);
-            options.WriteReport(new { succeeded = false, stage = "running", userRoot = options.UserRoot, checks });
+            options.WriteReport(new { succeeded = false, stage = "running", userRoot = options.UserRoot, checks, startupStages = options.StartupStages });
         }
         window.AssertUiThread();
         Record("WinUI Application.Start and UI synchronization context initialized");
@@ -26,10 +26,14 @@ internal static class NativeSmoke
         Record("Only curated samples discovered; no real user state loaded");
         try
         {
-            await using var duplicate = new HostRuntime(options);
+            using var duplicate = HostRuntime.AcquireLease(options.UserRoot);
             throw new InvalidOperationException("Another owner acquired the same user store.");
         }
-        catch (IOException) { Record("Exclusive user-root store lease rejects a second owner"); }
+        catch (UserStoreInUseException) { Record("Actual lease acquisition rejects a second owner with a Windows sharing/lock violation"); }
+        await VerifyOccupiedStartupAsync(options);
+        Record("Occupied-store startup shows a manager-independent page, blocks Settings/Home navigation and closes safely");
+        await window.SmokeVerifyLiveCardThemesAsync();
+        Record("Same native host card re-resolved actual theme and fill/stroke across live Light/Dark/Light changes");
 
         foreach (var id in RunOptions.SampleIds)
         {
@@ -81,10 +85,31 @@ internal static class NativeSmoke
             userRoot = options.UserRoot,
             uiThreadId = Environment.CurrentManagedThreadId,
             checks,
+            startupStages = options.StartupStages,
             files = files.Select(path => new { path, bytes = new FileInfo(path).Length }),
             completedUtc = DateTimeOffset.UtcNow
         });
         await window.FinishSmokeAsync();
+    }
+
+    private static async Task VerifyOccupiedStartupAsync(RunOptions options)
+    {
+        var failed = new MainWindow(options with { SmokeTest = false, ReportPath = null });
+        var closed = new TaskCompletionSource();
+        failed.Closed += (_, _) => closed.TrySetResult();
+        try
+        {
+            failed.Activate();
+            await failed.InitializeAsync();
+            Require(failed.SmokeStartupFailure is UserStoreInUseException, "Second host did not report the actual occupied-store failure.");
+            Require(!failed.SmokeNavigationAvailable, "Navigation/settings remained available after startup failed.");
+            failed.SmokeTryStartupNavigation();
+        }
+        finally
+        {
+            await failed.FinishSmokeAsync();
+            await closed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        }
     }
 
     private static async Task AttachAllViewsAsync(MainWindow window)
