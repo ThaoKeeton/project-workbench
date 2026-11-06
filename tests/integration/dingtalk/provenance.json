@@ -1,23 +1,24 @@
 {
   "schemaVersion": 1,
   "pluginId": "com.projectworkbench.dingtalk-insights",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "packageFile": "package.zip",
-  "sha256": "1e744a83ff85287de7acd43509b7df4822d99a9781e9af98dd3e0a448b4cad0f",
-  "packageBytes": 166877,
+  "sha256": "38d7a8f30ce6d4d5c6f6e26c757cbb6b9fc9f812546bf1db2ecdbadb9b578200",
+  "packageBytes": 179239,
   "sourceRepository": "ThaoKeeton/dingtalk-insights",
-  "sourceCommit": "b50586ff321f9932a35235de75f8c9b4996a5a61",
-  "sourceUrl": "https://github.com/ThaoKeeton/dingtalk-insights/tree/b50586ff321f9932a35235de75f8c9b4996a5a61",
-  "workflowRunId": 42284239767,
-  "workflowUrl": "https://github.com/ThaoKeeton/dingtalk-insights/actions/runs/42284239767",
+  "sourceCommit": "c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf",
+  "sourceUrl": "https://github.com/ThaoKeeton/dingtalk-insights/tree/c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf",
+  "workflowRunId": 42295585483,
+  "workflowUrl": "https://github.com/ThaoKeeton/dingtalk-insights/actions/runs/42295585483",
   "workflowConclusion": "success",
-  "artifactId": 13536248929,
-  "artifactSha256": "ddae9a3801688592a9979d572f00364cb5dcbaafaa24b8f028c4db6a818f5b97",
+  "workflowJobId": 128159848406,
+  "artifactId": 13542127319,
+  "artifactSha256": "31d157c5165fd157ab9a39bb1df0b118a95461938b9cefd5aca1f07bd89356ca",
   "transport": "publisher-root-manifest-zip",
   "manifest": {
     "id": "com.projectworkbench.dingtalk-insights",
     "name": "钉钉沟通事项",
-    "version": "0.3.1",
+    "version": "0.3.2",
     "apiVersion": 1,
     "minimumHostVersion": "0.2.0",
     "entryAssembly": "DingTalkInsights.Workbench.dll",
@@ -33,53 +34,53 @@
     ]
   },
   "fileCount": 8,
-  "expandedBytes": 395674,
+  "expandedBytes": 426906,
   "files": [
     {
       "path": "build-info.json",
       "bytes": 10263,
-      "sha256": "489f1352525c1fffb4a4ce63c425dcf09dce63c8e5095dce52594ddbd4f597c9"
+      "sha256": "a89c733ea7c767dbbb902cf39d17a9fb09cdef9ffa3d16146e7d9020d14329a3"
     },
     {
       "path": "DingTalkInsights.Core.dll",
-      "bytes": 165888,
-      "sha256": "a39f666097d74b4fd326bc72b3b697fa9668ab773746cd6bda05d6e30ac33daa"
+      "bytes": 166912,
+      "sha256": "0570f7bb14ac048fd029aeb57b2a25253dea15dbb901fbd4eda43e2002f120e2"
     },
     {
       "path": "DingTalkInsights.Runtime.dll",
-      "bytes": 94720,
-      "sha256": "381fdfb40e9392b27690010c5e8f42e9ff9c1b532db8a87b6b74e08426d5810d"
+      "bytes": 105472,
+      "sha256": "0a6b8c4e6288a1337b6b14b698f43aff69a3a1bf2e2ad69dbeba5c12e8302d9d"
     },
     {
       "path": "DingTalkInsights.Workbench.Bridge.dll",
-      "bytes": 37888,
-      "sha256": "34fbb889d86f3db87bcae0aa795b74bb8f1c7a0dafe9e44971a4588705ea60e3"
+      "bytes": 52736,
+      "sha256": "3e70788a08878439d96b88cc828a7913bd26278e648a1d2c9bc3e7d407e2a0df"
     },
     {
       "path": "DingTalkInsights.Workbench.deps.json",
       "bytes": 14916,
-      "sha256": "7f64e4529601951016491289c7d50e52bd044f13d24f3abfd25007da96de04ee"
+      "sha256": "4311892bf2c2999237084eaf3a67ec13eee5800f427d298fb4926d374a26f68b"
     },
     {
       "path": "DingTalkInsights.Workbench.dll",
-      "bytes": 70656,
-      "sha256": "1c4b6b85ad2437347a0ff44e365af7d656e204e2701f6222718cd9884578d6d6"
+      "bytes": 75264,
+      "sha256": "be3fd9bb0c6c2d01e91da270fbf655c420625f4fca3d0dbc312bfa275739137f"
     },
     {
       "path": "inventory.json",
       "bytes": 710,
-      "sha256": "a129a070fadbf003c122427c1ba0f1a47c1e96ad1044c86373eedb528b60a9f5"
+      "sha256": "616b6c7e7bad40743b42081740d4fb9bc0272a1b4721231dfaca3b9d2cfd22f2"
     },
     {
       "path": "plugin.json",
       "bytes": 633,
-      "sha256": "b99320e03e81fc4cf3eaabf669b12c077752740995887f49c7e7fc82358b9778"
+      "sha256": "81e1159818af77b520f3f7dbb3f5e0fb9e752113f56149c44965b611b98fcd85"
     }
   ],
-  "hostSdkSourceCommit": "82bd958e220aaf94ccdbf1ea68b0ec53b770706a",
-  "maintainedWorkflowRunId": 42284239775,
-  "coverageBoundary": "Production local demo Core and real MonitorSupervisor only. Three host secret definitions; actual host secret value consumption deferred upstream. No send action.",
+  "hostSdkSourceCommit": "27154465c08d132798c8ea7b637f137f7340a90b",
+  "coverageBoundary": "Production local demo Core and real MonitorSupervisor. Native synthetic model-only host Save/Cancel, approval reads credentials.commit/revision, revoke/Delete and unapproved retained ciphertext. Model-key value Read/provider dispatch unexecuted; no Webhook values, purpose or send.",
   "sourceBranch": "codex/workbench-plugin",
-  "publisherPackageFile": "workbench-plugin/DingTalkInsights.Workbench-0.3.1-win-x64.zip",
-  "workflowRunAttempt": 1
+  "publisherPackageFile": "workbench-plugin/DingTalkInsights.Workbench-0.3.2-win-x64.zip",
+  "workflowRunAttempt": 1,
+  "hostCredentialProviderImplementation": "Four definitions and async complete-batch provider implemented upstream; selected model-key value Read occurs immediately before actual model dispatch."
 }

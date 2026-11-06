@@ -58,6 +58,6 @@ foreach ($phase in $phases) {
 }
 @{ succeeded = $true; userRoot = $root; phases = $completed; provenance = $inputs; shippingExecutableSha256 = $binarySha256;
     platformCommit = (& git -C $repo rev-parse HEAD); coverage = 'Actual unchanged shipping host with pinned production packages; local demo/fictional inputs; no Webhook/HTTP/send or real credentials';
-    limitations = @('UPCAM automatic provider success is unexecuted; upstream publishes production only, not the distinct synthetic acceptance-ID package.', 'DingTalk host secret value consumption is deferred upstream; UPCAM host secret is generated binding key only.', 'Manifest/version/fault variants are synthetic integration inputs; external canonical data and schema rollback are not covered.', 'Windows11 manual acceptance is unexecuted.') } |
+    limitations = @('UPCAM automatic provider success is unexecuted; upstream publishes production only, not the distinct synthetic acceptance-ID package.', 'DingTalk host value coverage is synthetic model-only native save/approval with commit-revision read/revoke/delete; model-key value read/provider dispatch unexecuted, no Webhook values/purpose. UPCAM host secret is generated binding key only.', 'Manifest/version/fault variants are synthetic integration inputs; external canonical data and schema rollback are not covered.', 'Windows11 manual acceptance is unexecuted.') } |
     ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $output 'summary.json') -Encoding utf8
 Write-Host "Business plugin actual process sequence completed: $output"

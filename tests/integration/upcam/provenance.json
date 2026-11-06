@@ -3612,5 +3612,15 @@
   "coverageBoundary": "Production worker preview_sample uses fictional input. Automatic business run requires separately built acceptance ID; upstream workflow does not publish that package.",
   "sourceBranch": "feat/workbench-native-digest",
   "publisherPackageFile": "UPCAMTaskDigest-workbench-production-0.1.0-win-x64.zip",
-  "workflowRunAttempt": 1
+  "workflowRunAttempt": 1,
+  "workflowHeadCommit": "6370b9df46af564fde022924d1dbeace7d575c6a",
+  "actualCheckoutCommit": "1454dc3ff21de2152539d6f3462a3ddad13c4398",
+  "actualCheckoutTree": "0541a8118708fb564c3d5c38de4e9b88089b28ef",
+  "checkoutTreeEquivalence": {
+    "compareUrl": "https://github.com/ThaoKeeton/upcam-task-digest/compare/6370b9df46af564fde022924d1dbeace7d575c6a...1454dc3ff21de2152539d6f3462a3ddad13c4398",
+    "aheadBy": 1,
+    "behindBy": 0,
+    "changedFiles": 0,
+    "note": "Pull-request test merge; head and actual build checkout have identical source content. SourceCommit continues to identify the workflow head."
+  }
 }

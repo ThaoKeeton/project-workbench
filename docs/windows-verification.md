@@ -9,6 +9,7 @@
 | Task 3 Windows/SDK native（Task 4 BASE） | [42285023349](https://github.com/ThaoKeeton/project-workbench/actions/runs/42285023349)，提交 `27154465c08d132798c8ea7b637f137f7340a90b`：Windows Core 226 通过、原生 14 项、management 10 项、六个连续实际进程 7 项、默认 Windows SDK source/NuGet export 均通过 | 控制器已检查实际报告；该结果只证明 Task 4 之前的 BASE，不是下述新增独立业务包探针的 Windows 执行证据 |
 | Task 4 当前 Linux Core/固定业务包 | [42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164)，源码 `ccb6ef2`：237 通过、2 项 Windows DPAPI 明确跳过，共 239 项；16 项脚本检查及两个真实生产 ZIP 的逐文件审计通过 | Linux 不执行 WinUI 或业务程序集；参考编译仅为不可运行的类库 |
 | Task 4 当前 Windows/独立业务包 | 同轮源码 `ccb6ef2`：Windows Core 239/239（含两项真实 DPAPI），发布、原生 14 项、management 10 项、六个连续平台重启进程 7 项、SDK 默认 Windows export，以及真实生产业务包六进程 26 项均通过 | Server 2025 上实际运行当前 shipping App；生产 UPCAM 正向自动调度、绑定 key 正向创建/恢复仍缺独立上游模拟验收包，Windows 11 人工验收仍待执行 |
+| Task 4 新钉钉 0.3.2/UPCAM 联合输入 | 钉钉来源 `c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf`、上游成功 CI 42295585483、生产 ZIP SHA256 `38d7a8f30ce6d4d5c6f6e26c757cbb6b9fc9f812546bf1db2ecdbadb9b578200` 已固定；当前 shipping App 新增实际 host-DPAPI 合成模型值原生检查 | 当前提交 Windows 联合验收待运行；上列已通过的 26 项使用旧钉钉 0.3.1，不能代替新版证据。UPCAM 正向 acceptance-ID 包依赖仍未解决 |
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux C# 检查（历史基线） | 早期手动主程序版本参考编译及 7 个 C# 文件语法/XML 检查通过 | 后续不可运行的 NativeReference 语义编译已单列；生产 XAML/PRI 工具仍必须在 Windows 执行 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
@@ -132,7 +133,7 @@ pwsh ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300
 
 | 阶段 | 必需业务断言 |
 | --- | --- |
-| seed | 真正安装两个独立 ZIP；逐文件匹配已固定上游字节、禁用/未信任/未加载；实际信任弹窗取消及确认。钉钉实际设置、加密草稿、demo Core 读取/搜索/整理/历史，单个真实 MonitorSupervisor 跨页面继续；RequiresPluginStart 通用 Start/Resume 拒绝、原生 Stop/host Stop/停用完整退役。UPCAM 实际生产无窗口 worker/Core fictional preview、原生页面/设置/默认 profile 绑定、缺少自动授权的明确开始拒绝与真实 registered callback Faulted、安全 Stop/停用/worker 退役 |
+| seed | 真正安装两个独立 ZIP；逐文件匹配已固定上游字节、禁用/未信任/未加载；实际信任弹窗取消及确认。钉钉 0.3.2 实际 host-DPAPI 合成模型值的取消/完整批次保存、单独批准并读取 host commit/revision、立即撤销、删除及无授权再保存；Webhook 字段留空，模型 key 值读取及模型/来源/发送调度未执行。随后实际设置、加密草稿、demo Core 读取/搜索/整理/历史，单个真实 MonitorSupervisor 跨页面继续；RequiresPluginStart 通用 Start/Resume 拒绝、原生 Stop/host Stop/停用完整退役。UPCAM 实际生产无窗口 worker/Core fictional preview、原生页面/设置/默认 profile 绑定、缺少自动授权的明确开始拒绝与真实 registered callback Faulted、安全 Stop/停用/worker 退役 |
 | restart | 新 OS 进程恢复可信插件登记；钉钉任务仍停止、无业务连接/调度，必须新预览；UPCAM 恢复前无 worker/任务；实际加密草稿/非敏感偏好/profile 绑定保留；暂存两个只改 manifest 版本的明确合成升级，当前 DLL 不变，发现后 Apply 拒绝 |
 | update | 启动发现前 Apply 到合成版本，撤销信任/启用/恢复；原厂 DLL 逐文件不变、当前业务数据及实际备份保留；重新信任后真实页面可用。再暂存更高合成版本，仅损坏未加载的 staged manifest，供下一进程测试失败 |
 | fault | 真实启动 Apply 因 staged 指纹损坏失败，旧当前代码/数据不变；保留 Prepared journal；取消后按实际 HistoryId 暂存原版代码回滚 |
@@ -145,7 +146,7 @@ UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析�
 
 本轮 Linux 只能执行固定包审计/真实 Store 安装、报告与隔离参数测试及不可运行的 C# reference 编译；Windows 原生执行必须以当前提交的实际 CI 结果为准。原有样例 13 项加管理导航、独立平台 fixture 的 runtime probes 均保留，业务结果单独记录。
 
-覆盖边界：钉钉三个 host secret definitions 已登记，但上游明确推迟实际 host value 消费；UPCAM host secret 只用于程序生成的恢复绑定 key，业务凭据仍使用原 worker DPAPI。本探针没有自动业务授权，不创建恢复 key。UPCAM 上游 workflow 没有发布其不同 ID 的 synthetic acceptance 包，因此正向自动业务提供方执行未验；两插件均未执行发送、真实 Webhook/HTTP、真实 DWS/Teambition/OpenAI、企业权限或真实凭据测试。代码更新/故障版本是明确合成的集成输入，不是上游新发布；UserRoot 备份不包含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live Webhook 去重。Windows11 人工清单仍全部待验。
+覆盖边界：新钉钉 0.3.2 登记四项 host secret definitions，并实际采用异步完整批次值提供方；新原生探针仅配置合成模型值和最后提交的 `credentials.commit`，验证取消、保存、模型用途单独批准并读取 host commit/revision、立即撤销保留密文、删除、无授权再保存和空编辑框。批准只读 commit/revision；模型 key 值读取发生在实际 provider dispatch 前，该路径未执行。Webhook 两字段留空，不批准发送用途；批准后先撤销/删除，再运行本地 demo Core，不调用真实模型。该新增范围待新版联合 Windows 报告；旧钉钉 0.3.1 的仅声明结论仍只适用于旧包。UPCAM host secret 只用于程序生成的恢复绑定 key，业务凭据仍使用原 worker DPAPI；生产探针没有自动业务授权，不创建恢复 key。已完整审计上游 107 个 Actions artifacts 和零 releases，validation 包只有元数据/报告/截图；不同 ID 的 synthetic acceptance 二进制仍未发布，因此正向自动业务提供方执行仍为 Important 外部依赖。两插件均未执行发送、真实 Webhook/HTTP、真实 DWS/Teambition/OpenAI、企业权限或真实凭据测试。代码更新版本（钉钉 0.3.3/0.3.4、UPCAM 0.1.1/0.1.2）及 staged 故障是明确合成的集成输入，不是上游新发布；UserRoot 备份不包含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live Webhook 去重。Windows11 人工清单仍全部待验。
 
 ## Windows 实机人工清单（全部待验）
 

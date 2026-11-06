@@ -22,6 +22,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
     private const string Ding = "com.projectworkbench.dingtalk-insights";
     private const string Upcam = "com.upcam.task-digest";
     private const string Draft = "Synthetic integration: verify evidence before organizing fictional issues.";
+    private const string SyntheticCredential = "SYNTHETIC_TASK4_HOST_VAULT_ONLY";
     private const string Marker = "ProjectWorkbench independently built business probe v1";
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
     private static string InputsRoot => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "fixtures", "business"));
@@ -152,7 +153,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
                 options.WriteReport(new { succeeded = true, probe = options.BusinessProbe, userRoot = options.UserRoot, processId = Environment.ProcessId,
                     actualWindowClosed = true, provenance = _inputs, checks = _checks, observations = _observations, workers,
                     retainedStateSha256,
-                    credentialCoverage = "DingTalk: three definitions only, host value consumption deferred upstream. UPCAM: generated resume-binding key only; no automatic authority configured, therefore no key created. Business credentials stay canonical worker/plugin DPAPI.",
+                    credentialCoverage = "DingTalk 0.3.2: actual native model-only synthetic host-DPAPI batch save/cancel, separate approval with host commit/revision read, revoke and delete; only key+commit configured. Model-key value read/provider dispatch unexecuted; no Webhook values or purpose. Ciphertext persists without restoring grants. UPCAM: generated resume-binding key only; no automatic authority configured, therefore no key created; business credentials stay canonical worker DPAPI.",
                     providerCoverage = "DingTalk actual local demo read/search/organize and MonitorSupervisor; UPCAM production worker fictional preview and missing-authorization fault. No DWS/Teambition/OpenAI/Webhook/HTTP send action or actual credential.",
                     limits = new[] { "Synthetic manifest/version and staged metadata fault variants are integration inputs, not publisher releases.", "UPCAM positive automatic provider delivery is unexecuted: upstream does not publish its distinct acceptance-ID binary.", "Backups cover host UserRoot only; external canonical state/DWS profiles and arbitrary schema downgrade are not covered.", "Windows11 manual keyboard/theme/DPI/accessibility acceptance remains unexecuted." },
                     startupStages = options.StartupStages, completedUtc = DateTimeOffset.UtcNow });
@@ -175,7 +176,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         _ding = DingTarget();
         var task = Manager.GetBackgroundTaskSnapshots(Ding).Single();
         Require(task is { Id: "monitor", RequiresPluginStart: true, State: PluginBackgroundTaskState.Stopped, ResumeOnStartup: false, DesiredRunning: false }, "Actual DingTalk guarded monitor metadata differs from the selected artifact.");
-        Require(Manager.GetSecretDefinitions(Ding).Select(s => s.Id).Order().SequenceEqual(new[] { "dingtalk.webhook-secret", "dingtalk.webhook-url", "openai.api-key" })
+        Require(Manager.GetSecretDefinitions(Ding).Select(s => s.Id).Order().SequenceEqual(new[] { "credentials.commit", "dingtalk.webhook-secret", "dingtalk.webhook-url", "openai.api-key" })
             && Manager.GetSecretSnapshots(Ding).All(s => s.IsConfigured == false), "DingTalk host secret metadata/value coverage was misrepresented.");
         var before = DingObservation();
         var initialLoop = DingTask("MonitoringCompletion");
@@ -206,9 +207,11 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         await DingActionAsync("DTI 保存设置", () => Find<TextBlock>(settings, "DTI 操作结果").Text.Contains("配置已保存"));
         Require(File.Exists(Path.Combine(options.UserRoot, "data", Ding, "connection-draft.dpapi")), "Actual native settings did not persist the encrypted business draft.");
         Require(!File.ReadAllText(Path.Combine(options.UserRoot, "settings", Ding, "settings.json")).Contains(Draft), "Business draft entered host plaintext preferences.");
+        await DingHostCredentialsAsync(settings);
         await window.SmokeNavigateAsync("home");
         var page = await DingPageAsync("workspace");
-        Require(Find<CheckBox>(page, "DTI 使用模拟来源").IsChecked == true && Find<TextBox>(page, "DTI 整理事项").Text == Draft, "Recreated real page lost its default demo or draft.");
+        Require(Find<CheckBox>(page, "DTI 使用模拟来源").IsChecked == true && Find<CheckBox>(page, "DTI 监控模型整理").IsChecked != true
+            && Find<TextBox>(page, "DTI 整理事项").Text == Draft, "Recreated real page lost its local-only default demo or draft.");
         Invoke(Find<Button>(page, "DTI 打开模拟"));
         await DingActionAsync("DTI 打开模拟", () => DingObservation().GetProperty("Resources").GetProperty("StoreOwned").GetBoolean());
         var dispatches = DingObservation().GetProperty("Resources").GetProperty("Dispatches").GetInt64();
@@ -252,6 +255,66 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         await DingActionAsync("DTI 打开模拟", () => DingObservation().GetProperty("Resources").GetProperty("StoreOwned").GetBoolean());
         await StartDingAsync(page); // Remains active for the real shipping-window close path.
         Record("Actual registered guarded monitor rejects host Start/resume; real supervisor survives navigation singly; native Stop, host Stop and active native disable join work; new instance needs a new preview");
+    }
+
+    private async Task DingHostCredentialsAsync(FrameworkElement settings)
+    {
+        var root = Path.Combine(options.UserRoot, "secrets", Ding);
+        string[] Files() => Directory.Exists(root) ? Directory.GetFiles(root, "*", SearchOption.AllDirectories).Order(StringComparer.Ordinal).ToArray() : [];
+        void EmptyEditors()
+        {
+            foreach (var name in new[] { "DTI 新 OpenAI key", "DTI 新 Webhook URL", "DTI 新 Webhook 签名密钥" })
+                Require(Find<PasswordBox>(settings, name).Password.Length == 0, "Native credential editor retained or exposed a value.");
+        }
+        void ModelOnlyBatch()
+        {
+            var snapshots = Manager.GetSecretSnapshots(Ding).ToDictionary(s => s.Id);
+            Require(snapshots.Count == 4 && snapshots["openai.api-key"].IsConfigured == true && snapshots["credentials.commit"].IsConfigured == true
+                && snapshots["dingtalk.webhook-url"].IsConfigured == false && snapshots["dingtalk.webhook-secret"].IsConfigured == false,
+                "Actual host batch must contain only the synthetic model value and commit metadata, with no Webhook values.");
+        }
+        var location = Find<ComboBox>(settings, "DTI 凭据来源");
+        Require(location.Items.Count == 3 && location.SelectedIndex == 0 && location.SelectedItem?.ToString() == "Workbench 宿主加密凭据",
+            "Actual DingTalk native host-vault choice is unavailable.");
+        Find<PasswordBox>(settings, "DTI 新 OpenAI key").Password = SyntheticCredential;
+        await ConfirmAsync(settings, "DTI 保存新凭据", false);
+        await DingActionAsync("DTI 保存新凭据", () => Files().Length == 0);
+        EmptyEditors();
+        Find<PasswordBox>(settings, "DTI 新 OpenAI key").Password = SyntheticCredential;
+        await ConfirmAsync(settings, "DTI 保存新凭据", true);
+        await DingActionAsync("DTI 保存新凭据", () => Files().Length == 2);
+        EmptyEditors();
+        ModelOnlyBatch();
+        Require(Files().All(file => !System.Text.Encoding.UTF8.GetString(File.ReadAllBytes(file)).Contains(SyntheticCredential)), "Host DPAPI ciphertext contained the synthetic plaintext.");
+        Require(!File.ReadAllText(Path.Combine(options.UserRoot, "settings", Ding, "settings.json")).Contains(SyntheticCredential), "Synthetic credential entered host preferences.");
+        var metadata = await window.SmokeNavigateAsync("credentials");
+        foreach (var definition in Manager.GetSecretDefinitions(Ding))
+            Require(Find<PasswordBox>(metadata, $"新凭据值 {Ding}/{definition.Id}").Password.Length == 0, "Host credential metadata page prefilled a stored value.");
+        settings = await DingPageAsync("settings"); // The previous settings tree is detached; resolve the real replacement.
+        EmptyEditors();
+        Find<CheckBox>(settings, "DTI 凭据用于模型").IsChecked = true;
+        Require(Find<CheckBox>(settings, "DTI 凭据用于 Webhook").IsChecked != true, "A send-purpose grant was unexpectedly selected.");
+        await ConfirmAsync(settings, "DTI 批准凭据用途", true);
+        await DingActionAsync("DTI 批准凭据用途", () => Find<TextBlock>(settings, "DTI 操作结果").Text.Contains("已批准所选来源"));
+        var beforeRevoke = Files().ToDictionary(file => Path.GetFileName(file)!, Hash);
+        Invoke(Find<Button>(settings, "DTI 撤销凭据用途"));
+        await DingActionAsync("DTI 撤销凭据用途", () => Find<TextBlock>(settings, "DTI 操作结果").Text.Contains("已撤销凭据用途"));
+        Require(Files().Length == beforeRevoke.Count && Files().All(file => beforeRevoke[Path.GetFileName(file)] == Hash(file)), "Purpose revoke changed saved host ciphertext.");
+        ModelOnlyBatch();
+        await ConfirmAsync(settings, "DTI 删除所选凭据", true);
+        await DingActionAsync("DTI 删除所选凭据", () => Files().Length == 0 && Manager.GetSecretSnapshots(Ding).All(s => s.IsConfigured == false));
+        // Retain a complete synthetic batch for actual restart/update/rollback/remove checks, without any new purpose approval.
+        Find<PasswordBox>(settings, "DTI 新 OpenAI key").Password = SyntheticCredential;
+        await ConfirmAsync(settings, "DTI 保存新凭据", true);
+        await DingActionAsync("DTI 保存新凭据", () => Files().Length == 2);
+        EmptyEditors();
+        ModelOnlyBatch();
+        var resources = DingObservation().GetProperty("Resources");
+        Require(resources.GetProperty("Dispatches").GetInt64() == 0 && !resources.GetProperty("StoreOwned").GetBoolean(), "Credential flow performed source/model/send work or opened an external business store.");
+        _observations.Add(new { stage = "dingtalk-032-native-host-credentials", protection = "actual Windows CurrentUser DPAPI", canceledSaveWroteNothing = true,
+            selectedPurpose = "model-only approval with actual host commit/revision read; model-key value read/provider dispatch unexecuted", revokeRetainedCiphertext = true, deleteRemovedBatch = true,
+            retainedCiphertextFiles = Files().Length, secretMetadata = Manager.GetSecretSnapshots(Ding), credentialValueReported = false });
+        Record("DingTalk 0.3.2 actual native host-DPAPI model-only save/cancel/complete commit, separate approval/host commit read, immediate revoke, delete and unapproved resave; model-key value read and provider/send dispatch unexecuted");
     }
 
     private async Task UpcamAsync(bool full)
@@ -662,7 +725,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
     }
 
     private static string Package(Input input) => Path.Combine(InputsRoot, input.PackageFile);
-    private static string UpdatedVersion(Input input, bool fault) => input.PluginId == Ding ? (fault ? "0.3.3" : "0.3.2") : (fault ? "0.1.2" : "0.1.1");
+    private static string UpdatedVersion(Input input, bool fault) => input.PluginId == Ding ? (fault ? "0.3.4" : "0.3.3") : (fault ? "0.1.2" : "0.1.1");
     private static string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
     private static T? TryById<T>(DependencyObject root, string id) where T : DependencyObject
     {
