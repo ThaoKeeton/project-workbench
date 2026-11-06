@@ -29,10 +29,15 @@ public sealed class RunOptionsTests
     [Theory]
     [InlineData("--business-probe")]
     [InlineData("--probe-root")]
-    public void Incomplete_business_probe_options_cannot_fall_through_to_the_normal_user_store(string option)
+    [InlineData("--runtime-probe")]
+    [InlineData("--smoke-report")]
+    public void Incomplete_value_options_cannot_fall_through_to_the_normal_user_store(string option)
     {
-        var args = option == "--business-probe" ? new[] { option } : new[] { "--business-probe", "seed", option };
-        Assert.Throws<ArgumentException>(() => RunOptions.Parse(args));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse([option]));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--business-probe", "seed", option]));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse([option, "--smoke-test"]));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse([option, "--runtime-probe", "management"]));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse([option, ""]));
     }
 
     [Theory]

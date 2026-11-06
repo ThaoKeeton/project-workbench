@@ -38,14 +38,14 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
 
     private async Task RunWorkerAsync(string id, IPluginBackgroundExecution execution)
     {
-        var settings = _context.Settings;
-        await settings.SetAsync(id + "-runs", await settings.GetAsync(id + "-runs", 0) + 1);
-        await settings.SetAsync(id + "-start", execution.StartReason.ToString());
         if (_mode == "synchronous" && id == "worker")
         {
             File.WriteAllText(Path.Combine(_context.DataDirectory, "sync-started"), "synthetic");
             while (!File.Exists(Path.Combine(_context.DataDirectory, "release-sync"))) Thread.Sleep(10);
         }
+        var settings = _context.Settings;
+        await settings.SetAsync(id + "-runs", await settings.GetAsync(id + "-runs", 0) + 1);
+        await settings.SetAsync(id + "-start", execution.StartReason.ToString());
         try { await Task.Delay(Timeout.Infinite, execution.CancellationToken); }
         catch (OperationCanceledException) when (execution.CancellationToken.IsCancellationRequested)
         {
@@ -64,6 +64,7 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
 
     private FrameworkElement CreatePage()
     {
+        if (_mode is "page-fail" or "hostile-page") throw FactoryFailure();
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(28) };
         panel.Children.Add(new TextBlock { Text = "Synthetic local-only runtime fixture" });
         var confirm = new Button { Content = "Confirm synthetic one-use start" };
@@ -75,8 +76,23 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
 
     private FrameworkElement CreateSettings()
     {
+        if (_mode is "settings-fail" or "hostile-settings") throw FactoryFailure();
         var text = new TextBlock { Text = "Synthetic settings persist in the host-owned store." };
         AutomationProperties.SetName(text, "合成插件设置页");
         return text;
+    }
+
+    private Exception FactoryFailure() => _mode.StartsWith("hostile", StringComparison.Ordinal)
+        ? new HostileFactoryException(_context.DataDirectory) : new InvalidOperationException("synthetic-private-native-provider-response");
+
+    private sealed class HostileFactoryException(string dataDirectory) : Exception
+    {
+        public override string Message => Fail("Message");
+        public override string ToString() => Fail("ToString");
+        private string Fail(string member)
+        {
+            File.WriteAllText(Path.Combine(dataDirectory, "unsafe-exception-access"), member);
+            throw new InvalidOperationException("synthetic-private-native-provider-response");
+        }
     }
 }

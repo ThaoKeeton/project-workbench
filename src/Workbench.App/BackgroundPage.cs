@@ -14,9 +14,24 @@ internal sealed partial class MainWindow
         if (_shutdownPending) page.Children.Add(Ui.Text("关闭仍在等待已知工作结束；保留本进程与用户目录租约。可查看状态并使用上方“重试关闭”。"));
         List<Action> refresh = [];
         var count = 0;
-        foreach (var plugin in Manager.Plugins.Where(plugin => plugin.Manifest is not null))
+        foreach (var group in Manager.Plugins.Where(plugin => plugin.Manifest is not null).GroupBy(plugin => plugin.Manifest!.Id))
         {
-            var pluginId = plugin.Manifest!.Id;
+            var pluginId = group.Key;
+            if (group.Any(plugin => plugin.HasRuntime || plugin.HasPendingStop))
+            {
+                var retained = new StackPanel { Spacing = 10 };
+                retained.Children.Add(Ui.Text(pluginId, 20));
+                retained.Children.Add(Ui.Text("工作台仍持有此插件的运行实例。即使包已更改、缺失或存在重复 ID，仍可请求完整停用。"));
+                var disable = Ui.Named(new Button
+                {
+                    Content = group.Any(plugin => plugin.HasPendingStop) ? "重试停用插件" : "停用插件",
+                    IsEnabled = !_shutdownPending
+                }, $"停用后台插件 {pluginId}");
+                disable.Click += async (_, _) => await RunAsync(() => DisableAsync(pluginId));
+                retained.Children.Add(disable);
+                page.Children.Add(Ui.Card(retained));
+                count++;
+            }
             foreach (var task in Manager.GetBackgroundTaskSnapshots(pluginId))
             {
                 count++;
@@ -53,7 +68,8 @@ internal sealed partial class MainWindow
                 void Refresh()
                 {
                     var current = Manager.GetBackgroundTaskSnapshots(pluginId).SingleOrDefault(snapshot => snapshot.Id == task.Id);
-                    var active = Manager.Plugins.Any(snapshot => snapshot.Manifest?.Id == pluginId && snapshot.State == PluginState.Enabled);
+                    var matches = Manager.Plugins.Where(snapshot => snapshot.Manifest?.Id == pluginId).ToArray();
+                    var active = matches is [{ State: PluginState.Enabled, IsTrusted: true }];
                     status.Text = current is null ? "已停止，插件运行实例已释放。" :
                         $"状态：{current.State} · 恢复偏好：{current.ResumeOnStartup} · 运行意图：{current.DesiredRunning}\n开始：{current.StartedAt:u} · 结束：{current.FinishedAt:u}"
                         + (current.ErrorCode is null ? "" : $"\n错误代码：{current.ErrorCode}");

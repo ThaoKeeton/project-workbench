@@ -123,19 +123,67 @@ public sealed class PackageMaintenanceTests
         var source = disk.Package("com.example.maintain", external: true, fields: new() { ["version"] = "2.0.0" });
         var store = Store(disk);
         Assert.True((await store.StageUpdateAsync("com.example.maintain", source)).Succeeded);
-        var apply = store.ApplyPendingAsync();
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
-        var history = Path.Combine(disk.Plugins, ".workbench-packages", "history");
-        while (!Directory.Exists(history) || !Directory.EnumerateDirectories(history, "data.preparing-*", SearchOption.AllDirectories)
-            .Any(directory => Directory.EnumerateFiles(directory, "*", SearchOption.AllDirectories).Any()))
+        var paused = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var apply = ApplyWithBackupCheckpointAsync(disk, store, 1000, paused, release);
+        try
         {
-            Assert.False(apply.IsCompleted, "The test must observe the real snapshot copy before mutating its source.");
-            await Task.Delay(1, deadline.Token);
+            Assert.Same(paused.Task, await Task.WhenAny(paused.Task, apply).WaitAsync(TimeSpan.FromSeconds(20)));
+            Assert.InRange(await paused.Task, 1, 999);
+            Assert.False(apply.IsCompleted);
+            File.WriteAllText(Path.Combine(data, "added-during-copy"), "current business data");
         }
-        File.WriteAllText(Path.Combine(data, "added-during-copy"), "current business data");
+        finally { release.Set(); }
         Assert.False(Assert.Single(await apply).Succeeded);
         Assert.Contains("1.0.0", File.ReadAllText(Path.Combine(target, "plugin.json")));
         Assert.Equal("current business data", File.ReadAllText(Path.Combine(data, "added-during-copy")));
+    }
+
+    [Fact]
+    public async Task A_data_change_after_backup_and_apply_complete_is_legal_and_does_not_rewrite_the_backup()
+    {
+        using var disk = new TestDirectory();
+        disk.Package("com.example.maintain");
+        var data = Path.Combine(disk.User, "data", "com.example.maintain");
+        Directory.CreateDirectory(data);
+        for (var i = 0; i < 1000; i++) File.WriteAllText(Path.Combine(data, $"f{i:D4}"), "original");
+        var source = disk.Package("com.example.maintain", external: true, fields: new() { ["version"] = "2.0.0" });
+        var store = Store(disk);
+        Assert.True((await store.StageUpdateAsync("com.example.maintain", source)).Succeeded);
+        var paused = new TaskCompletionSource<int>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var release = new ManualResetEventSlim();
+        var apply = ApplyWithBackupCheckpointAsync(disk, store, 1000, paused, release);
+        try
+        {
+            Assert.Same(paused.Task, await Task.WhenAny(paused.Task, apply).WaitAsync(TimeSpan.FromSeconds(20)));
+            Assert.InRange(await paused.Task, 1, 999);
+            Assert.False(apply.IsCompleted);
+        }
+        finally { release.Set(); }
+        Assert.True(Assert.Single(await apply).Succeeded);
+        File.WriteAllText(Path.Combine(data, "added-after-copy"), "later business data");
+        var backup = Assert.Single(store.History).DataBackupPath!;
+        Assert.False(File.Exists(Path.Combine(backup, "data", "com.example.maintain", "added-after-copy")));
+        Assert.Equal("original", File.ReadAllText(Path.Combine(backup, "data", "com.example.maintain", "f0000")));
+        Assert.Equal("later business data", File.ReadAllText(Path.Combine(data, "added-after-copy")));
+    }
+
+    private static Task<IReadOnlyList<PluginOperationResult>> ApplyWithBackupCheckpointAsync(TestDirectory disk,
+        PluginPackageStore store, int sourceCount, TaskCompletionSource<int> paused, ManualResetEventSlim release)
+    {
+        var history = Path.Combine(disk.Plugins, ".workbench-packages", "history");
+        return TestDispatcher.RunAsync(() => store.ApplyPendingAsync(), () =>
+        {
+            if (paused.Task.IsCompleted || !Directory.Exists(history)) return;
+            var temporary = Directory.EnumerateDirectories(history, "data.preparing-*", SearchOption.AllDirectories).SingleOrDefault();
+            if (temporary is null) return;
+            var copied = Directory.EnumerateFiles(temporary, "*", SearchOption.AllDirectories).Count();
+            if (copied == 0 || copied >= sourceCount) return;
+            // Hold the actual backup continuation, with a strict partial copy.
+            // Revalidation and the commit rename cannot race the test writer.
+            paused.TrySetResult(copied);
+            Assert.True(release.Wait(TimeSpan.FromSeconds(20)), "The test did not release its backup checkpoint.");
+        });
     }
 
     [Fact]

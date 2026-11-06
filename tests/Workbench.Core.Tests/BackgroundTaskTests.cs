@@ -84,7 +84,7 @@ public sealed class BackgroundTaskTests
         await EnableAsync(manager, "synchronous");
         Assert.True((await manager.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true)).Succeeded);
         Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
-        await RuntimeTest.WaitAsync(async () => await manager.GetSettings(Id).GetAsync("jobRuns", 0) == 1);
+        await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(disk.User, "data", Id, "sync-started"))));
         var releaseWork = Path.Combine(disk.User, "data", Id, "release-sync");
         Task<PluginTaskOperationResult>? stop = null;
         try
@@ -155,10 +155,32 @@ public sealed class BackgroundTaskTests
         await using var manager = Manager(disk);
         await EnableAsync(manager, "synchronous");
         var release = Path.Combine(disk.User, "data", Id, "release-sync");
-        var start = Task.Run(() => manager.StartBackgroundTaskAsync(Id, "monitor"));
-        try { Assert.True((await start.WaitAsync(TimeSpan.FromSeconds(1))).Succeeded); }
-        finally { await File.WriteAllTextAsync(release, "synthetic release"); }
-        await start;
+        var returned = new TaskCompletionSource<PluginTaskOperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var pulse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var start = TestDispatcher.RunAsync(async () =>
+        {
+            var result = await manager.StartBackgroundTaskAsync(Id, "monitor");
+            returned.TrySetResult(result);
+            SynchronizationContext.Current!.Post(_ => pulse.TrySetResult(), null);
+            await pulse.Task;
+            // Keep the controlled dispatcher alive through actual work completion,
+            // including when the negative control incorrectly runs the delegate here.
+            await RuntimeTest.WaitAsync(() => Task.FromResult(Assert.Single(manager.GetBackgroundTaskSnapshots(Id)).State == PluginBackgroundTaskState.Completed));
+            return result;
+        });
+        try
+        {
+            await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(disk.User, "data", Id, "sync-started"))));
+            Assert.True((await returned.Task.WaitAsync(TimeSpan.FromSeconds(1))).Succeeded);
+            await pulse.Task.WaitAsync(TimeSpan.FromSeconds(1));
+            Assert.False(File.Exists(release));
+            Assert.Equal(0, await manager.GetSettings(Id).GetAsync("jobRuns", 0)); // No delegate await ran before the held gate.
+        }
+        finally
+        {
+            await File.WriteAllTextAsync(release, "synthetic release");
+            await start.WaitAsync(TimeSpan.FromSeconds(5));
+        }
     }
 
     [Theory]

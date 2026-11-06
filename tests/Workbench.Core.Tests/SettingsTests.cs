@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Workbench.Core;
 using Xunit;
 
@@ -6,6 +7,57 @@ namespace Workbench.Core.Tests;
 
 public sealed class SettingsTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Plugin_converter_failures_return_defaults_with_only_safe_diagnostics(bool unknownFailure)
+    {
+        using var disk = new TestDirectory();
+        disk.Package("com.example.fixture");
+        await using var manager = disk.Manager();
+        await manager.DiscoverAsync();
+        var settings = manager.GetSettings("com.example.fixture");
+        await settings.SetAsync("converted", "synthetic stored value");
+        if (unknownFailure)
+        {
+            var fallback = new HostileValue();
+            Assert.Same(fallback, await settings.GetAsync("converted", fallback));
+        }
+        else
+        {
+            var fallback = new SecretValue();
+            Assert.Same(fallback, await settings.GetAsync("converted", fallback));
+        }
+        var diagnostic = Assert.Single(Assert.Single(manager.Plugins).Diagnostics);
+        Assert.Equal(PluginDiagnosticCode.SettingsCorrupt, diagnostic.Code);
+        Assert.Contains("SettingsConversionFailed", diagnostic.Message);
+        Assert.DoesNotContain("synthetic-converter-private-response", diagnostic.Message);
+        Assert.Equal("synthetic stored value", await settings.GetAsync("converted", "missing"));
+    }
+
+    [JsonConverter(typeof(SecretConverter))]
+    public sealed class SecretValue;
+    public sealed class SecretConverter : JsonConverter<SecretValue>
+    {
+        public override SecretValue Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            => throw new JsonException("synthetic-converter-private-response");
+        public override void Write(Utf8JsonWriter writer, SecretValue value, JsonSerializerOptions options) => throw new NotSupportedException();
+    }
+
+    [JsonConverter(typeof(HostileConverter))]
+    public sealed class HostileValue;
+    public sealed class HostileConverter : JsonConverter<HostileValue>
+    {
+        public override HostileValue Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+            => throw new HostileConverterException();
+        public override void Write(Utf8JsonWriter writer, HostileValue value, JsonSerializerOptions options) => throw new NotSupportedException();
+    }
+    public sealed class HostileConverterException : Exception
+    {
+        public override string Message => throw new InvalidOperationException("A converter exception Message must not be evaluated.");
+        public override string ToString() => throw new InvalidOperationException("A converter exception ToString must not be evaluated.");
+    }
+
     [Fact]
     public async Task Defaults_and_json_values_persist_across_fresh_manager_instances()
     {

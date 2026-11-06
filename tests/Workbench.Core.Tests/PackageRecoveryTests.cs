@@ -10,6 +10,121 @@ namespace Workbench.Core.Tests;
 public sealed class PackageRecoveryTests
 {
     private const string Id = "com.example.recovery";
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task BackedUp_before_old_move_with_damaged_stage_aborts_durably_without_losing_bytes_or_authority(bool missing)
+    {
+        using var disk = new TestDirectory();
+        var currentData = Path.Combine(disk.User, "data", Id);
+        Directory.CreateDirectory(currentData);
+        File.WriteAllText(Path.Combine(currentData, "business.txt"), "synthetic retained business data");
+        var layout = await PrepareAsync(disk, "BackedUp", false, false);
+        Directory.Delete(layout.Data);
+        var backup = await PackageDataBackup.CreateAsync(disk.User, Id, layout.Data, default);
+        var journal = JsonNode.Parse(File.ReadAllText(layout.Journal))!;
+        journal["dataFingerprint"] = backup;
+        File.WriteAllText(layout.Journal, journal.ToJsonString());
+        var oldFingerprint = journal["oldFingerprint"]!.GetValue<string>();
+        await new PluginStateStore(disk.User).SaveAsync(Id, true, oldFingerprint, default);
+        await new PluginRuntimeState(disk.User).SaveAsync(Id, oldFingerprint, "monitor", new(true, true), _ => { }, default);
+        var before = await PackageDataBackup.FingerprintAsync(layout.Data, default);
+        if (missing) Directory.Delete(layout.Stage, recursive: true);
+        else File.WriteAllText(Path.Combine(layout.Stage, "plugin.json"), "synthetic damaged stage retained");
+
+        var store = Store(disk);
+        Assert.False(Assert.Single(await store.ApplyPendingAsync()).Succeeded);
+        Assert.Empty(store.PendingOperations);
+        Assert.Empty(store.History); // An abort must not invent an old-code history copy.
+        Assert.False(Directory.Exists(layout.Old));
+        Assert.Equal(oldFingerprint, (await PackageValidator.ValidateAsync(layout.Target, new(0, 2, 0), default)).Fingerprint);
+        Assert.Equal(before, await PackageDataBackup.FingerprintAsync(layout.Data, default));
+        Assert.Equal("synthetic retained business data", File.ReadAllText(Path.Combine(currentData, "business.txt")));
+        if (!missing) Assert.Equal("synthetic damaged stage retained", File.ReadAllText(Path.Combine(layout.Stage, "plugin.json")));
+        Assert.Empty(await store.ApplyPendingAsync());
+        Assert.Empty(await Store(disk).ApplyPendingAsync());
+        using (var intent = JsonDocument.Parse(File.ReadAllText(Path.Combine(disk.User, "background-tasks.json"))))
+            Assert.False(intent.RootElement.GetProperty("plugins").TryGetProperty(Id, out _));
+
+        // Replay the durable terminal record as if interrupted just before journal deletion.
+        File.Copy(Path.Combine(Path.GetDirectoryName(layout.Old)!, "record.json"), layout.Journal);
+        Assert.False(Assert.Single(await Store(disk).ApplyPendingAsync()).Succeeded);
+        Assert.False(File.Exists(layout.Journal));
+        // An actual fresh child process applies before discovery and observes revoked trust/intent.
+        var restarted = await ProbeAsync(disk, Id, "package-apply");
+        Assert.False(restarted.GetProperty("Trusted").GetBoolean());
+        Assert.False(restarted.GetProperty("DesiredEnabled").GetBoolean());
+        Assert.False(restarted.GetProperty("Loaded").GetBoolean());
+        await using var manager = disk.Manager();
+        Assert.False(Assert.Single(await manager.DiscoverAsync()).IsTrusted);
+        Assert.False((await manager.EnableAsync(Id)).Succeeded);
+        Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+    }
+
+    [Theory]
+    [InlineData("history-code")]
+    [InlineData("history-record")]
+    [InlineData("backup")]
+    [InlineData("missing-backup")]
+    [InlineData("target")]
+    [InlineData("unknown-phase")]
+    [InlineData("unsafe-path")]
+    public async Task BackedUp_abort_rejects_unverified_or_conflicting_layouts(string damage)
+    {
+        using var disk = new TestDirectory();
+        var layout = await PrepareAsync(disk, "BackedUp", false, false);
+        File.WriteAllText(Path.Combine(layout.Stage, "plugin.json"), "damaged stage retained");
+        if (damage == "history-code") Directory.CreateDirectory(layout.Old);
+        if (damage == "history-record") File.WriteAllText(Path.Combine(Path.GetDirectoryName(layout.Old)!, "record.json"), "unknown history retained");
+        if (damage == "backup") File.WriteAllText(Path.Combine(layout.Data, "unexpected"), "damaged backup retained");
+        if (damage == "missing-backup") Directory.Delete(layout.Data);
+        if (damage == "target") File.WriteAllText(Path.Combine(layout.Target, "changed.txt"), "changed current retained");
+        if (damage is "unknown-phase" or "unsafe-path")
+        {
+            var json = JsonNode.Parse(File.ReadAllText(layout.Journal))!;
+            json[damage == "unknown-phase" ? "phase" : "targetDirectory"] = damage == "unknown-phase" ? "Unknown" : "../escape";
+            File.WriteAllText(layout.Journal, json.ToJsonString());
+        }
+        var journalBytes = File.ReadAllBytes(layout.Journal);
+        Assert.False(Assert.Single(await Store(disk).ApplyPendingAsync()).Succeeded);
+        Assert.Equal(journalBytes, File.ReadAllBytes(layout.Journal));
+        Assert.Equal("damaged stage retained", File.ReadAllText(Path.Combine(layout.Stage, "plugin.json")));
+        Assert.Contains("1.0.0", File.ReadAllText(Path.Combine(layout.Target, "plugin.json")));
+        Assert.False((await Store(disk).CancelPendingAsync(Id)).Succeeded);
+        await using var manager = disk.Manager();
+        Assert.Equal(PluginState.Invalid, Assert.Single(await manager.DiscoverAsync()).State);
+        Assert.False((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Interrupted_Backup_abort_keeps_activation_fenced_until_durable_revocation_replays_in_a_new_process()
+    {
+        using var disk = new TestDirectory();
+        var layout = await PrepareAsync(disk, "BackedUp", false, false);
+        File.WriteAllText(Path.Combine(layout.Stage, "plugin.json"), "damaged staged bytes retained");
+        var fingerprint = JsonNode.Parse(File.ReadAllText(layout.Journal))!["oldFingerprint"]!.GetValue<string>();
+        await new PluginStateStore(disk.User).SaveAsync(Id, true, fingerprint, default);
+        var state = Path.Combine(disk.User, "plugin-state.json");
+        File.Move(state, state + ".saved");
+        Directory.CreateDirectory(state); // Actual durable trust revocation cannot complete.
+        Assert.False(Assert.Single(await Store(disk).ApplyPendingAsync()).Succeeded);
+        Assert.Equal("Aborted", JsonNode.Parse(File.ReadAllText(layout.Journal))!["phase"]!.GetValue<string>());
+        Directory.Delete(state);
+        File.Move(state + ".saved", state);
+        await using (var manager = disk.Manager())
+        {
+            Assert.Equal(PluginState.Invalid, Assert.Single(await manager.DiscoverAsync()).State);
+            Assert.False((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+        }
+        var restarted = await ProbeAsync(disk, Id, "package-apply");
+        Assert.False(restarted.GetProperty("Trusted").GetBoolean());
+        Assert.False(restarted.GetProperty("DesiredEnabled").GetBoolean());
+        Assert.False(restarted.GetProperty("Loaded").GetBoolean());
+        Assert.False(File.Exists(layout.Journal));
+        Assert.Equal("damaged staged bytes retained", File.ReadAllText(Path.Combine(layout.Stage, "plugin.json")));
+        Assert.False(Directory.Exists(layout.Old));
+    }
+
     // Removing phase reconciliation, fingerprint checks, quarantine journaling,
     // durable revocation or per-package error isolation breaks these real layouts.
     [Theory]

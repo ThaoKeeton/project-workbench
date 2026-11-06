@@ -198,6 +198,8 @@ public sealed class PluginPackageStore
         var target = _journal.TargetPath(record);
         var stage = _journal.StagePath(record);
         var old = _journal.CodePath(record);
+        if (record.Phase == PackageOperationPhase.Aborted)
+            return await AbortBeforeOldMoveAsync(record, token);
         if (record.Phase is PackageOperationPhase.RecoveryPrepared or PackageOperationPhase.Quarantined)
             return await RecoverOldAsync(record, token);
         if (record.NewFingerprint is not null && record.Phase is (PackageOperationPhase.NewMoved or PackageOperationPhase.Committed))
@@ -234,6 +236,9 @@ public sealed class PluginPackageStore
             try { await VerifyAsync(stage, record.PluginId, record.NewFingerprint, token); }
             catch (Exception error) when (IsStorageError(error))
             {
+                if (record.Phase == PackageOperationPhase.BackedUp && targetFingerprint == record.OldFingerprint &&
+                    targetFingerprint is not null && oldFingerprint is null)
+                    return await AbortBeforeOldMoveAsync(record, token);
                 if (targetFingerprint is null && oldFingerprint == record.OldFingerprint && oldFingerprint is not null)
                 {
                     return await RecoverOldAsync(record, token);
@@ -285,6 +290,29 @@ public sealed class PluginPackageStore
         await _journal.WriteAsync(record, token);
         await CompleteAsync(record, token);
         return new(true, $"{record.Kind} applied to '{record.PluginId}'. Code requires explicit trust; current data was not restored.");
+    }
+
+    private async Task<PluginOperationResult> AbortBeforeOldMoveAsync(PackageJournalRecord record, CancellationToken token)
+    {
+        // Only this owned, verified physical layout can terminate without a
+        // move. A terminal journal fences activation until revocation completes.
+        if (record.Phase is not (PackageOperationPhase.BackedUp or PackageOperationPhase.Aborted) || record.OldFingerprint is null)
+            throw new IOException("The journal does not own a before-move recovery.");
+        await VerifyAsync(_journal.TargetPath(record), record.PluginId, record.OldFingerprint, token);
+        var old = _journal.CodePath(record);
+        FileSystemGuard.RejectLinks(old);
+        if (Directory.Exists(old) || File.Exists(old)) throw new IOException("Code history conflicts with before-move recovery.");
+        if (await PackageDataBackup.FingerprintAsync(_journal.DataPath(record), token) != record.DataFingerprint)
+            throw new IOException("The owned state backup cannot be verified.");
+        var aborted = record with { Phase = PackageOperationPhase.Aborted };
+        var historyRecord = FileSystemGuard.ContainedPath(_journal.HistoryDirectory(record), "record.json");
+        FileSystemGuard.RejectLinks(historyRecord);
+        if (Directory.Exists(historyRecord) || File.Exists(historyRecord) && await PackageJournal.ReadAsync(historyRecord, token) != aborted)
+            throw new IOException("History metadata conflicts with before-move recovery.");
+        await _journal.WriteAsync(aborted, token);
+        await RevokeAsync(record.PluginId, token);
+        await CompleteAsync(aborted, token);
+        return Failure("Damaged staged code and its state backup were preserved; verified current code requires explicit trust. Current data was not restored.");
     }
 
     private async Task<PluginOperationResult> RecoverOldAsync(PackageJournalRecord record, CancellationToken token)

@@ -16,7 +16,7 @@ public sealed partial class WorkbenchApplication : Application
         UnhandledException += (_, args) =>
         {
             Environment.ExitCode = 1;
-            _options.WriteFailure("unhandled-ui-exception", args.Exception, args.Message);
+            _options.WriteFailure("unhandled-ui-exception", args.Exception);
             // Do not turn an unhandled native/UI failure into a successful smoke result.
         };
         _options.TraceStartup("initializing-compiled-application-xaml");

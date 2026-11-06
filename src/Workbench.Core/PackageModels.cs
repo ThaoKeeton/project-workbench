@@ -6,7 +6,7 @@ namespace Workbench.Core;
 public enum PackageOperationKind { Update, Rollback, Remove }
 
 [JsonConverter(typeof(JsonStringEnumConverter<PackageOperationPhase>))]
-public enum PackageOperationPhase { Prepared, BackedUp, OldMoved, NewMoved, Committed, RecoveryPrepared, Quarantined, Recovered }
+public enum PackageOperationPhase { Prepared, BackedUp, OldMoved, NewMoved, Committed, RecoveryPrepared, Quarantined, Recovered, Aborted }
 
 public sealed record PendingPackageOperation(
     string PluginId, string OperationId, PackageOperationKind Kind, PackageOperationPhase Phase,

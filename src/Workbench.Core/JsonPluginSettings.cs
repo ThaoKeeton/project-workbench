@@ -29,9 +29,11 @@ internal sealed partial class JsonPluginSettings(string directory, Action<Plugin
             if (!_values!.TryGetValue(key, out var value))
                 return defaultValue;
             try { return value.Deserialize<T>(AtomicJsonFile.Options)!; }
-            catch (JsonException error)
+            catch (Exception)
             {
-                diagnostic(new(PluginDiagnosticCode.SettingsCorrupt, $"Setting '{key}' has an incompatible JSON value: {error.Message}"));
+                // A converter belongs to the plugin. Even Message/ToString can
+                // execute plugin code, and its text can contain provider secrets.
+                diagnostic(new(PluginDiagnosticCode.SettingsCorrupt, $"SettingsConversionFailed: setting '{key}' could not be read; its default is being used."));
                 return defaultValue;
             }
         }
@@ -72,9 +74,9 @@ internal sealed partial class JsonPluginSettings(string directory, Action<Plugin
             _values = await JsonSerializer.DeserializeAsync<Dictionary<string, JsonElement>>(stream, AtomicJsonFile.Options, cancellationToken)
                 ?? throw new JsonException("The settings document cannot be null.");
         }
-        catch (JsonException error)
+        catch (JsonException)
         {
-            diagnostic(new(PluginDiagnosticCode.SettingsCorrupt, $"Corrupt settings at '{_path}'; defaults are being used. {error.Message}"));
+            diagnostic(new(PluginDiagnosticCode.SettingsCorrupt, "SettingsDocumentInvalid: defaults are being used; the stored document was preserved."));
             _values = new(StringComparer.Ordinal);
         }
     }

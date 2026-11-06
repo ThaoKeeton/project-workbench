@@ -29,7 +29,8 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         string? probeRoot = null;
         for (var i = 0; i < args.Length; i++)
         {
-            if (args[i] is "--business-probe" or "--probe-root" && i + 1 == args.Length)
+            if (args[i] is "--business-probe" or "--runtime-probe" or "--probe-root" or "--smoke-report" &&
+                (i + 1 == args.Length || string.IsNullOrWhiteSpace(args[i + 1]) || args[i + 1].StartsWith("--", StringComparison.Ordinal)))
                 throw new ArgumentException("An isolated probe option requires its explicit value.");
             if (args[i] == "--smoke-report" && i + 1 < args.Length) report = Path.GetFullPath(args[++i]);
             else if (args[i] == "--runtime-probe" && i + 1 < args.Length) probe = args[++i];
@@ -67,8 +68,8 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         succeeded = false,
         stage,
         userRoot = UserRoot,
-        error = error.ToString(),
-        nativeMessage,
+        error = HostFailure.Describe("HostOperationFailed", error),
+        nativeMessage = nativeMessage is null ? null : "NativeFailure",
         errorHResult = $"0x{unchecked((uint)error.HResult):X8}",
         startupStages = StartupStages,
         completedUtc = DateTimeOffset.UtcNow

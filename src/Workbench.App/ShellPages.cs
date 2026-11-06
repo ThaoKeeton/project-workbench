@@ -53,12 +53,13 @@ internal sealed partial class MainWindow
             if (manifest is not null)
             {
                 var id = manifest.Id;
+                var ownsRuntime = package.HasRuntime || package.HasPendingStop;
                 var button = Ui.Named(new Button
                 {
-                    Content = package.State == PluginState.Stopping ? "重试停用" : package.State == PluginState.Enabled ? "停用" : "启用",
-                    IsEnabled = !_shutdownPending && package.State != PluginState.Invalid
-                }, $"{(package.State is PluginState.Enabled or PluginState.Stopping ? "停用" : "启用")} {manifest.Name}");
-                button.Click += async (_, _) => await RunAsync(() => package.State is PluginState.Enabled or PluginState.Stopping ? DisableAsync(id) : EnableAsync(package));
+                    Content = package.HasPendingStop ? "重试停用" : ownsRuntime ? "停用" : "启用",
+                    IsEnabled = !_shutdownPending && (ownsRuntime || package.State != PluginState.Invalid)
+                }, $"{(ownsRuntime ? "停用" : "启用")} {manifest.Name}");
+                button.Click += async (_, _) => await RunAsync(() => ownsRuntime ? DisableAsync(id) : EnableAsync(package));
                 body.Children.Add(button);
                 AddPackageActions(body, package);
             }

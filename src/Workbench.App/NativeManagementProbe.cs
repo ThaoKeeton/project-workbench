@@ -23,17 +23,21 @@ internal static class NativeManagementProbe
         var background = await window.SmokeNavigateAsync("background");
         Require(!Find<Button>(background, $"启动后台任务 {Id}/confirmed-worker").IsEnabled
             && !Find<ToggleSwitch>(background, $"恢复后台任务 {Id}/confirmed-worker").IsEnabled, "Business-confirmed task exposed generic Start/Resume.");
-        Invoke(Find<Button>(background, $"启动后台任务 {Id}/worker"));
         var data = Path.Combine(options.UserRoot, "data", Id);
-        await WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(data, "sync-started"))));
-        var pulse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        Require(window.DispatcherQueue.TryEnqueue(() => pulse.TrySetResult()), "Dispatcher pulse could not be queued.");
-        await pulse.Task.WaitAsync(TimeSpan.FromSeconds(2));
-        await window.SmokeNavigateAsync("home");
-        await window.SmokeNavigateAsync("settings");
-        background = await window.SmokeNavigateAsync("background");
-        Require(manager.GetBackgroundTaskSnapshots(Id).Single(task => task.Id == "worker").State == PluginBackgroundTaskState.Running, "Navigation ended the supervised worker.");
-        await File.WriteAllTextAsync(Path.Combine(data, "release-sync"), "synthetic");
+        try
+        {
+            Invoke(Find<Button>(background, $"启动后台任务 {Id}/worker"));
+            await WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(data, "sync-started")) && !window.SmokeActionBusy));
+            Require(await manager.GetSettings(Id).GetAsync("worker-runs", 0) == 0, "The delegate awaited settings before its synchronous prefix gate.");
+            var pulse = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Require(window.DispatcherQueue.TryEnqueue(() => pulse.TrySetResult()), "Dispatcher pulse could not be queued.");
+            await pulse.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            await window.SmokeNavigateAsync("home");
+            await window.SmokeNavigateAsync("settings");
+            background = await window.SmokeNavigateAsync("background");
+            Require(manager.GetBackgroundTaskSnapshots(Id).Single(task => task.Id == "worker").State == PluginBackgroundTaskState.Running, "Navigation ended the supervised worker.");
+        }
+        finally { await File.WriteAllTextAsync(Path.Combine(data, "release-sync"), "synthetic"); }
         Invoke(Find<Button>(background, $"停止后台任务 {Id}/worker"));
         await WaitAsync(() => Task.FromResult(manager.GetBackgroundTaskSnapshots(Id).Single(task => task.Id == "worker").State == PluginBackgroundTaskState.Stopped && !window.SmokeActionBusy));
         await WaitAsync(() => Task.FromResult(Find<TextBlock>(background, $"后台任务状态 {Id}/worker").Text.Contains("Stopped", StringComparison.Ordinal)));
@@ -62,6 +66,8 @@ internal static class NativeManagementProbe
         record("Close declined during an owned asynchronous package action, blocked second ownership, then safely retried after the actual write settled");
         await VerifyMaintenanceFailureAsync(options);
         record("Local managed maintenance failure remained visible without blocking navigation or an unrelated bundled sample");
+        await NativeFailureProbe.RunAsync(options, record);
+        await NativeRetainedRuntimeProbe.RunAsync(options, record);
     }
 
     private static async Task VerifyCredentialsAsync(MainWindow window)
@@ -179,7 +185,7 @@ internal static class NativeManagementProbe
         finally { await extra.FinishSmokeAsync(); }
     }
 
-    private static async Task<MainWindow> OpenFixtureWindowAsync(RunOptions options, string name)
+    internal static async Task<MainWindow> OpenFixtureWindowAsync(RunOptions options, string name)
     {
         var root = Path.Combine(options.UserRoot, name);
         using (HostRuntime.AcquireLease(root))
@@ -198,7 +204,7 @@ internal static class NativeManagementProbe
         throw new InvalidOperationException("Known native work lost its user-root lease.");
     }
 
-    private static void Invoke(Button button) => new ButtonAutomationPeer(button).Invoke();
+    internal static void Invoke(Button button) => new ButtonAutomationPeer(button).Invoke();
 }
 
 internal sealed partial class MainWindow
@@ -208,4 +214,5 @@ internal sealed partial class MainWindow
     internal Button? SmokeCloseRetryButton => _notice.ActionButton as Button;
     internal bool SmokeCloseInProgress => _closing;
     internal Task<bool> SmokeCloseCompletion => _closeCompleted.Task;
+    internal string SmokeNoticeText => _notice.Title + " " + _notice.Message;
 }

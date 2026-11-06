@@ -346,7 +346,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         // The vendor rebuilds tab bodies on worker results. Always re-resolve controls after the operation.
         await WaitForUpcamViewAsync(page, "digest-tabs", 1,
             content => TryById<TextBox>(content, "diagnostic-output") is { IsLoaded: true } output && output.Text.Length > 50);
-        var characters = ById<TextBox>(page, "diagnostic-output").Text.Length;
+        var previewOutput = ById<TextBox>(page, "diagnostic-output").Text;
         var workerIds = CaptureWorkers();
         Require(workerIds.Length > 0, "Sample preview did not use the real production worker.");
         await window.SmokeNavigateAsync("home");
@@ -354,7 +354,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         await UpcamReadyAsync(page);
         await WaitForUpcamViewAsync(page, "digest-tabs", 1,
             content => TryById<TextBox>(content, "diagnostic-output") is { IsLoaded: true });
-        Require(ById<TextBox>(page, "diagnostic-output").Text.Length == characters && CaptureWorkers().SequenceEqual(workerIds), "Page recreation lost real preview output or duplicated workers.");
+        Require(ById<TextBox>(page, "diagnostic-output").Text == previewOutput && CaptureWorkers().SequenceEqual(workerIds), "Page recreation lost real preview output or duplicated workers.");
         if (full)
         {
             Require(!(await Manager.ExecuteCommandAsync(Upcam, "scheduler-start")).Succeeded, "Production UPCAM started without saved automatic business authority.");
@@ -366,7 +366,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
             var fault = Manager.GetBackgroundTaskSnapshots(Upcam).Single();
             Require((await Manager.StopBackgroundTaskAsync(Upcam, "digest-scheduler")).Succeeded, "Host could not clear the real faulted UPCAM task.");
             Require((await Manager.ExecuteCommandAsync(Upcam, "preview-sample")).Succeeded && CaptureWorkers().SequenceEqual(workerIds), "Task-only Stop retired or duplicated the session-owned preview worker.");
-            _observations.Add(new { stage = "upcam-real-production-worker", previewCharacters = characters, workerIds, taskFault = fault,
+            _observations.Add(new { stage = "upcam-real-production-worker", previewCharacters = previewOutput.Length, workerIds, taskFault = fault,
                 automaticProviderCoverage = "Unexecuted: no saved authority/credentials; selected upstream workflow publishes production only, not the separate synthetic acceptance-ID binary." });
             await DisableAsync(Upcam);
             await WaitUntilAsync(() => _workers.Values.All(p => p.HasExited));
@@ -604,7 +604,11 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         return hosts.Length == 1 ? hosts[0] : null;
     }
     private object DingTarget() => ((WinUiView)Manager.Contributions.Views.Single(v => v.PluginId == Ding && v.View.Id == "workspace").View).CreateView.Target ?? throw new InvalidOperationException("Actual DingTalk diagnostic target unavailable.");
-    private JsonElement DingObservation() => JsonDocument.Parse((string)_ding!.GetType().GetProperty("ObservationJson")!.GetValue(_ding)!).RootElement.Clone();
+    private JsonElement DingObservation()
+    {
+        using var document = JsonDocument.Parse((string)_ding!.GetType().GetProperty("ObservationJson")!.GetValue(_ding)!);
+        return document.RootElement.Clone();
+    }
     private Task DingTask(string property) => (Task)_ding!.GetType().GetProperty(property)!.GetValue(_ding)!;
     private PluginSnapshot Snapshot(string id) => Manager.Plugins.Single(p => p.Manifest?.Id == id);
 

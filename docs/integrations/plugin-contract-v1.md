@@ -13,7 +13,7 @@ pwsh -File ./scripts/export-sdk.ps1
 pwsh -File ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-snapshot
 ```
 
-CI artifact `workbench-sdk-0.2.0` 包含 `sdk-snapshot.zip`、`source/`、两个 `.nupkg` 和 `manifest.json`。清单记录完整 sourceCommit、SDK 源码是否有未提交修改、每个源码/包的 SHA256 及上述版本。固定并核对该清单后再进入独立 CI；若 sdkSourcesDirty 为 true，源码以逐文件哈希为准，不能仅凭 sourceCommit 复现。快照仅复制明确列出的两个 SDK 项目、三个契约源文件、Directory.Build.props 和 global.json；不包含 App/Core/Desktop DLL、用户配置、凭据或业务数据。可按相同工具版本从源码重建程序集；ZIP/包哈希用于核对该次分发，不承诺不同打包时间的容器字节相同。
+CI artifact `workbench-sdk-0.2.0` 包含 `sdk-snapshot.zip`、`source/`、两个 `.nupkg` 和 `manifest.json`。清单记录完整 sourceCommit、SDK 源码是否有未提交修改、每个源码/包的 SHA256 及上述版本。固定并核对该清单后再进入独立 CI；若 sdkSourcesDirty 为 true，源码以逐文件哈希为准，不能仅凭 sourceCommit 复现。快照仅复制九个明确列出的源文件：两个 SDK 项目、三个契约源文件、两份消费者 README、Directory.Build.props 和 global.json；两个 `.nupkg` 均声明并包含各自的 README。不包含 App/Core/Desktop DLL、用户配置、凭据或业务数据。可按相同工具版本从源码重建程序集；ZIP/包哈希用于核对该次分发，不承诺不同打包时间的容器字节相同。
 
 源码方式解压后引用 `source/src/Workbench.Sdk/Workbench.Sdk.csproj` 和 `source/src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj`。NuGet 方式将快照 `packages/` 加入本地源，在独立插件项目固定：
 

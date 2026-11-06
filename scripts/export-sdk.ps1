@@ -14,8 +14,8 @@ if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force 
 New-Item $source, $packages -ItemType Directory -Force | Out-Null
 # Explicit source allow-list: no host/Desktop binary, private config, credentials or business data.
 $files = @('Directory.Build.props', 'global.json', 'src/Workbench.Sdk/Workbench.Sdk.csproj',
-    'src/Workbench.Sdk/PluginContracts.cs', 'src/Workbench.Sdk/RuntimeContracts.cs',
-    'src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj', 'src/Workbench.WinUI.Sdk/WinUiView.cs')
+    'src/Workbench.Sdk/PluginContracts.cs', 'src/Workbench.Sdk/RuntimeContracts.cs', 'src/Workbench.Sdk/README.md',
+    'src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj', 'src/Workbench.WinUI.Sdk/WinUiView.cs', 'src/Workbench.WinUI.Sdk/README.md')
 $hashes = @()
 foreach ($relative in $files) {
     $destination = Join-Path $source $relative

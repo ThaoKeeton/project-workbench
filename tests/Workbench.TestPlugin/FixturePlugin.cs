@@ -210,6 +210,11 @@ public sealed class RuntimeFixturePlugin : IWorkbenchPlugin
 
     private async Task RunAsync(IPluginBackgroundExecution execution)
     {
+        if (_mode == "synchronous")
+        {
+            File.WriteAllText(Path.Combine(_context.DataDirectory, "sync-started"), "synthetic earliest prefix");
+            while (!File.Exists(Path.Combine(_context.DataDirectory, "release-sync"))) Thread.Sleep(10);
+        }
         var settings = _context.Settings;
         var run = Interlocked.Increment(ref _runCount);
         await File.WriteAllTextAsync(Path.Combine(_context.DataDirectory, $"run-{run}.marker"), "synthetic execution");
@@ -245,7 +250,6 @@ public sealed class RuntimeFixturePlugin : IWorkbenchPlugin
         if (_mode == "complete") return;
         if (_mode == "synchronous")
         {
-            while (!File.Exists(Path.Combine(_context.DataDirectory, "release-sync"))) Thread.Sleep(10);
             return;
         }
         if (_mode == "callback-held")

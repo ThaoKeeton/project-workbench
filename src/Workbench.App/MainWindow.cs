@@ -106,13 +106,14 @@ internal sealed partial class MainWindow : Window
             _navigation.IsEnabled = false;
             _navigation.IsSettingsVisible = false;
             DetachPluginViews();
-            var failure = Ui.Page("工作台未能启动", error.Message);
+            var message = HostFailure.Describe("HostStartupFailed", error);
+            var failure = Ui.Page("工作台未能启动", message);
             failure.Children.Add(Ui.Text("请关闭此窗口后重试。若用户目录已被占用，请先关闭另一个工作台实例。"));
             var close = Ui.Named(new Button { Content = "关闭窗口" }, "关闭未能启动的工作台窗口");
             close.Click += async (_, _) => await CloseAsync();
             failure.Children.Add(close);
             _body.Content = ScrollPage(failure); // Independent of Manager, even after partial initialization.
-            Notice("启动或原生验证失败", error.Message, InfoBarSeverity.Error);
+            Notice("启动或原生验证失败", message, InfoBarSeverity.Error);
             if (_options.IsIsolated)
             {
                 Environment.ExitCode = 1;
@@ -172,18 +173,29 @@ internal sealed partial class MainWindow : Window
                 case "settings": ShowPage(SettingsPage()); break;
                 case "view":
                     var registration = Manager.Contributions.Views.SingleOrDefault(v => v.PluginId == target.PluginId && v.View.Id == target.ViewId);
-                    if (registration?.View is not WinUiView view) throw new InvalidOperationException("插件页面已停用或未提供原生视图。");
+                    if (registration?.View is not WinUiView view)
+                    {
+                        ShowNavigationFailure("插件页面已停用或未提供原生视图。"); // Host-authored validation result.
+                        break;
+                    }
                     AssertUiThread();
-                    _content.Content = view.CreateView() ?? throw new InvalidOperationException("插件返回了空视图。");
+                    var created = HostFailure.CreateView(view.CreateView);
+                    if (created.Error is { } failure) ShowNavigationFailure(failure);
+                    else _content.Content = created.Value;
                     break;
                 default: ShowPage(HomePage()); break;
             }
         }
         catch (Exception error)
         {
-            ShowPage(Ui.Page("无法打开页面", error.Message));
-            Notice("无法打开页面", error.Message, InfoBarSeverity.Error);
+            ShowNavigationFailure(HostFailure.Describe("NavigationFailed", error));
         }
+    }
+
+    private void ShowNavigationFailure(string message)
+    {
+        ShowPage(Ui.Page("无法打开页面", message));
+        Notice("无法打开页面", message, InfoBarSeverity.Error);
     }
 
     private void ShowPage(FrameworkElement page) => _content.Content = ScrollPage(page);
@@ -209,8 +221,10 @@ internal sealed partial class MainWindow : Window
         _busy = true;
         _navigation.IsEnabled = false;
         _content.IsEnabled = false;
-        try { await action(); }
-        catch (Exception error) { Notice("操作失败", error.Message, InfoBarSeverity.Error); }
+        try
+        {
+            if (await HostFailure.RunAsync(action) is { } failure) Notice("操作失败", failure, InfoBarSeverity.Error);
+        }
         finally
         {
             _busy = false;
@@ -324,7 +338,7 @@ internal sealed partial class MainWindow : Window
                 _content.IsEnabled = true;
                 Navigate(new("background"));
             }
-            ShowCloseRetry("仍在等待插件停止", "已保留当前进程和用户目录租约。可查看状态并重试关闭；不会强制结束插件。" + error.Message);
+            ShowCloseRetry("仍在等待插件停止", "已保留当前进程和用户目录租约。可查看状态并重试关闭；不会强制结束插件。" + HostFailure.Describe("HostStopPending", error));
             _closing = false;
             _closeCompleted.TrySetResult(false);
             return false;
