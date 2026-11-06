@@ -18,6 +18,8 @@
 
 钉钉适配应把真实 `MonitorSupervisor.Completion` 纳入平台登记任务并等待 Stop 完成，不使用独立应用的托盘、窗口或第二份常驻程序。Restore 需继续执行业务自己的配置指纹/授权/预算检查；HostShutdown 保留恢复意图，用户停止/停用撤销恢复。平台恢复默认关闭，更新换包后旧任务意图不直接继承。
 
+需要业务页面完成具体范围确认的任务应标记 `RequiresPluginStart = true`：宿主通用 Start/Resume 不代替业务确认，插件拿到有效预览确认后才调用自己的 `context.BackgroundTasks.StartAsync`。目前钉钉 Runtime 的默认策略是停用/退出撤销所有具体权限，不能因为 host 0.2 提供恢复就改成无人值守授权；保留业务自己的更严格策略。
+
 `runtime.Secrets` 保存声明过的键，Windows DPAPI CurrentUser 加密，JSON 仅保存非敏感引用。建议 ID：`openai.api-key`、`dingtalk.webhook-url`、`dingtalk.webhook-secret`。Webhook URL 也按凭据处理。错误与任务标题不能包含值；不能把此接口称为防其他可信插件访问的安全隔离。
 
 平台只观察登记任务；插件自己的子进程、未登记任务、流和状态库仍必须在取消后停止，并在已知工作完成后才 Dispose。超时不会自动强杀或假装停止。

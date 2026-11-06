@@ -20,7 +20,8 @@
 - `WorkbenchApi.Version == 1` 保持不变。两个 SDK 的程序集版本保持 `1.0.0.0`，包/文件版本升至 `0.2.0`，主程序 `HostVersion=0.2.0`。依赖新服务的清单声明 `minimumHostVersion: "0.2.0"`。
 - `IPluginRuntimeContext : IPluginContext` 提供 `BackgroundTasks`、`Secrets` 和只读 `StopReason`。新服务以 `WorkbenchRuntimeServices.Version == 1` 标记。旧插件无需实现新成员。
 - `IPluginBackgroundTasks` 在 Initialize 内 `Register(PluginBackgroundTask)`；提供 `GetSnapshots()`、`StartAsync(id, token)`、`StopAsync(id, token)`、`SetResumeOnStartupAsync(id, enabled, token)`。
-- `PluginBackgroundTask` 为 `Id`、`Title`、`Func<IPluginBackgroundExecution, Task> RunAsync`。执行上下文有 `CancellationToken`、`StartReason`、动态只读 `StopReason`。开始原因区分 `UserRequest` 与 `Restore`；停止原因区分 `None`、`UserRequest`、`PluginDisabled`、`HostShutdown`、`InitializationFailed`。
+- `PluginBackgroundTask` 为 `Id`、`Title`、`Func<IPluginBackgroundExecution, Task> RunAsync`，另有默认 false 的 init 元数据 `RequiresPluginStart`，快照也暴露该值。为 true 时宿主通用 Start 不执行委托，SetResume(true)/Restore 拒绝并清除旧意图；插件自己的 context Start 可代表它已经完成业务确认，Stop 始终可用。这是宿主策略提示，不是对可信插件强制授权的沙箱。
+- 执行上下文有 `CancellationToken`、`StartReason`、动态只读 `StopReason`。开始原因区分 `UserRequest` 与 `Restore`；停止原因区分 `None`、`UserRequest`、`PluginDisabled`、`HostShutdown`、`InitializationFailed`。
 - `PluginBackgroundTaskState` 至少为 `Stopped/Running/Stopping/Completed/Faulted`；快照含 ID、标题、状态、恢复开关、期望运行状态、时间和安全错误码，不含原始异常信息。操作返回 SDK 自己的 `PluginTaskOperationResult(bool Succeeded, string Message)`，不引用 Core 类型。
 - `IPluginSecretStore` 提供 `IsSupported`、`Register(PluginSecretDefinition)`、`GetDefinitions()`、`ReadAsync(id, token): Task<string?>`、`WriteAsync(id, value, token)`、`DeleteAsync(id, token)`。定义仅含 ID、标题、描述，不含值。只有声明过的键可读写。
 - 钉钉建议凭据 ID 为 `openai.api-key`、`dingtalk.webhook-url`、`dingtalk.webhook-secret`。Webhook URL 本身也可能包含密钥，不能放入普通 JSON 设置或日志。DWS profile 只保存引用，不自动复制独立版凭据。
@@ -31,7 +32,7 @@
 
 恢复默认关闭。显式开启恢复且任务期望运行、包指纹不变、插件已信任/启用时，下一次平台启动才恢复，并给出 `StartReason=Restore`。显式停止或停用清除期望运行；平台退出保留恢复意图。包变更清除旧任务运行意图，需要重新启动，不能把新代码的启用当作业务联网/发送授权。
 
-停用先撤销页面/命令，设置原因并取消令牌，再等待插件 Stop 和已登记任务。默认等待预算 5 秒，可由测试缩短。超时保留实例、上下文和未完成 Stop Task，显示 Stopping；不能称为已停用、重新创建第二实例或释放用户根锁。重试等待复用同一 Stop，完成后才清理。退出失败保留进程和锁，用户仍能查看原因并重试；不自动强杀。未登记任务仍由可信插件自己负责，平台不能发现所有线程或子进程。
+停用先撤销页面/命令，设置原因并异步取消令牌，再等待取消回调、插件 Stop 和已登记任务。默认等待预算 5 秒，可由测试缩短。超时保留实例、上下文和未完成 Stop Task，显示 Stopping；不能称为已停用、重新创建第二实例或释放用户根锁。重试等待复用同一 Stop，完成后才清理。退出失败保留进程和锁，用户仍能查看原因并重试；不自动强杀。Stop 实现必须合作并快速返回可等待 Task；同进程的同步阻塞 UI/恶意代码无法被超时抢占。未登记任务仍由可信插件自己负责，平台不能发现所有线程或子进程。
 
 业务适配应把 `HostShutdown` 映射为保留业务恢复意图，把 `UserRequest/PluginDisabled` 映射为撤销；Restore 仍必须经过业务自己的配置指纹、授权、预算和去重校验。宿主锁不代表独立版与插件之间已互斥；业务侧应提供共享资源所有权，并明确旧独立版监控必须停止，不能宣称已阻止所有旧版本重复发送。
 
@@ -48,6 +49,8 @@
 每插件只允许一个待执行维护操作，可取消。更新、回滚、移除只针对用户管理目录，bundled 示例不原地修改。StageUpdate 验证 ID、严格更高版本、API/host 兼容性和内容指纹；暂存副本复验后写原子 journal。下次启动拿到用户根独占锁、发现/加载插件之前 ApplyPending。
 
 Apply 通过同卷目录移动切换代码，保留旧代码历史。更新前只复制数据、设置、后台意图和加密凭据到只读意义上的历史备份，不自动写回它们。备份遇到链接、变化或超过 1 GiB/10000 文件即拒绝更新并保留旧版本；不自动删除历史或业务数据。journal 描述准备、旧包移动、新包落位、提交，重放必须幂等；阶段中断或新副本损坏时恢复可用旧包，未知/损坏 journal 只报告，不能猜路径或清除目录。
+
+宿主备份范围仅为其 UserRoot 管理目录。钉钉通过用户明确连接的独立版规范状态文件、外部 DWS profile 等不自动加入备份，不能把平台包回滚宣传为这些外部数据的备份或降级迁移。业务运行时仍负责规范文件的互斥、格式和发送回执保护。
 
 任何当前进程曾加载过的包都不能 Apply；保守记录进程内已加载包路径，停用不清除。维护成功后新包仍需指纹信任；回滚不继承未经确认的新信任。移除保留数据/设置/凭据，提供代码历史作为恢复来源。
 
