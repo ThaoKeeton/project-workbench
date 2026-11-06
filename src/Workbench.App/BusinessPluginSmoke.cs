@@ -17,7 +17,7 @@ using static Workbench.App.NativeRuntimeProbe;
 namespace Workbench.App;
 
 /// <summary>Opt-in tests of immutable external packages in the current shipping host. No business references or provider replacements.</summary>
-internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
+internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions options)
 {
     private const string Ding = "com.projectworkbench.dingtalk-insights";
     private const string Upcam = "com.upcam.task-digest";
@@ -25,7 +25,10 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
     private const string SyntheticCredential = "SYNTHETIC_TASK4_HOST_VAULT_ONLY";
     private const string Marker = "ProjectWorkbench independently built business probe v1";
     private static readonly JsonSerializerOptions Json = new() { PropertyNameCaseInsensitive = true, WriteIndented = true };
-    private static string InputsRoot => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "fixtures", "business"));
+    private bool IsAcceptance => options.BusinessProbe!.StartsWith("acceptance-", StringComparison.Ordinal);
+    private string UpcamId => IsAcceptance ? AcceptanceId : Upcam;
+    private static string FixtureRoot(bool acceptance) => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "fixtures", acceptance ? "business-acceptance" : "business"));
+    private string InputsRoot => FixtureRoot(IsAcceptance);
     private PluginManager Manager => window.SmokeManager;
     private PluginPackageStore Packages => window.SmokeRuntime.Packages;
     private readonly List<string> _checks = [];
@@ -39,17 +42,19 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
 
     public static async Task PrepareAsync(HostRuntime runtime, RunOptions options)
     {
-        var inputs = ReadInputs();
+        var acceptance = options.BusinessProbe!.StartsWith("acceptance-", StringComparison.Ordinal);
+        var inputs = ReadInputs(acceptance);
         var marker = Path.Combine(options.UserRoot, "isolated-business-probe.txt");
         HostRuntime.RejectLinks(marker);
-        if (options.BusinessProbe == "seed")
+        if (options.BusinessProbe is "seed" or "acceptance-seed")
         {
             Require(!File.Exists(marker) && !Directory.EnumerateFileSystemEntries(Path.Combine(options.UserRoot, "Plugins")).Any(), "Business seed requires a fresh isolated root.");
             foreach (var input in inputs)
-                Require((await runtime.Packages.InstallAsync(Package(input))).Succeeded, "Pinned business ZIP installation through the production store failed.");
-            await File.WriteAllTextAsync(marker, Marker);
+                Require((await runtime.Packages.InstallAsync(Path.Combine(FixtureRoot(acceptance), input.PackageFile))).Succeeded, "Pinned business ZIP installation through the production store failed.");
+            await File.WriteAllTextAsync(marker, acceptance ? AcceptanceMarker : Marker);
         }
-        else Require(File.Exists(marker) && await File.ReadAllTextAsync(marker) == Marker, "Business restart requires its previously seeded isolated root.");
+        else Require(File.Exists(marker) && await File.ReadAllTextAsync(marker) == (acceptance ? AcceptanceMarker : Marker), "Business restart requires its previously seeded isolated root.");
+        if (acceptance) await PrepareAcceptanceAsync(options);
     }
 
     public static async Task RunAsync(MainWindow window, RunOptions options)
@@ -66,67 +71,71 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
     private async Task RunAsync()
     {
         window.AssertUiThread();
-        _inputs = ReadInputs();
-        if (options.BusinessProbe != "seed") VerifyRetainedState();
-        switch (options.BusinessProbe)
+        _inputs = ReadInputs(IsAcceptance);
+        if (IsAcceptance) await RunAcceptanceAsync();
+        else
         {
-            case "seed":
-                Require(Manager.Plugins.Count == 2, "Business probe must discover exactly the two external packages, without samples.");
-                foreach (var input in _inputs)
-                {
-                    await VerifyInstalledAsync(input, input.Version);
-                    Require(Snapshot(input.PluginId) is { IsLoaded: false, IsTrusted: false, DesiredEnabled: false }, "Install executed or approved external code.");
-                    Require(!(await Manager.EnableAsync(input.PluginId)).Succeeded, "External package enabled without explicit fingerprint approval.");
-                    await TrustAsync(input.PluginId, approve: false);
-                    await TrustAsync(input.PluginId, approve: true);
-                }
-                Record("Both pinned independently built ZIPs installed through shipping PluginPackageStore; disabled/untrusted/unloaded first; real native trust cancel and explicit approval of verified bytes");
-                await DingSeedAsync();
-                await UpcamAsync(full: true);
-                foreach (var input in _inputs)
-                {
-                    await File.WriteAllTextAsync(Path.Combine(options.UserRoot, "data", input.PluginId, "integration-retention.txt"), "synthetic-current-data-never-rolled-back");
-                    await Manager.GetSettings(input.PluginId).SetAsync("integration-note", "synthetic-state-survives-code-maintenance");
-                }
-                break;
-            case "restart":
-                await VerifyRestartAsync();
-                await StageUpdatesAsync(fault: false);
-                break;
-            case "update":
-                await VerifyMaintenanceAsync(original: false);
-                foreach (var input in _inputs) await TrustAsync(input.PluginId, approve: true);
-                await VerifyNativePersistenceAsync();
-                await StageUpdatesAsync(fault: true);
-                break;
-            case "fault":
-                Require(window.SmokeRuntime.MaintenanceResults.Count == 2 && window.SmokeRuntime.MaintenanceResults.All(result => !result.Succeeded)
-                    && Packages.PendingOperations.Count == 2 && Packages.PendingOperations.All(p => p.Phase == PackageOperationPhase.Prepared), "Synthetic staged metadata corruption did not fail safely before code movement.");
-                foreach (var input in _inputs)
-                {
-                    await VerifyInstalledAsync(input, UpdatedVersion(input, false));
-                    Require((await Packages.CancelPendingAsync(input.PluginId)).Succeeded, "Untouched failed Prepared operation could not be canceled.");
-                    var history = Packages.History.Single(item => item.PluginId == input.PluginId && item.Version == input.Version);
-                    Require((await Packages.StageRollbackAsync(input.PluginId, history.HistoryId)).Succeeded, "Actual business package code rollback staging failed.");
-                }
-                VerifyStoppedTasks();
-                Record("Fourth actual process rejected deliberately corrupted synthetic staged manifests, retained current code/data, canceled untouched journals and staged code-only rollback by real HistoryId");
-                break;
-            case "rollback":
-                await VerifyMaintenanceAsync(original: true);
-                foreach (var input in _inputs) await TrustAsync(input.PluginId, approve: true);
-                await VerifyNativePersistenceAsync();
-                foreach (var input in _inputs) Require((await Packages.StageRemoveAsync(input.PluginId)).Succeeded, "Business package removal staging failed.");
-                Require(Manager.Plugins.All(p => p.IsLoaded) && Packages.PendingOperations.Count == 2, "Staged removal changed current loaded code.");
-                Record("Fifth actual process restored original publisher bytes with fresh trust and working native pages, preserved current business state and staged keep-data removal");
-                break;
-            case "remove":
-                Require(Manager.Plugins.Count == 0 && Packages.PendingOperations.Count == 0 && Packages.History.Count == 6
-                    && window.SmokeRuntime.MaintenanceResults.Count == 2 && window.SmokeRuntime.MaintenanceResults.All(r => r.Succeeded), "Removal lost code history or left active business code.");
-                Require(!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name is "DingTalkInsights.Workbench" or "UPCAM.Workbench"), "Removed business code was loaded.");
-                Record("Sixth actual process applied both removals before discovery; native host has no business code loaded and retains current data/settings and all six code-history backups");
-                break;
-            default: throw new InvalidOperationException("Unknown business probe phase.");
+            if (options.BusinessProbe != "seed") VerifyRetainedState();
+            switch (options.BusinessProbe)
+            {
+                case "seed":
+                    Require(Manager.Plugins.Count == 2, "Business probe must discover exactly the two external packages, without samples.");
+                    foreach (var input in _inputs)
+                    {
+                        await VerifyInstalledAsync(input, input.Version);
+                        Require(Snapshot(input.PluginId) is { IsLoaded: false, IsTrusted: false, DesiredEnabled: false }, "Install executed or approved external code.");
+                        Require(!(await Manager.EnableAsync(input.PluginId)).Succeeded, "External package enabled without explicit fingerprint approval.");
+                        await TrustAsync(input.PluginId, approve: false);
+                        await TrustAsync(input.PluginId, approve: true);
+                    }
+                    Record("Both pinned independently built ZIPs installed through shipping PluginPackageStore; disabled/untrusted/unloaded first; real native trust cancel and explicit approval of verified bytes");
+                    await DingSeedAsync();
+                    await UpcamAsync(full: true);
+                    foreach (var input in _inputs)
+                    {
+                        await File.WriteAllTextAsync(Path.Combine(options.UserRoot, "data", input.PluginId, "integration-retention.txt"), "synthetic-current-data-never-rolled-back");
+                        await Manager.GetSettings(input.PluginId).SetAsync("integration-note", "synthetic-state-survives-code-maintenance");
+                    }
+                    break;
+                case "restart":
+                    await VerifyRestartAsync();
+                    await StageUpdatesAsync(fault: false);
+                    break;
+                case "update":
+                    await VerifyMaintenanceAsync(original: false);
+                    foreach (var input in _inputs) await TrustAsync(input.PluginId, approve: true);
+                    await VerifyNativePersistenceAsync();
+                    await StageUpdatesAsync(fault: true);
+                    break;
+                case "fault":
+                    Require(window.SmokeRuntime.MaintenanceResults.Count == 2 && window.SmokeRuntime.MaintenanceResults.All(result => !result.Succeeded)
+                        && Packages.PendingOperations.Count == 2 && Packages.PendingOperations.All(p => p.Phase == PackageOperationPhase.Prepared), "Synthetic staged metadata corruption did not fail safely before code movement.");
+                    foreach (var input in _inputs)
+                    {
+                        await VerifyInstalledAsync(input, UpdatedVersion(input, false));
+                        Require((await Packages.CancelPendingAsync(input.PluginId)).Succeeded, "Untouched failed Prepared operation could not be canceled.");
+                        var history = Packages.History.Single(item => item.PluginId == input.PluginId && item.Version == input.Version);
+                        Require((await Packages.StageRollbackAsync(input.PluginId, history.HistoryId)).Succeeded, "Actual business package code rollback staging failed.");
+                    }
+                    VerifyStoppedTasks();
+                    Record("Fourth actual process rejected deliberately corrupted synthetic staged manifests, retained current code/data, canceled untouched journals and staged code-only rollback by real HistoryId");
+                    break;
+                case "rollback":
+                    await VerifyMaintenanceAsync(original: true);
+                    foreach (var input in _inputs) await TrustAsync(input.PluginId, approve: true);
+                    await VerifyNativePersistenceAsync();
+                    foreach (var input in _inputs) Require((await Packages.StageRemoveAsync(input.PluginId)).Succeeded, "Business package removal staging failed.");
+                    Require(Manager.Plugins.All(p => p.IsLoaded) && Packages.PendingOperations.Count == 2, "Staged removal changed current loaded code.");
+                    Record("Fifth actual process restored original publisher bytes with fresh trust and working native pages, preserved current business state and staged keep-data removal");
+                    break;
+                case "remove":
+                    Require(Manager.Plugins.Count == 0 && Packages.PendingOperations.Count == 0 && Packages.History.Count == 6
+                        && window.SmokeRuntime.MaintenanceResults.Count == 2 && window.SmokeRuntime.MaintenanceResults.All(r => r.Succeeded), "Removal lost code history or left active business code.");
+                    Require(!AppDomain.CurrentDomain.GetAssemblies().Any(a => a.GetName().Name is "DingTalkInsights.Workbench" or "UPCAM.Workbench"), "Removed business code was loaded.");
+                    Record("Sixth actual process applied both removals before discovery; native host has no business code loaded and retains current data/settings and all six code-history backups");
+                    break;
+                default: throw new InvalidOperationException("Unknown business probe phase.");
+            }
         }
         if (_ding is null && Manager.Contributions.Views.Any(v => v.PluginId == Ding)) _ding = DingTarget();
         _observations.Add(new { stage = "before-real-close", packages = Manager.Plugins, tasks = Manager.Plugins.SelectMany(p => Manager.GetBackgroundTaskSnapshots(p.Manifest!.Id)).ToArray(),
@@ -153,9 +162,9 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
                 options.WriteReport(new { succeeded = true, probe = options.BusinessProbe, userRoot = options.UserRoot, processId = Environment.ProcessId,
                     actualWindowClosed = true, provenance = _inputs, checks = _checks, observations = _observations, workers,
                     retainedStateSha256,
-                    credentialCoverage = "DingTalk 0.3.2: actual native model-only synthetic host-DPAPI batch save/cancel, separate approval with host commit/revision read, revoke and delete; only key+commit configured. Model-key value read/provider dispatch unexecuted; no Webhook values or purpose. Ciphertext persists without restoring grants. UPCAM: generated resume-binding key only; no automatic authority configured, therefore no key created; business credentials stay canonical worker DPAPI.",
-                    providerCoverage = "DingTalk actual local demo read/search/organize and MonitorSupervisor; UPCAM production worker fictional preview and missing-authorization fault. No DWS/Teambition/OpenAI/Webhook/HTTP send action or actual credential.",
-                    limits = new[] { "Synthetic manifest/version and staged metadata fault variants are integration inputs, not publisher releases.", "UPCAM positive automatic provider delivery is unexecuted: upstream does not publish its distinct acceptance-ID binary.", "Backups cover host UserRoot only; external canonical state/DWS profiles and arbitrary schema downgrade are not covered.", "Windows11 manual keyboard/theme/DPI/accessibility acceptance remains unexecuted." },
+                    credentialCoverage = IsAcceptance ? AcceptanceCredentialCoverage : "DingTalk 0.3.2: actual native model-only synthetic host-DPAPI batch save/cancel, separate approval with host commit/revision read, revoke and delete; only key+commit configured. Model-key value read/provider dispatch unexecuted; no Webhook values or purpose. Ciphertext persists without restoring grants. Production UPCAM: no automatic authority or generated binding key; business credentials stay canonical worker DPAPI.",
+                    providerCoverage = IsAcceptance ? AcceptanceProviderCoverage : "DingTalk actual local demo read/search/organize and MonitorSupervisor; UPCAM production worker fictional preview and missing-authorization fault. No DWS/Teambition/OpenAI/Webhook/HTTP send action or actual credential.",
+                    limits = new[] { "Synthetic manifest/version and staged metadata fault variants are integration inputs, not publisher releases.", "Positive automatic work uses a separate genuine acceptance-ID binary/root; production provider delivery is unexecuted.", "Backups cover host UserRoot only; external canonical state/DWS profiles and arbitrary schema downgrade are not covered.", "Windows11 manual keyboard/theme/DPI/accessibility acceptance remains unexecuted." },
                     startupStages = options.StartupStages, completedUtc = DateTimeOffset.UtcNow });
             }
             catch (Exception error)
@@ -367,7 +376,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
             Require((await Manager.StopBackgroundTaskAsync(Upcam, "digest-scheduler")).Succeeded, "Host could not clear the real faulted UPCAM task.");
             Require((await Manager.ExecuteCommandAsync(Upcam, "preview-sample")).Succeeded && CaptureWorkers().SequenceEqual(workerIds), "Task-only Stop retired or duplicated the session-owned preview worker.");
             _observations.Add(new { stage = "upcam-real-production-worker", previewCharacters = previewOutput.Length, workerIds, taskFault = fault,
-                automaticProviderCoverage = "Unexecuted: no saved authority/credentials; selected upstream workflow publishes production only, not the separate synthetic acceptance-ID binary." });
+                automaticProviderCoverage = "Production automatic delivery unexecuted: no saved authority/credentials. Separate acceptance-ID/root tests the real Core with upstream local fake providers." });
             await DisableAsync(Upcam);
             await WaitUntilAsync(() => _workers.Values.All(p => p.HasExited));
             await TrustAsync(Upcam, true);
@@ -557,7 +566,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         AutomationProperties.GetAutomationId(page) == "settings-page" ? "settings-tabs" : "digest-tabs", seconds: 60);
 
     private static async Task WaitForUpcamViewAsync(FrameworkElement page, string tabId, int? selectedIndex = null,
-        Func<FrameworkElement, bool>? contentReady = null, int seconds = 20)
+        Func<FrameworkElement, bool>? contentReady = null, int seconds = 20, bool synthetic = false)
     {
         TabView? selectionTarget = null;
         TabView? previousHost = null;
@@ -577,7 +586,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
                 tabs?.ApplyTemplate();
                 page.UpdateLayout();
                 var content = (tabs?.SelectedItem as TabViewItem)?.Content as FrameworkElement;
-                var ready = TryById<TextBlock>(page, "plugin-status")?.Text == "Ready · local profile"
+                var ready = TryById<TextBlock>(page, "plugin-status")?.Text == (synthetic ? "Ready · CI synthetic data" : "Ready · local profile")
                     && page.IsLoaded && page.XamlRoot is not null && tabs is { IsLoaded: true, ActualWidth: > 0, ActualHeight: > 0 }
                     && content is { IsLoaded: true, ActualWidth: > 0, ActualHeight: > 0 }
                     && ReferenceEquals(CurrentLogicalTabs(page, tabId), tabs) && ReferenceEquals(TryById<TabView>(page, tabId), tabs)
@@ -614,7 +623,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
 
     private int[] CaptureWorkers()
     {
-        var root = Path.TrimEndingDirectorySeparator(Path.Combine(options.UserRoot, "Plugins", Upcam)) + Path.DirectorySeparatorChar;
+        var root = Path.TrimEndingDirectorySeparator(Path.Combine(options.UserRoot, "Plugins", UpcamId)) + Path.DirectorySeparatorChar;
         List<int> current = [];
         foreach (var process in Process.GetProcessesByName("UPCAMPluginWorker"))
         {
@@ -634,14 +643,15 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         return current.Order().ToArray();
     }
 
-    private static Input[] ReadInputs()
+    private static Input[] ReadInputs(bool acceptance)
     {
-        var inputs = JsonSerializer.Deserialize<Input[]>(File.ReadAllText(Path.Combine(InputsRoot, "inputs.json")), Json)!;
-        Require(inputs.Length == 2 && inputs.Select(i => i.PluginId).Order().SequenceEqual(new[] { Ding, Upcam }.Order()), "Exactly the pinned DingTalk and UPCAM production inputs are required.");
+        var inputs = JsonSerializer.Deserialize<Input[]>(File.ReadAllText(Path.Combine(FixtureRoot(acceptance), "inputs.json")), Json)!;
+        Require(inputs.Length == 2 && inputs.Select(i => i.PluginId).Order().SequenceEqual(new[] { Ding, acceptance ? AcceptanceId : Upcam }.Order()), "Exactly the pinned DingTalk and selected UPCAM variant inputs are required.");
         foreach (var input in inputs)
         {
-            HostRuntime.RejectLinks(Package(input));
-            Require(Hash(Package(input)).Equals(input.Sha256, StringComparison.OrdinalIgnoreCase), "External package SHA256 changed after verified import.");
+            var path = Path.Combine(FixtureRoot(acceptance), input.PackageFile);
+            HostRuntime.RejectLinks(path);
+            Require(Hash(path).Equals(input.Sha256, StringComparison.OrdinalIgnoreCase), "External package SHA256 changed after verified import.");
         }
         return inputs;
     }
@@ -721,6 +731,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         {
             var evidence = new { succeeded = false, probe = options.BusinessProbe, processId = Environment.ProcessId, userRoot = options.UserRoot,
                 provenance = _inputs, checks = _checks, observations = _observations, observedWorkerProcessIds = _workers.Keys.ToArray(),
+                acceptance = IsAcceptance ? AcceptanceFailureObservation() : null,
                 errorType = error.GetType().Name, errorHResult = $"0x{unchecked((uint)error.HResult):X8}", startupStages = options.StartupStages };
             File.WriteAllText(Path.ChangeExtension(options.ReportPath, ".evidence.json"), JsonSerializer.Serialize(evidence,
                 new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
@@ -728,7 +739,7 @@ internal sealed class BusinessPluginSmoke(MainWindow window, RunOptions options)
         catch { /* Supplemental evidence must not replace the original failing verdict or exception. */ }
     }
 
-    private static string Package(Input input) => Path.Combine(InputsRoot, input.PackageFile);
+    private string Package(Input input) => Path.Combine(InputsRoot, input.PackageFile);
     private static string UpdatedVersion(Input input, bool fault) => input.PluginId == Ding ? (fault ? "0.3.4" : "0.3.3") : (fault ? "0.1.2" : "0.1.1");
     private static string Hash(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path)));
     private static T? TryById<T>(DependencyObject root, string id) where T : DependencyObject

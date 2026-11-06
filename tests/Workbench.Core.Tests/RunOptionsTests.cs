@@ -12,6 +12,12 @@ public sealed class RunOptionsTests
     [InlineData("fault")]
     [InlineData("rollback")]
     [InlineData("remove")]
+    [InlineData("acceptance-seed")]
+    [InlineData("acceptance-restore")]
+    [InlineData("acceptance-stopped")]
+    [InlineData("acceptance-config")]
+    [InlineData("acceptance-missing")]
+    [InlineData("acceptance-disabled")]
     public void Business_probe_requires_its_own_isolated_root_and_cannot_mix_probe_modes(string phase)
     {
         var root = Path.Combine(Path.GetTempPath(), "ProjectWorkbench-business-probe", Guid.NewGuid().ToString("N"));

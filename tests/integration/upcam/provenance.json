@@ -3609,7 +3609,7 @@
   "publisherWrapper": "com.upcam.task-digest",
   "repackVerification": "Only the pinned single wrapper prefix was removed; all 714 file contents are byte-identical to publisher ZIP.",
   "hostSdkSourceCommit": "d2005d469aef6a385c134b6914fb6dfa9cff20b2",
-  "coverageBoundary": "Production worker preview_sample uses fictional input. Automatic business run requires separately built acceptance ID; upstream workflow does not publish that package.",
+  "coverageBoundary": "Production worker preview_sample uses fictional input; its missing-authority scheduler refusal remains production proof. Positive managed work uses the separately built, separately pinned acceptance ID/root and does not establish production provider delivery.",
   "sourceBranch": "feat/workbench-native-digest",
   "publisherPackageFile": "UPCAMTaskDigest-workbench-production-0.1.0-win-x64.zip",
   "workflowRunAttempt": 1,

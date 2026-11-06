@@ -9,7 +9,7 @@
 | Task 3 Windows/SDK native（Task 4 BASE） | [42285023349](https://github.com/ThaoKeeton/project-workbench/actions/runs/42285023349)，提交 `27154465c08d132798c8ea7b637f137f7340a90b`：Windows Core 226 通过、原生 14 项、management 10 项、六个连续实际进程 7 项、默认 Windows SDK source/NuGet export 均通过 | 控制器已检查实际报告；该结果只证明 Task 4 之前的 BASE，不是下述新增独立业务包探针的 Windows 执行证据 |
 | Task 4 当前 Linux Core/固定业务包 | [42295396164](https://github.com/ThaoKeeton/project-workbench/actions/runs/42295396164)，源码 `ccb6ef2`：237 通过、2 项 Windows DPAPI 明确跳过，共 239 项；16 项脚本检查及两个真实生产 ZIP 的逐文件审计通过 | Linux 不执行 WinUI 或业务程序集；参考编译仅为不可运行的类库 |
 | Task 4 当前 Windows/独立业务包 | 同轮源码 `ccb6ef2`：Windows Core 239/239（含两项真实 DPAPI），发布、原生 14 项、management 10 项、六个连续平台重启进程 7 项、SDK 默认 Windows export，以及真实生产业务包六进程 26 项均通过 | Server 2025 上实际运行当前 shipping App；生产 UPCAM 正向自动调度、绑定 key 正向创建/恢复仍缺独立上游模拟验收包，Windows 11 人工验收仍待执行 |
-| Task 4 新钉钉 0.3.2/UPCAM 联合输入 | 钉钉来源 `c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf`、上游成功 CI 42295585483、生产 ZIP SHA256 `38d7a8f30ce6d4d5c6f6e26c757cbb6b9fc9f812546bf1db2ecdbadb9b578200` 已固定；当前 shipping App 新增实际 host-DPAPI 合成模型值原生检查 | 当前提交 Windows 联合验收待运行；上列已通过的 26 项使用旧钉钉 0.3.1，不能代替新版证据。UPCAM 正向 acceptance-ID 包依赖仍未解决 |
+| Task 4 新钉钉 0.3.2/UPCAM 联合输入 | 钉钉来源 `c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf`、上游成功 CI 42295585483、生产 ZIP SHA256 `38d7a8f30ce6d4d5c6f6e26c757cbb6b9fc9f812546bf1db2ecdbadb9b578200` 已固定；当前 shipping App 新增实际 host-DPAPI 合成模型值原生检查 | 当前提交 Windows 联合验收待运行；上列已通过的 26 项使用旧钉钉 0.3.1，不能代替新版证据。UPCAM 正向 acceptance-ID 包已由独立上游 CI 42299664328 发布并固定；新增六进程正向验收待实际 Windows 运行/审查 |
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux C# 检查（历史基线） | 早期手动主程序版本参考编译及 7 个 C# 文件语法/XML 检查通过 | 后续不可运行的 NativeReference 语义编译已单列；生产 XAML/PRI 工具仍必须在 Windows 执行 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
@@ -146,7 +146,7 @@ UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析�
 
 本轮 Linux 只能执行固定包审计/真实 Store 安装、报告与隔离参数测试及不可运行的 C# reference 编译；Windows 原生执行必须以当前提交的实际 CI 结果为准。原有样例 13 项加管理导航、独立平台 fixture 的 runtime probes 均保留，业务结果单独记录。
 
-覆盖边界：新钉钉 0.3.2 登记四项 host secret definitions，并实际采用异步完整批次值提供方；新原生探针仅配置合成模型值和最后提交的 `credentials.commit`，验证取消、保存、模型用途单独批准并读取 host commit/revision、立即撤销保留密文、删除、无授权再保存和空编辑框。批准只读 commit/revision；模型 key 值读取发生在实际 provider dispatch 前，该路径未执行。Webhook 两字段留空，不批准发送用途；批准后先撤销/删除，再运行本地 demo Core，不调用真实模型。该新增范围待新版联合 Windows 报告；旧钉钉 0.3.1 的仅声明结论仍只适用于旧包。UPCAM host secret 只用于程序生成的恢复绑定 key，业务凭据仍使用原 worker DPAPI；生产探针没有自动业务授权，不创建恢复 key。已完整审计上游 107 个 Actions artifacts 和零 releases，validation 包只有元数据/报告/截图；不同 ID 的 synthetic acceptance 二进制仍未发布，因此正向自动业务提供方执行仍为 Important 外部依赖。两插件均未执行发送、真实 Webhook/HTTP、真实 DWS/Teambition/OpenAI、企业权限或真实凭据测试。代码更新版本（钉钉 0.3.3/0.3.4、UPCAM 0.1.1/0.1.2）及 staged 故障是明确合成的集成输入，不是上游新发布；UserRoot 备份不包含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live Webhook 去重。Windows11 人工清单仍全部待验。
+覆盖边界：新钉钉 0.3.2 登记四项 host secret definitions，并实际采用异步完整批次值提供方；新原生探针仅配置合成模型值和最后提交的 `credentials.commit`，验证取消、保存、模型用途单独批准并读取 host commit/revision、立即撤销保留密文、删除、无授权再保存和空编辑框。批准只读 commit/revision；模型 key 值读取发生在实际 provider dispatch 前，该路径未执行。Webhook 两字段留空，不批准发送用途；批准后先撤销/删除，再运行本地 demo Core，不调用真实模型。该新增范围待新版联合 Windows 报告；旧钉钉 0.3.1 的仅声明结论仍只适用于旧包。UPCAM host secret 只用于程序生成的恢复绑定 key，业务凭据仍使用原 worker DPAPI；生产探针没有自动业务授权，不创建恢复 key。早期完整审计的 107 个 Actions artifacts 和零 releases 中，validation 包只有元数据/报告/截图。新上游 CI 42299664328/artifact 13544710526 已发布不同 ID 的真实 compiled synthetic acceptance 二进制，来源 `48e67e8`，publisher ZIP SHA256 `5d3fa64b1389acad36e425be9b274291315b4f7ed373df2b533ef99cf72e9f9c`。输入缺失依赖已解除，正向自动 Core/key/Restore 仍待当前 Windows 执行和审查，尚不能关闭 I01。两插件均未执行发送、真实 Webhook/HTTP、真实 DWS/Teambition/OpenAI、企业权限或真实凭据测试。代码更新版本（钉钉 0.3.3/0.3.4、UPCAM 0.1.1/0.1.2）及 staged 故障是明确合成的集成输入，不是上游新发布；UserRoot 备份不包含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live Webhook 去重。Windows11 人工清单仍全部待验。
 
 ## Windows 实机人工清单（全部待验）
 
@@ -170,3 +170,7 @@ UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析�
 - [ ] 凭据框每次打开均为空，保存/删除后清空；仅显示“已保存（未验证值）”，错误及日志不包含值；使用合成凭据验收。
 - [ ] ZIP 与文件夹选择器均可取消；更新/回滚/移除提示重启、重新信任和代码/当前数据/外部存储边界；Prepared 可取消，已开始的恢复 journal 不能丢弃。
 - [ ] 关闭等待期间可查看管理状态并重试，不能重新启用或启动新工作；宿主包写入未结束时同样保留锁，Windows 11 多窗口/重复关闭实际交互正常。
+
+新增独立 synthetic acceptance 序列使用 `--business-probe acceptance-seed|acceptance-restore|acceptance-stopped|acceptance-config|acceptance-missing|acceptance-disabled`，在原六个生产进程全部退出之后使用另一个全新 GUID 用户根；两变体共享上游 worker 单例，禁止重叠。真实原生 CI-synthetic banner、Ready 握手和 profile 标记先于服务动作；只调用上游编译变体的本地 fake providers。首阶段等待实际到期的定时 Core 生成一条 synthetic sent history 和虚构摘要，随后对 Running 任务 Stop，跨越真实 15 秒 timer 周期检查 revision/数据库哈希不变。其余真实进程覆盖原 key/binding 恢复、独立 Resume 同意、显式 Stop 阻止恢复、配置改变/缺 key 拒绝且不补造授权、活动停用/worker 退役及禁用重启保留数据。当前为已编写、待 Windows 执行范围；synthetic sent 不代表真实钉钉送达。
+
+UPCAM 固定 worker 的最终 owned retirement 会调用 `TerminateJobObject(job, 1)`；报告保留真实 worker exit 1，不宣称优雅 exit 0。shipping App 仍须 Closed、实际 OS exit 0 和 launcher 重新取得根 lease。

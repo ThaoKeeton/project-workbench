@@ -7,7 +7,8 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
     public string? RuntimeProbe { get; init; }
     public string? BusinessProbe { get; init; }
     public bool IsIsolated => SmokeTest || RuntimeProbe is not null || BusinessProbe is not null;
-    public static readonly string[] BusinessProbePhases = ["seed", "restart", "update", "fault", "rollback", "remove"];
+    public static readonly string[] BusinessProbePhases = ["seed", "restart", "update", "fault", "rollback", "remove",
+        "acceptance-seed", "acceptance-restore", "acceptance-stopped", "acceptance-config", "acceptance-missing", "acceptance-disabled"];
     public static readonly string[] RuntimeProbePhases = ["management", "restart-seed", "restart-verify", "restart-disabled", "update-verify", "rollback-verify", "remove-verify"];
     public static readonly string[] SampleIds = ["com.projectworkbench.summary", "com.projectworkbench.test-cases"];
     private readonly List<object> _startupStages = [];

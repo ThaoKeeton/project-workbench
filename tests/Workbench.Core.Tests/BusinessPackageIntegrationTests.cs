@@ -11,7 +11,8 @@ public sealed class BusinessPackageIntegrationTests
     [Theory]
     [InlineData("dingtalk", "com.projectworkbench.dingtalk-insights", 8)]
     [InlineData("upcam", "com.upcam.task-digest", 714)]
-    public async Task Real_independent_production_package_installs_byte_exact_and_stays_untrusted_without_executing_code(string vendor, string id, int files)
+    [InlineData("upcam-acceptance", "com.upcam.task-digest.acceptance", 714)]
+    public async Task Real_independent_package_installs_byte_exact_and_stays_untrusted_without_executing_code(string vendor, string id, int files)
     {
         using var disk = new TestDirectory();
         var options = new PluginManagerOptions { PluginsRoot = disk.Plugins, UserRoot = disk.User };

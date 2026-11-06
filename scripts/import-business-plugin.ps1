@@ -1,7 +1,8 @@
 [CmdletBinding()]
 param(
     [string]$InputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'tests/integration'),
-    [string]$DestinationRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/native/fixtures/business')
+    [string]$DestinationRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'artifacts/native/fixtures/business'),
+    [ValidateSet('Production', 'Acceptance')][string]$Mode = 'Production'
 )
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
@@ -12,7 +13,7 @@ if ($destinationPath.Equals($appRoot, [StringComparison]::OrdinalIgnoreCase) -or
     throw 'External integration inputs must stay outside the shipping app and its bundled Plugins directory.'
 }
 $verified = @()
-foreach ($name in @('dingtalk', 'upcam')) {
+foreach ($name in @('dingtalk', $(if ($Mode -eq 'Acceptance') { 'upcam-acceptance' } else { 'upcam' }))) {
     $directory = Join-Path $InputRoot $name
     $provenance = Get-Content -LiteralPath (Join-Path $directory 'provenance.json') -Raw | ConvertFrom-Json
     $package = Join-Path $directory $provenance.packageFile
@@ -44,6 +45,15 @@ foreach ($name in @('dingtalk', 'upcam')) {
         $reader = [IO.StreamReader]::new($manifestEntry.Open())
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
         if ($manifest.id -ne $provenance.pluginId -or $manifest.version -ne $provenance.version -or $manifest.apiVersion -ne 1 -or $manifest.minimumHostVersion -ne '0.2.0') { throw "Pinned $name manifest mismatch." }
+        if ($name -eq 'upcam-acceptance') {
+            $reader = [IO.StreamReader]::new($archive.GetEntry('plugin-package.json').Open())
+            try { $metadata = $reader.ReadToEnd() | ConvertFrom-Json } finally { $reader.Dispose() }
+            if ($manifest.id -ne 'com.upcam.task-digest.acceptance' -or $provenance.syntheticAcceptance -ne $true -or
+                $metadata.syntheticAcceptance -ne $true -or $metadata.pluginId -ne $manifest.id -or
+                $metadata.sourceCommit -ne $provenance.actualCheckoutCommit -or $metadata.runtimeServicesVersion -ne 1) {
+                throw 'The separately compiled synthetic acceptance identity/provenance is required.'
+            }
+        }
     }
     finally { $archive.Dispose() }
     $verified += @{ name = $name; directory = $directory; provenance = $provenance }
@@ -61,4 +71,4 @@ foreach ($item in $verified) {
         workflowRunId = $pin.workflowRunId; sha256 = $pin.sha256; transport = $pin.transport; packageFile = "$($item.name)/package.zip"; provenanceFile = "$($item.name)/provenance.json" }
 }
 $inputs | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $DestinationRoot 'inputs.json') -Encoding utf8
-Write-Host 'Imported both independently built, provenance-pinned business inputs outside bundled Plugins (722 files audited).'
+Write-Host "Imported $Mode independently built, provenance-pinned business inputs outside bundled Plugins (722 files audited)."
