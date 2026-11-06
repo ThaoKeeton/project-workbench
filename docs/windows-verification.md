@@ -10,10 +10,13 @@
 | Windows Core 测试/发布（历史基线） | [第八轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42209929309)：Windows Core 86/86，自包含主程序与两个独立插件包构建通过；发布的 `Workbench.App.pri` 为 1,352,680 bytes | 提交 `d615fa064c8962ed849b494b8b42d1ca54e67b0a`，使用 `windows-2025` runner |
 | Windows 原生自动冒烟（历史基线） | 同轮 `succeeded=true`、`stage=completed`，原有 11 项检查全部通过：原生启动、占用根失败窗口、实时主题、4 个页面/设置控件、文件命令、停用/重新启用及关闭 | 没有编辑/导航/重复生成回归，不能证明该行为安全；自动检查不代替人工验收 |
 | Windows 编辑回归 RED | [第九轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42213219634)，提交 `9e97dc6b596d3821803189b0c55d112f2be9ba48`：实际原生进程 exit 1，`Summary unsaved draft was lost after navigating through home.` | Windows Core 86/86、主程序与独立插件编译发布成功后，在真实 TextBox 编辑/新工厂导航断言失败；不是编译或初始化故障 |
-| 本轮编辑修复 GREEN | 尚待修复提交的 Windows CI | Linux 语法/参考编译检查不代替真实原生回归通过 |
+| Windows 本轮构建 GREEN | [第十二轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42216264601)：Windows Core 86/86，主程序与两个独立插件发布通过，主 PRI 1,352,680 bytes；两个 job 均成功 | 实测代码提交 `a5d9825a9662710ff10dd833e0f9d53cfeaf8cdd`，使用 `windows-2025` runner |
+| Windows 本轮编辑回归 GREEN | 同轮原生进程 exit 0，`succeeded=true`、`stage=completed`、UI 线程 2，全部 13 项通过；最终摘要 100 bytes、CSV 293 bytes | 包含新工厂导航/真实编辑/保存/拒绝覆盖/停用恢复；原有 11 项检查保留 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
 
-上述历史基线的原生报告验证了同一张卡片 Light/Dark/Light 切换时实际主题与填充/描边重新解析，以及占用用户目录的失败窗口无法进入设置/首页并可安全关闭；两个样例在隔离 `DataDirectory` 下生成 235-byte 摘要与 293-byte CSV。新增编辑回归已在未修复代码上取得精确 RED；修复后的实际 GREEN 另行记录。Windows 证据来自 GitHub `windows-2025` runner，不是 Windows 11 人工验收。未连接真实业务系统。
+历史基线的 11 项检查没有输入用户编辑，摘要为 235 bytes。第九轮在原来的无文档模型/无覆盖保护实现上出现上述导航断言 RED。第十轮修复模型后仍因原始 LF 字面预期失败；第十一轮增加隔离诊断，确认编辑前后与新工厂文本全文相同、均为 62 字符，唯一差异是输入字面的第 42 位 LF（U+000A）被 WinUI 规范为 CR（U+000D）。TextChanging 已读到完整新文本，随后 TextChanged 的值一致。
+
+因此回归先仅统一 CRLF/CR/LF 核对完整输入内容，再捕获真实 `TextBox.Text`；此后导航、保存文件、重复生成和停用恢复全部按该原生值严格逐字比较。没有 Trim、部分匹配或省略多行内容。第十二轮在该测试边界修正后完成全部 13 项，100-byte 摘要是实际编辑并保存的版本。Windows 证据来自 GitHub `windows-2025` runner，Windows 11 人工清单的 14 项仍全部待验。未连接真实业务系统。
 
 ## 干净 Windows 环境
 
@@ -40,7 +43,7 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 2. 仅对实际文件锁获取验证 Windows 共享/锁冲突；创建同隔离根目录的第二个测试窗口，检查启动失败后无法导航到设置/首页且可安全关闭。
 3. 为测试明确批准并启用这两个样例，验证共享 WinUI/WinRT 契约身份，并逐个创建、附加两个页面与两个设置控件到真实 XamlRoot。
 4. 在同一个已附加的主程序卡片上检查 Light/Dark/Light 的实际主题与填充/描边颜色重新解析，再应用系统主题。运行两个本地命令，检查隔离目录下的非空摘要与 CSV 文件。
-5. 在真实摘要 TextBox 输入不同于预置内容的文本，经过首页、命令、主程序设置和两插件设置后用新工厂返回；检查未保存文本不变。重复生成须明确拒绝且保留模型/文件，调用真实保存按钮后检查磁盘文本，再次生成仍不得覆盖。
+5. 设置真实摘要 TextBox.Text 为不同于预置内容的多行文本，等待原生文本事件并核对完整输入；经过首页、命令、主程序设置和两插件设置后用新工厂返回，检查捕获的原生文本逐字不变。重复生成须明确拒绝且保留模型/文件；通过 `ButtonAutomationPeer.Invoke` 请求真实保存按钮并等待异步 UI 状态后检查磁盘文本，再次生成仍不得覆盖。物理键盘、焦点及屏幕阅读器行为仍由下方人工清单验收。
 6. 再修改摘要但不保存；清除控件，停用并重新启用两个样例，再次附加原生控件；检查注册撤销与恢复，摘要仅恢复已保存版本且文件不变。
 7. 停止插件、清除注册，检查保存的 enabled 偏好仍为 true，写入 JSON 并关闭窗口。
 
@@ -61,6 +64,8 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 如果 Core、发布或原生启动失败，job 保持失败状态；上传已有产物供排查，缺少必需报告不会被解释为通过。
 
 原生冒烟失败后才运行 `scripts/native-debug.ps1`，默认最多采集 240 秒；如需安装官方调试器，仅安装调试工具组件并验证 Microsoft 签名。采集只发布相关文本，不生成或上传进程内存 dump，不执行堆遍历或导出完整环境。调试器及被调试程序启动前清空继承环境，仅保留明确允许的 OS、运行时和代理配置，不继承 CI token。调试采集不修改原始失败判定。第六轮通过这些文本定位了 InfoBar 默认样式资源加载失败；第七轮补齐主 PRI 发布后完整冒烟通过。成功运行会跳过采集及其 artifact 上传；采集已尝试但失败或取消时，仍上传已有部分证据。必需的应用目录和冒烟报告仍严格要求存在。
+
+第十/十一轮实际原生失败后均尝试采集并成功上传 `native-debugger-evidence`，保留故障文本。第十二轮实际 job 结果显示采集与对应 artifact 上传均为 skipped；必需应用/报告 artifact 上传成功，日志没有缺少调试文件的 `No files were found` 警告。
 
 Linux 可以执行 Core 测试、源文件语法/XML 检查，以及独立 SDK/示例的 C# 参考编译。完整主程序需要 Windows XAML 编译器，`App.xaml` 的生成代码和资源处理由 Windows 构建验证。单独 SDK 参考检查示例（不能用于发布或声称原生验收）：
 
