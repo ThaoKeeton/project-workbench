@@ -7,9 +7,11 @@
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux C# 检查 | 早期手动主程序版本参考编译通过；当前主程序 7 个 C# 文件语法与 XML 检查通过 | 采用标准 App.xaml 后，XAML 编译器必须在 Windows 执行；当前主程序没有 Linux 完整语义编译证据 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
-| Windows Core 测试/发布 | [第二轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42196885706)：Windows Core 86/86 和自包含发布通过；两个独立插件包构建通过 | 构建通过仍不代表原生启动 |
-| Windows 原生自动冒烟 | 第四轮仍退出 0xC000027B；标准控件资源构造失败，补齐手动元数据提供器没有解决。现改为 SDK 标准 App.xaml/生成入口/资源图，实际 GREEN 待 Windows 冒烟 | 初始化失败或没有可用桌面会失败，不能跳过为通过 |
+| Windows Core 测试/发布 | [第七轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42209148829)：Windows Core 86/86，自包含主程序与两个独立插件包构建通过；发布的 `Workbench.App.pri` 为 1,352,680 bytes | 使用 `windows-2025` runner；主程序的标准 XAML 生成、语义编译和 PRI 发布由本次 Windows 构建验证 |
+| Windows 原生自动冒烟 | 同轮 `succeeded=true`、`stage=completed`，11 项检查全部通过：原生启动、占用根失败窗口、实时主题、4 个页面/设置控件、文件命令、停用/重新启用及关闭 | 使用真实 WinUI 控件和隔离临时数据；自动检查不代替视觉与交互人工验收 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
+
+本次通过的代码提交为 `0808aa97f20b524ef5058dffeaf9aa8e9203bc0a`，CI 的 Linux 和 Windows 两个 job 均成功。Windows 证据来自 GitHub `windows-2025` runner，不是 Windows 11 人工验收。原生报告验证了同一张卡片 Light/Dark/Light 切换时实际主题与填充/描边重新解析，以及占用用户目录的失败窗口无法进入设置/首页并可安全关闭；两个样例在隔离 `DataDirectory` 下生成 235-byte 摘要与 293-byte CSV。未连接真实业务系统。
 
 ## 干净 Windows 环境
 
@@ -22,7 +24,7 @@ pwsh -File .\scripts\build.ps1
 .\artifacts\native\app\Workbench.App.exe
 ```
 
-发布目标为 win-x64、unpackaged、自包含目录，保留完整 `app/` 及其 `Plugins/` 子目录。没有安装器、签名、上线或部署步骤。构建脚本遇到任意非零 dotnet 退出码即失败，并从干净的 `artifacts/native/` 开始，避免旧插件混入。
+发布目标为 win-x64、unpackaged、自包含目录，保留完整 `app/` 及其 `Plugins/` 子目录。没有安装器、签名、上线或部署步骤。构建脚本遇到任意非零 dotnet 退出码即失败，并从干净的 `artifacts/native/` 开始，避免旧插件混入；还要求主程序资源图 `app/Workbench.App.pri` 存在且非空。该文件由标准 SDK PRI 生成/合并/发布目标产生，不能仅保留框架的 PRI 文件。
 
 ## 自动冒烟与 CI 产物
 
@@ -49,10 +51,13 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 | `native-smoke-report` | `artifacts/native/native-smoke.json` | 原生运行检查、启动阶段、失败层与临时数据位置 |
 | `native-host-generated-sources` | `src/Workbench.App/obj/**/App.g*.cs`、`XamlTypeInfo.g.cs` | 检查固定 SDK 实际生成的入口、元数据和 InitializeComponent |
 | `native-startup-diagnostics` | `artifacts/native/native-stdout.log`、`native-stderr.log`、失败时的 `native-crash-events.json` | 进程输出及只匹配 Workbench.App 的 Windows Application 崩溃事件；无法读事件时记录原因 |
+| `native-debugger-evidence` | 失败后生成的 `artifacts/native/native-debug/` | Microsoft 签名的 x64 CDB 就地采集 HRESULT、错误消息、原生调用栈和采集状态；独立于普通冒烟报告 |
 | `core-linux-results` | `artifacts/tests/` | Linux TRX |
 | `core-windows-results` | `artifacts/tests/` | Windows TRX（包括 Windows 文件系统分支） |
 
 如果 Core、发布或原生启动失败，job 保持失败状态；上传已有产物供排查，缺少必需报告不会被解释为通过。
+
+原生冒烟失败后才运行 `scripts/native-debug.ps1`，默认最多采集 240 秒；如需安装官方调试器，仅安装调试工具组件并验证 Microsoft 签名。采集只发布相关文本，不生成或上传进程内存 dump，不执行堆遍历或导出完整环境。调试器及被调试程序启动前清空继承环境，仅保留明确允许的 OS、运行时和代理配置，不继承 CI token。调试采集不修改原始失败判定。第六轮通过这些文本定位了 InfoBar 默认样式资源加载失败；第七轮补齐主 PRI 发布后完整冒烟通过，成功运行无需产生调试器 artifact。
 
 Linux 可以执行 Core 测试、源文件语法/XML 检查，以及独立 SDK/示例的 C# 参考编译。完整主程序需要 Windows XAML 编译器，`App.xaml` 的生成代码和资源处理由 Windows 构建验证。单独 SDK 参考检查示例（不能用于发布或声称原生验收）：
 
