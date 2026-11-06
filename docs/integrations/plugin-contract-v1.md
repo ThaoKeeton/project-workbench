@@ -1,8 +1,8 @@
 # 独立业务插件接入契约
 
-原生基础基线为 `6565180`（API 1、host 0.1）。新增 SDK 0.2.0 的实际源码已在 `d2005d469aef6a385c134b6914fb6dfa9cff20b2` 构建并通过 [Windows/Linux CI 42255867411](https://github.com/ThaoKeeton/project-workbench/actions/runs/42255867411)：Windows Core 122 项、Linux 120 项及 2 项明确的 Windows 专用跳过，原生检查 13 项。独立插件可以固定此提交的两个 SDK 项目和最近的 Directory.Build.props/global.json，通过源码 ProjectReference 构建；API 1 和程序集身份 1.0.0.0 保持兼容。此证据不是 WinUI SDK nupkg 发布记录。
+原生基础基线为 `6565180`（API 1、host 0.1）。新增 SDK 0.2.0 的实际源码已在 `4815207ec8d49e8a0fc10ad2e751a7791afe45bc` 构建并通过 [Windows/Linux CI 42262558586](https://github.com/ThaoKeeton/project-workbench/actions/runs/42262558586)：Windows Core 127 项、Linux 125 项及 2 项明确的 Windows 专用跳过，原生检查 13 项。独立插件可以固定此提交的两个 SDK 项目和最近的 Directory.Build.props/global.json，通过源码 ProjectReference 构建；API 1 和程序集身份 1.0.0.0 保持兼容。此证据不是 WinUI SDK nupkg 发布记录。
 
-当前 host 0.2 的运行服务仍在独立审查修复：发现包文件变化后，旧后台对象的授权写入需要追加并发撤销保障；包维护、原生管理和业务安装验收也在继续。上述提交可作为 SDK 编译契约，不能据此宣称整个 host 0.2 已通过最终验收。完成后会补充新的宿主提交和 SDK 分发快照。
+运行服务已通过独立审查及上述实际 Windows 验证：发现包变更会立即撤销旧对象的新增操作，排空在途意图保存后最终清除授权；历史警告不会撤销后来明确批准的版本。两个真实 DPAPI 测试包含同一 Windows 用户下跨进程读写。包维护、原生管理和业务安装验收仍在继续；上述提交可作为 SDK 编译契约，不能据此宣称整个 host 0.2 已通过最终验收。后续会补充 SDK 分发快照。
 
 ## 构建与边界
 

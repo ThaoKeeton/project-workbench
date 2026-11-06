@@ -92,3 +92,7 @@
 - [ ] Exit and wait for the OS process, relaunch the same isolated root and verify consent-bound restore, no duplicate worker, checkpoint/credentials/settings persistence and clean stop. Probe missing configuration and managed task failure without corrupting existing state.
 - [ ] Exercise staged version update, failure and rollback across separate processes; explicitly label synthetic manifest/version fault variants if upstream supplies only one real release. Verify package identity, backups and current business data preservation; do not claim arbitrary schema rollback or live Webhook dedup proof.
 - [ ] Produce JSON reports with actual PID/exit codes/source provenance and all checks. Run current Windows CI and read its results/artifacts. Keep Windows11 manual acceptance pending unless actually executed. Commit and obtain scoped then final review.
+
+### 2026-11-06 追加：UPCAM 真实插件兼容验证
+
+用户通过父线程明确要求在平台维护功能完成后加入 UPCAM 生产插件的安装、启停和升级兼容测试，不能用示例代替。Task4 同时覆盖钉钉和 UPCAM，先接入具备成功 CI 的包；固定 UPCAM6370b9d/CI42268731102/artifact13529430900，保持业务仓库只读。其插件确实使用 SDK0.2 的后台任务和恢复绑定密钥；私有无窗口 worker 允许存在，不嵌套独立应用。正式包的单层 com.upcam.task-digest 包装目录使用目录安装，若为 ZIP 接口生成根清单传输包，保留文件并明确记录重包来源与 SHA，不猜测任意目录或伪称新业务发布。生产/合成验收模式必须区分，无真实项目/密钥/发送。
