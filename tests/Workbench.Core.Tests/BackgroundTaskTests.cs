@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Workbench.Core;
 using Workbench.Sdk;
@@ -471,17 +472,84 @@ public sealed class BackgroundTaskTests
             Assert.Equal(newApproval, await ReadApprovalAsync(disk));
         }
 
-        await using var restarted = Manager(disk);
-        await restarted.DiscoverAsync();
-        Assert.True(Assert.Single(restarted.Plugins).IsTrusted);
-        Assert.True(Assert.Single(restarted.Plugins).DesiredEnabled);
-        Assert.All(await restarted.RestoreEnabledAsync(), result => Assert.True(result.Succeeded, result.Message));
-        await RuntimeTest.WaitAsync(async () => await restarted.GetSettings(Id).GetAsync("jobRuns", 0) == 3
-            && await restarted.GetSettings(Id).GetAsync("startReason", "") == "Restore");
-        var restored = Assert.Single(restarted.GetBackgroundTaskSnapshots(Id));
-        Assert.True(restored.ResumeOnStartup);
-        Assert.True(restored.DesiredRunning);
-        Assert.Equal(PluginBackgroundTaskState.Running, restored.State);
+        var restarted = Manager(disk);
+        await WithRuntimeCleanupAsync(restarted, async () =>
+        {
+            await restarted.DiscoverAsync();
+            Assert.True(Assert.Single(restarted.Plugins).IsTrusted);
+            Assert.True(Assert.Single(restarted.Plugins).DesiredEnabled);
+            Assert.All(await restarted.RestoreEnabledAsync(), result => Assert.True(result.Succeeded, result.Message));
+            await RuntimeTest.WaitAsync(async () => await restarted.GetSettings(Id).GetAsync("jobRuns", 0) == 3
+                && await restarted.GetSettings(Id).GetAsync("startReason", "") == "Restore");
+            var restored = Assert.Single(restarted.GetBackgroundTaskSnapshots(Id));
+            Assert.True(restored.ResumeOnStartup);
+            Assert.True(restored.DesiredRunning);
+            Assert.Equal(PluginBackgroundTaskState.Running, restored.State);
+        });
+    }
+
+    [Fact]
+    public async Task Cleanup_retries_pending_cooperative_work_and_preserves_the_body_failure()
+    {
+        using var disk = Package();
+        var manager = Manager(disk);
+        try
+        {
+            await EnableAsync(manager, "held");
+            var settings = manager.GetSettings(Id);
+            Task? cleanup = null;
+            var released = false;
+            try
+            {
+                Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
+                await RuntimeTest.WaitAsync(async () => await settings.GetAsync("jobRuns", 0) == 1);
+                var bodyFailure = new Xunit.Sdk.XunitException("Synthetic assertion before cooperative cleanup.");
+                cleanup = WithRuntimeCleanupAsync(manager, () => throw bodyFailure);
+                // Real cancellation reaches the fixture, whose existing held
+                // completion stays closed through the first actual Stop timeout.
+                await RuntimeTest.WaitAsync(() => Task.FromResult(Assert.Single(manager.Plugins).Diagnostics
+                    .Any(diagnostic => diagnostic.Code == PluginDiagnosticCode.StopTimedOut)));
+                await RuntimeTest.WaitAsync(async () => await settings.GetAsync("stopCalls", 0) == 1
+                    && await settings.GetAsync("jobStopReason", "") == "HostShutdown");
+                var pending = Assert.Single(manager.Plugins);
+                Assert.True(pending.HasRuntime);
+                Assert.True(pending.HasPendingStop);
+                Assert.Equal(PluginBackgroundTaskState.Stopping, Assert.Single(manager.GetBackgroundTaskSnapshots(Id)).State);
+                Assert.Equal(1, await settings.GetAsync("instanceCount", 0));
+                Assert.Equal(1, await settings.GetAsync("jobRuns", 0));
+                Assert.False(await settings.GetAsync("jobFinished", false));
+                var completedWhileHeld = cleanup.IsCompleted;
+
+                await settings.SetAsync("releaseJob", true);
+                released = true;
+                var observed = await Record.ExceptionAsync(() => cleanup);
+                Assert.Same(bodyFailure, observed);
+                Assert.False(completedWhileHeld, "Cleanup must retain ownership until the held cooperative completion is released.");
+                Assert.False(Assert.Single(manager.Plugins).HasRuntime);
+                Assert.False(manager.HasPendingStops);
+                Assert.True(await settings.GetAsync("jobFinished", false));
+                Assert.Equal(1, await settings.GetAsync("instanceCount", 0));
+                Assert.Equal(1, await settings.GetAsync("jobRuns", 0));
+                Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+            }
+            finally
+            {
+                if (!released) await settings.SetAsync("releaseJob", true);
+                if (cleanup is not null) _ = await Record.ExceptionAsync(() => cleanup); // Observe even when a covering assertion failed.
+            }
+        }
+        finally { await RuntimeTest.DisposeAsync(manager); }
+    }
+
+    private static async Task WithRuntimeCleanupAsync(PluginManager manager, Func<Task> body)
+    {
+        var bodyFailure = await Record.ExceptionAsync(body);
+        // A bounded Stop may retain ownership. Retry the same Stop through the
+        // existing test cleanup contract, without replacing a body assertion.
+        var cleanupFailure = await Record.ExceptionAsync(() => RuntimeTest.DisposeAsync(manager));
+        if (bodyFailure is not null && cleanupFailure is not null) throw new AggregateException(bodyFailure, cleanupFailure);
+        if (bodyFailure is not null) ExceptionDispatchInfo.Capture(bodyFailure).Throw();
+        if (cleanupFailure is not null) ExceptionDispatchInfo.Capture(cleanupFailure).Throw();
     }
 
     private static async Task<(bool Enabled, string? Fingerprint)> ReadApprovalAsync(TestDirectory disk)
