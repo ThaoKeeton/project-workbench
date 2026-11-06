@@ -4,11 +4,11 @@
 
 | 检查 | 已有证据 | 范围与限制 |
 | --- | --- | --- |
-| Linux Core Release | 83/83，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
+| Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux 全解决方案参考编译 | 零警告、零错误 | 通过命令行关闭原生资源步骤；不能用于分发 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
-| Windows Core 测试/发布 | 由 PR 的 `native-windows` job 执行，结果以实际 CI 记录为准 | 构建通过仍不代表原生启动 |
-| Windows 原生自动冒烟 | 由 CI 启动发布 EXE，结果以 `native-smoke-report` 为准 | 初始化失败或没有可用桌面会失败，不能跳过为通过 |
+| Windows Core 测试/发布 | 首轮分支 CI 在测试夹具删除已映射 DLL 时失败（33 失败 / 50 通过）；已修复夹具，重跑待观察 | 构建通过仍不代表原生启动 |
+| Windows 原生自动冒烟 | 首轮因前置 Core 失败未执行；修复后由 CI 启动发布 EXE，以 `native-smoke-report` 为准 | 初始化失败或没有可用桌面会失败，不能跳过为通过 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
 
 ## 干净 Windows 环境

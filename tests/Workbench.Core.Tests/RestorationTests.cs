@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Workbench.Core;
 using Xunit;
@@ -72,10 +73,36 @@ public sealed class RestorationTests
         var path = disk.Package(Id);
         await File.WriteAllTextAsync(Path.Combine(path, "extra.txt"), "original data");
         using var marker = disk.WatchActivation();
-        await using (var manager = disk.Manager())
+        // Disposing a noncollectible load context does not release Windows DLL mappings.
+        // Finish an actual host process before replacing package bytes, as users must do.
+        var executable = Path.Combine(AppContext.BaseDirectory, "deployment-probe",
+            OperatingSystem.IsWindows() ? "Workbench.DeploymentProbe.exe" : "Workbench.DeploymentProbe");
+        var start = new ProcessStartInfo(executable)
         {
-            await manager.DiscoverAsync();
-            Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add(disk.Plugins);
+        start.ArgumentList.Add(disk.User);
+        start.ArgumentList.Add(Id);
+        using (var process = Process.Start(start) ?? throw new InvalidOperationException("Fixture host did not start."))
+        {
+            using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(30));
+            var output = process.StandardOutput.ReadToEndAsync(deadline.Token);
+            var errors = process.StandardError.ReadToEndAsync(deadline.Token);
+            try
+            {
+                await process.WaitForExitAsync(deadline.Token);
+                Assert.True(process.ExitCode == 0, await errors);
+                using var result = JsonDocument.Parse(await output);
+                Assert.True(result.RootElement.GetProperty("Enabled").GetBoolean(), result.RootElement.GetProperty("Message").GetString());
+                Assert.True(File.Exists(marker.Path));
+            }
+            finally
+            {
+                if (!process.HasExited) process.Kill(entireProcessTree: true);
+            }
         }
         File.Delete(marker.Path);
         if (changedFile == "plugin.json")

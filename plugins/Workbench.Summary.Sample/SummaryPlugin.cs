@@ -22,7 +22,7 @@ public sealed class SummaryPlugin : IWorkbenchPlugin
             var text = $"本地演示摘要\n读者：{_audience}\n\n已完成：原生插件页面原型。\n进行中：本地测试用例整理。\n待确认：下一次评审时间。\n\n以上均为预置示例，不来自真实业务系统，也未调用 AI。";
             var path = Path.Combine(context.DataDirectory, "summary-draft.txt");
             await File.WriteAllTextAsync(path, text, token);
-            return new(true, $"示例草稿已写入本地：{path}。打开工作摘要页面可编辑。" );
+            return new(true, $"示例草稿已写入本地：{path}。打开工作摘要页面可编辑。");
         }, "使用预置数据写入插件自己的数据目录，不发送消息。"));
     }
 
@@ -35,8 +35,11 @@ public sealed class SummaryPlugin : IWorkbenchPlugin
         var path = Path.Combine(context.DataDirectory, "summary-draft.txt");
         var draft = Named(new TextBox
         {
-            Header = "可编辑的本地草稿", AcceptsReturn = true, TextWrapping = TextWrapping.Wrap,
-            MinHeight = 220, Text = File.Exists(path) ? File.ReadAllText(path) : "先在“命令”中运行“生成本地示例摘要”，或直接在此编辑。"
+            Header = "可编辑的本地草稿",
+            AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap,
+            MinHeight = 220,
+            Text = File.Exists(path) ? File.ReadAllText(path) : "先在“命令”中运行“生成本地示例摘要”，或直接在此编辑。"
         }, "工作摘要示例草稿");
         var status = Text($"保存位置：{path}");
         var save = Named(new Button { Content = "保存本地草稿" }, "保存工作摘要示例草稿");

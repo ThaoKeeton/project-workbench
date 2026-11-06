@@ -76,8 +76,11 @@ internal static class NativeSmoke
         Record("Shutdown removed registrations and preserved desired-enabled preferences");
         options.WriteReport(new
         {
-            succeeded = true, stage = "completed", userRoot = options.UserRoot,
-            uiThreadId = Environment.CurrentManagedThreadId, checks,
+            succeeded = true,
+            stage = "completed",
+            userRoot = options.UserRoot,
+            uiThreadId = Environment.CurrentManagedThreadId,
+            checks,
             files = files.Select(path => new { path, bytes = new FileInfo(path).Length }),
             completedUtc = DateTimeOffset.UtcNow
         });

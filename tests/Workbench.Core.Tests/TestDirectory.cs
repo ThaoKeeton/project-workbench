@@ -49,7 +49,46 @@ internal sealed class TestDirectory : IDisposable
 
     public ActivationMarker WatchActivation() => new(Path.Combine(Root, "activated.marker"));
 
-    public void Dispose() => Directory.Delete(Root, recursive: true);
+    public void Dispose() => RemoveOwnedDirectory(Root);
+
+    private static bool RemoveOwnedDirectory(string directory)
+    {
+        if ((File.GetAttributes(directory) & FileAttributes.ReparsePoint) != 0)
+        {
+            Directory.Delete(directory); // The owned root itself may have been replaced by a link.
+            return false;
+        }
+        var retainedMappedFile = false;
+        foreach (var path in Directory.EnumerateFileSystemEntries(directory))
+        {
+            var attributes = File.GetAttributes(path);
+            if ((attributes & FileAttributes.ReparsePoint) != 0)
+            {
+                // Remove the link itself, never recurse into its target.
+                if ((attributes & FileAttributes.Directory) != 0) Directory.Delete(path);
+                else File.Delete(path);
+            }
+            else if ((attributes & FileAttributes.Directory) != 0)
+                retainedMappedFile |= RemoveOwnedDirectory(path);
+            else
+            {
+                try { File.Delete(path); }
+                catch (Exception error) when ((error is IOException or UnauthorizedAccessException) && IsMappedFixture(path))
+                {
+                    // Noncollectible plugin DLLs stay mapped until the test process exits.
+                    // Leave only these owned files/ancestors; do not hide unrelated IO failures.
+                    retainedMappedFile = true;
+                }
+            }
+        }
+        if (!retainedMappedFile) Directory.Delete(directory);
+        return retainedMappedFile;
+    }
+
+    private static bool IsMappedFixture(string path) => OperatingSystem.IsWindows()
+        && (Path.GetFileName(path) is "Workbench.TestPlugin.dll" or "Workbench.TestDependency.dll")
+        && AppDomain.CurrentDomain.GetAssemblies().Any(assembly => !assembly.IsDynamic
+            && string.Equals(assembly.Location, path, StringComparison.OrdinalIgnoreCase));
 }
 
 internal sealed class ActivationMarker : IDisposable

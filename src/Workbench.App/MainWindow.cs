@@ -13,7 +13,8 @@ internal sealed partial class MainWindow : Window
     private readonly NavigationView _navigation = Ui.Named(new NavigationView
     {
         PaneDisplayMode = NavigationViewPaneDisplayMode.Auto,
-        IsSettingsVisible = true, IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
+        IsSettingsVisible = true,
+        IsBackButtonVisible = NavigationViewBackButtonVisible.Collapsed,
         PaneTitle = "Project Workbench"
     }, "工作台导航");
     private readonly ContentControl _content = new()
@@ -103,7 +104,9 @@ internal sealed partial class MainWindow : Window
     {
         var item = Ui.Named(new NavigationViewItem
         {
-            Content = title, Icon = new SymbolIcon(icon), Tag = target
+            Content = title,
+            Icon = new SymbolIcon(icon),
+            Tag = target
         }, title);
         _navigation.MenuItems.Add(item);
     }
@@ -135,7 +138,8 @@ internal sealed partial class MainWindow : Window
 
     private void ShowPage(FrameworkElement page) => _content.Content = new ScrollViewer
     {
-        Content = page, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        Content = page,
+        HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
         HorizontalContentAlignment = HorizontalAlignment.Stretch
     };
 
@@ -170,9 +174,11 @@ internal sealed partial class MainWindow : Window
         {
             var dialog = new ContentDialog
             {
-                XamlRoot = _root.XamlRoot, Title = $"信任并启用 {manifest.Name}？",
+                XamlRoot = _root.XamlRoot,
+                Title = $"信任并启用 {manifest.Name}？",
                 Content = $"{manifest.Id}\n{package.PackagePath}\n\n插件是与工作台同进程运行的可信代码，可访问当前用户的文件和系统权限。能力说明并非权限限制；程序集加载上下文不是安全沙箱。仅信任您审查过的本地代码。",
-                PrimaryButtonText = "信任并启用", CloseButtonText = "取消",
+                PrimaryButtonText = "信任并启用",
+                CloseButtonText = "取消",
                 DefaultButton = ContentDialogButton.Close
             };
             approve = await dialog.ShowAsync() == ContentDialogResult.Primary;

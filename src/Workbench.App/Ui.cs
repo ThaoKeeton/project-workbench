@@ -8,7 +8,9 @@ internal static class Ui
 {
     public static TextBlock Text(string text, double size = 14) => new()
     {
-        Text = text, FontSize = size, TextWrapping = TextWrapping.Wrap,
+        Text = text,
+        FontSize = size,
+        TextWrapping = TextWrapping.Wrap,
         IsTextSelectionEnabled = true
     };
 
@@ -22,7 +24,9 @@ internal static class Ui
 
     public static Border Card(UIElement child) => new()
     {
-        Child = child, Padding = new Thickness(20), CornerRadius = new CornerRadius(8),
+        Child = child,
+        Padding = new Thickness(20),
+        CornerRadius = new CornerRadius(8),
         BorderThickness = new Thickness(1),
         BorderBrush = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardStrokeColorDefaultBrush"],
         Background = (Microsoft.UI.Xaml.Media.Brush)Application.Current.Resources["CardBackgroundFillColorDefaultBrush"]
