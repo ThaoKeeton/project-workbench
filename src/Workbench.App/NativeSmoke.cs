@@ -75,7 +75,7 @@ internal static class NativeSmoke
         };
         Require(files.All(file => File.Exists(file) && new FileInfo(file).Length > 0), "Local commands did not write isolated sample files.");
         Record("Local commands wrote nonempty draft and CSV under isolated DataDirectory paths");
-        await VerifySummaryDraftAsync(window, files[0]);
+        var savedSummaryDraft = await VerifySummaryDraftAsync(window, files[0]);
         Record("Real Summary editor retained unsaved text through fresh Home/Commands/settings navigation, saved edits and refused destructive regeneration");
         foreach (var id in RunOptions.SampleIds)
         {
@@ -89,9 +89,9 @@ internal static class NativeSmoke
             if (id == RunOptions.SampleIds[0])
             {
                 var page = await OpenSummaryAsync(window);
-                Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == SummarySavedDraft,
+                Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == savedSummaryDraft,
                     "Summary re-enable did not reload the saved draft after discarding unsaved session edits.");
-                Require(await File.ReadAllTextAsync(files[0]) == SummarySavedDraft,
+                Require(await File.ReadAllTextAsync(files[0]) == savedSummaryDraft,
                     "Summary disable/re-enable changed the saved draft file.");
             }
         }
@@ -119,7 +119,7 @@ internal static class NativeSmoke
         await window.FinishSmokeAsync();
     }
 
-    private static async Task VerifySummaryDraftAsync(MainWindow window, string path)
+    private static async Task<string> VerifySummaryDraftAsync(MainWindow window, string path)
     {
         var manager = window.SmokeManager;
         var generatedText = await File.ReadAllTextAsync(path);
@@ -128,6 +128,10 @@ internal static class NativeSmoke
         List<string> editEvents = [];
         await EditAsync(edited, SummarySavedDraft, editEvents);
         var afterEdit = edited.Text;
+        // WinUI canonicalizes LF input to CR. Validate content once, then require exact native text everywhere.
+        Require(NormalizeNewlines(afterEdit) == NormalizeNewlines(SummarySavedDraft),
+            $"Summary editor changed the entered content. {DescribeText("literal", SummarySavedDraft)}; "
+            + $"{DescribeText("after edit", afterEdit)}; events={JsonSerializer.Serialize(editEvents)}");
 
         List<(string Page, string? PluginId, string? ViewId)> routes =
             [("home", null, null), ("commands", null, null), ("settings", null, null)];
@@ -141,11 +145,11 @@ internal static class NativeSmoke
             page = await OpenSummaryAsync(window);
             Require(!ReferenceEquals(previous, page), "Summary navigation must create a fresh native view.");
             var actual = FindNamed<TextBox>(page, "工作摘要示例草稿").Text;
-            Require(actual == SummarySavedDraft,
+            Require(actual == afterEdit,
                 $"Summary unsaved draft was lost after navigating through {route.Page}. "
                 + $"{DescribeText("literal", SummarySavedDraft)}; {DescribeText("after edit", afterEdit)}; "
                 + $"{DescribeText("old.Text now", edited.Text)}; {DescribeText("fresh.Text", actual)}; "
-                + $"{DescribeDifference(SummarySavedDraft, actual)}; events={JsonSerializer.Serialize(editEvents)}");
+                + $"{DescribeDifference(afterEdit, actual)}; events={JsonSerializer.Serialize(editEvents)}");
         }
 
         var command = manager.Contributions.Commands.Single(c => c.PluginId == RunOptions.SampleIds[0]);
@@ -155,7 +159,7 @@ internal static class NativeSmoke
             "Summary generation must clearly refuse to replace an edited draft.");
         Require(await File.ReadAllTextAsync(path) == generatedText, "Summary regeneration replaced the existing file before Save.");
         page = await OpenSummaryAsync(window);
-        Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == SummarySavedDraft,
+        Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == afterEdit,
             "Summary regeneration replaced unsaved editor text.");
 
         var status = Descendants<TextBlock>(page).Single(text => text.Text.Contains(path, StringComparison.Ordinal));
@@ -168,18 +172,19 @@ internal static class NativeSmoke
             await saved.Task.WaitAsync(TimeSpan.FromSeconds(15));
         }
         finally { status.UnregisterPropertyChangedCallback(TextBlock.TextProperty, subscription); }
-        Require(await File.ReadAllTextAsync(path) == SummarySavedDraft, "Summary Save did not persist the edited draft.");
+        Require(await File.ReadAllTextAsync(path) == afterEdit, "Summary Save did not persist the edited draft.");
 
         await window.SmokeNavigateAsync("commands");
         var savedGeneration = await manager.ExecuteCommandAsync(command.PluginId, command.Id);
         Require(!savedGeneration.Succeeded && !string.IsNullOrWhiteSpace(savedGeneration.Message),
             "Summary generation must clearly refuse to replace a saved draft.");
-        Require(await File.ReadAllTextAsync(path) == SummarySavedDraft, "Summary regeneration replaced the user's saved draft file.");
+        Require(await File.ReadAllTextAsync(path) == afterEdit, "Summary regeneration replaced the user's saved draft file.");
         page = await OpenSummaryAsync(window);
         var editor = FindNamed<TextBox>(page, "工作摘要示例草稿");
-        Require(editor.Text == SummarySavedDraft, "Summary regeneration replaced the saved draft model.");
+        Require(editor.Text == afterEdit, "Summary regeneration replaced the saved draft model.");
         // The existing lifecycle round trip below must restore the saved value, not this session-only edit.
         await EditAsync(editor, SummaryUnsavedDraft);
+        return afterEdit;
     }
 
     private static Task<FrameworkElement> OpenSummaryAsync(MainWindow window)
@@ -218,6 +223,8 @@ internal static class NativeSmoke
 
     // Only isolated smoke literals/sample data are included in these failure diagnostics.
     private static string DescribeText(string label, string text) => $"{label}: length={text.Length}, text={JsonSerializer.Serialize(text)}";
+
+    private static string NormalizeNewlines(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
 
     private static string DescribeDifference(string expected, string actual)
     {
