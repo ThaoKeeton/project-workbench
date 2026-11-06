@@ -6,7 +6,9 @@
 | --- | --- | --- |
 | Task 3 Linux Core | 一次完整运行 221 通过、2 项明确 Windows DPAPI 跳过，共 223 项；随后新增 OS 进程用例的最终聚焦运行 12/12 通过 | 聚焦运行包含 6 个实际子进程，验证通用 opt-in Restore、RequiresPluginStart 不恢复、停用后不复活；另含 HostRuntime 持锁/Stop 重试、Apply 顺序、坏元数据独立根及只读凭据状态。未把更新后的完整套件宣称为已重新运行；TRX 在 Task 3 报告 |
 | Task 3 Linux C# reference | App 与独立 NativeFixture 参考编译 0 warnings/errors | `tests/Workbench.NativeReference` 仅为不可运行的类库；InitializeComponent 占位直接抛异常，没有生产入口/资源替代；不验证 SDK 生成 Main、XAML、主 PRI 或实际 WinUI |
-| Task 3 Windows/SDK native | 本轮待控制器取得 Windows CI | 原有 13 项保留，新增管理导航检查；另有显式 runtime probes。不得把下述历史 GREEN 当成本轮证据 |
+| Task 3 Windows/SDK native（Task 4 BASE） | [42285023349](https://github.com/ThaoKeeton/project-workbench/actions/runs/42285023349)，提交 `27154465c08d132798c8ea7b637f137f7340a90b`：Windows Core 226 通过、原生 14 项、management 10 项、六个连续实际进程 7 项、默认 Windows SDK source/NuGet export 均通过 | 控制器已检查实际报告；该结果只证明 Task 4 之前的 BASE，不是下述新增独立业务包探针的 Windows 执行证据 |
+| Task 4 Linux Core/固定业务包 | 完整运行 234 通过、2 项 Windows DPAPI 明确跳过，共 236 项；两个真实生产 ZIP 的 Store 安装及逐文件 SHA256 校验通过 | 不执行 WinUI 或业务程序集；新参数/脚本报告验证与不可运行的 App C# reference 编译另行记录在 Task 4 报告 |
+| Task 4 Windows 独立业务包 | 当前新增提交仍待控制器运行 CI | 已编写下述实际 shipping App 六进程测试；不得把 Linux、上游 source-linked host 或 Task 3 BASE GREEN 当作通过 |
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux C# 检查 | 早期手动主程序版本参考编译通过；当前主程序 7 个 C# 文件语法与 XML 检查通过 | 采用标准 App.xaml 后，XAML 编译器必须在 Windows 执行；当前主程序没有 Linux 完整语义编译证据 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
@@ -111,6 +113,33 @@ dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c
 pwsh ./scripts/export-sdk.ps1 -ReferenceOnly
 pwsh ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-reference-snapshot
 ```
+
+## Task 4 独立钉钉与 UPCAM 生产包验收（本轮 Windows 待运行）
+
+此探针运行当前 `artifacts/native/app/Workbench.App.exe`，使用当前 `HostRuntime`、真实 Store 和原生管理界面。它不运行上游 source-linked 旧宿主，不把两个平台样例当作业务插件，也不静态引用业务程序集。固定输入和来源记录见 [integration inputs](../tests/integration/README.md)。
+
+```powershell
+pwsh ./scripts/build.ps1
+pwsh ./scripts/import-business-plugin.ps1
+pwsh ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300
+```
+
+仅显式 `--business-probe <phase> --probe-root <root> --smoke-report <report>` 开启此模式；root 必须是 `%TEMP%/ProjectWorkbench-business-probe/<GUID>` 的直接子目录，并排除 bundled 发现根。普通启动不读取或安装这些输入。六个阶段共享同一隔离根，每个阶段实际退出后才启动下一个。
+
+| 阶段 | 必需业务断言 |
+| --- | --- |
+| seed | 真正安装两个独立 ZIP；逐文件匹配已固定上游字节、禁用/未信任/未加载；实际信任弹窗取消及确认。钉钉实际设置、加密草稿、demo Core 读取/搜索/整理/历史，单个真实 MonitorSupervisor 跨页面继续；RequiresPluginStart 通用 Start/Resume 拒绝、原生 Stop/host Stop/停用完整退役。UPCAM 实际生产无窗口 worker/Core fictional preview、原生页面/设置/默认 profile 绑定、缺少自动授权的明确开始拒绝与真实 registered callback Faulted、安全 Stop/停用/worker 退役 |
+| restart | 新 OS 进程恢复可信插件登记；钉钉任务仍停止、无业务连接/调度，必须新预览；UPCAM 恢复前无 worker/任务；实际加密草稿/非敏感偏好/profile 绑定保留；暂存两个只改 manifest 版本的明确合成升级，当前 DLL 不变，发现后 Apply 拒绝 |
+| update | 启动发现前 Apply 到合成版本，撤销信任/启用/恢复；原厂 DLL 逐文件不变、当前业务数据及实际备份保留；重新信任后真实页面可用。再暂存更高合成版本，仅损坏未加载的 staged manifest，供下一进程测试失败 |
+| fault | 真实启动 Apply 因 staged 指纹损坏失败，旧当前代码/数据不变；保留 Prepared journal；取消后按实际 HistoryId 暂存原版代码回滚 |
+| rollback | 原版完整字节恢复且需新信任；不恢复旧业务数据；真实页面/worker sample 仍可用，暂存保留数据的移除 |
+| remove | 启动前移除两个代码目录；业务程序集未加载，保留当前 data/settings/已有 secrets 和六份代码历史；再次验证当前文件 SHA256 |
+
+业务探针的 `artifacts/native/business-probes/<phase>.json` 和 `summary.json` 由 CI artifact `independent-business-plugin-probes` 收集，包含实际 PID、**实际 OS exitCode**、来源提交/ZIP SHA256、合成更新 ZIP SHA256、当前文件/备份/停止状态、已观察 worker 的实际 PID/exitCode、实际 WinUI Closed 事件和启动器退出后重新获取租约的证据。缺失报告、非零退出、PID/来源不匹配或超时均失败；已有原生成功报告也不能覆盖进程失败。超时保留已知进程所有权并停止后续阶段，不强杀来证明正常停止。
+
+本轮 Linux 只能执行固定包审计/真实 Store 安装、报告与隔离参数测试及不可运行的 C# reference 编译；Windows 原生执行必须以当前提交的实际 CI 结果为准。原有样例 13 项加管理导航、独立平台 fixture 的 runtime probes 均保留，业务结果单独记录。
+
+覆盖边界：钉钉三个 host secret definitions 已登记，但上游明确推迟实际 host value 消费；UPCAM host secret 只用于程序生成的恢复绑定 key，业务凭据仍使用原 worker DPAPI。本探针没有自动业务授权，不创建恢复 key。UPCAM 上游 workflow 没有发布其不同 ID 的 synthetic acceptance 包，因此正向自动业务提供方执行未验；两插件均未执行发送、真实 Webhook/HTTP、真实 DWS/Teambition/OpenAI、企业权限或真实凭据测试。代码更新/故障版本是明确合成的集成输入，不是上游新发布；UserRoot 备份不包含外部独立版规范状态或 DWS profiles，不证明任意 schema 降级或 live Webhook 去重。Windows11 人工清单仍全部待验。
 
 ## Windows 实机人工清单（全部待验）
 

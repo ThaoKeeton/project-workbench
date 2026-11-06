@@ -21,6 +21,11 @@ jobs:
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
+      - name: Pinned business package import and process report regressions
+        shell: pwsh
+        run: |
+          ./tests/scripts/BusinessPluginImport.Tests.ps1
+          ./tests/scripts/BusinessPluginReport.Tests.ps1
       - name: Core runtime and real filesystem tests
         run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-linux.trx" --results-directory artifacts/tests
       - uses: actions/upload-artifact@v7.0.2
@@ -55,6 +60,9 @@ jobs:
       - name: Native runtime management and actual process restarts
         shell: pwsh
         run: ./scripts/native-runtime-probe.ps1 -TimeoutSeconds 180
+      - name: Independent DingTalk and UPCAM in current shipping app
+        shell: pwsh
+        run: ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300
       - name: Export independent SDK source and NuGet snapshot
         shell: pwsh
         run: ./scripts/export-sdk.ps1
@@ -71,6 +79,12 @@ jobs:
         with:
           name: native-runtime-probes
           path: artifacts/native/runtime-probes/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: independent-business-plugin-probes
+          path: artifacts/native/business-probes/
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7.0.2
         with:

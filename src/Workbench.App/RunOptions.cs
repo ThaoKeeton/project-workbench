@@ -5,7 +5,9 @@ namespace Workbench.App;
 internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? ReportPath)
 {
     public string? RuntimeProbe { get; init; }
-    public bool IsIsolated => SmokeTest || RuntimeProbe is not null;
+    public string? BusinessProbe { get; init; }
+    public bool IsIsolated => SmokeTest || RuntimeProbe is not null || BusinessProbe is not null;
+    public static readonly string[] BusinessProbePhases = ["seed", "restart", "update", "fault", "rollback", "remove"];
     public static readonly string[] RuntimeProbePhases = ["management", "restart-seed", "restart-verify", "restart-disabled", "update-verify", "rollback-verify", "remove-verify"];
     public static readonly string[] SampleIds = ["com.projectworkbench.summary", "com.projectworkbench.test-cases"];
     private readonly List<object> _startupStages = [];
@@ -23,19 +25,25 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         var smoke = args.Contains("--smoke-test", StringComparer.Ordinal);
         string? report = null;
         string? probe = null;
+        string? business = null;
         string? probeRoot = null;
         for (var i = 0; i < args.Length; i++)
         {
+            if (args[i] is "--business-probe" or "--probe-root" && i + 1 == args.Length)
+                throw new ArgumentException("An isolated probe option requires its explicit value.");
             if (args[i] == "--smoke-report" && i + 1 < args.Length) report = Path.GetFullPath(args[++i]);
             else if (args[i] == "--runtime-probe" && i + 1 < args.Length) probe = args[++i];
+            else if (args[i] == "--business-probe" && i + 1 < args.Length) business = args[++i];
             else if (args[i] == "--probe-root" && i + 1 < args.Length) probeRoot = Path.GetFullPath(args[++i]);
         }
         if (probe is not null && (!RuntimeProbePhases.Contains(probe, StringComparer.Ordinal) || smoke))
             throw new ArgumentException("Unknown or conflicting isolated runtime probe mode.");
-        if (probe is null && probeRoot is not null) throw new ArgumentException("A probe root requires an isolated runtime probe.");
-        if (probe is not null)
+        if (business is not null && (!BusinessProbePhases.Contains(business, StringComparer.Ordinal) || smoke || probe is not null))
+            throw new ArgumentException("Unknown or conflicting isolated business probe mode.");
+        if (probe is null && business is null && probeRoot is not null) throw new ArgumentException("A probe root requires an isolated probe.");
+        if (probe is not null || business is not null)
         {
-            var parent = Path.Combine(Path.GetTempPath(), "ProjectWorkbench-runtime-probe");
+            var parent = Path.Combine(Path.GetTempPath(), business is not null ? "ProjectWorkbench-business-probe" : "ProjectWorkbench-runtime-probe");
             probeRoot ??= Path.Combine(parent, Guid.NewGuid().ToString("N"));
             if (!string.Equals(Path.GetDirectoryName(probeRoot), Path.TrimEndingDirectorySeparator(parent), StringComparison.OrdinalIgnoreCase)
                 || !Guid.TryParseExact(Path.GetFileName(probeRoot), "N", out _))
@@ -44,7 +52,7 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         var root = probeRoot ?? (smoke
             ? Path.Combine(Path.GetTempPath(), "ProjectWorkbench-smoke", Guid.NewGuid().ToString("N"))
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ProjectWorkbench"));
-        return new(smoke, root, smoke || probe is not null ? report ?? Path.Combine(root, "smoke-result.json") : null) { RuntimeProbe = probe };
+        return new(smoke, root, smoke || probe is not null || business is not null ? report ?? Path.Combine(root, "smoke-result.json") : null) { RuntimeProbe = probe, BusinessProbe = business };
     }
 
     public void WriteReport(object result)

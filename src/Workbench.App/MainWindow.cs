@@ -79,6 +79,7 @@ internal sealed partial class MainWindow : Window
             _options.TraceStartup("opening-host-runtime");
             _runtime = new HostRuntime(HostRuntimeOptions.Create(_options));
             if (_options.RuntimeProbe is not null) await NativeRuntimeProbe.PrepareAsync(_runtime, _options);
+            if (_options.BusinessProbe is not null) await BusinessPluginSmoke.PrepareAsync(_runtime, _options);
             _options.TraceStartup("loading-host-theme");
             LoadTheme();
             await _runtime.InitializeAsync(_options.TraceStartup);
@@ -93,6 +94,7 @@ internal sealed partial class MainWindow : Window
             _options.TraceStartup("host-initialization-completed");
             _initializing = false;
             if (_shutdownPending) Navigate(new("background"));
+            else if (_options.BusinessProbe is not null) await BusinessPluginSmoke.RunAsync(this, _options);
             else if (_options.RuntimeProbe is not null) await NativeRuntimeProbe.RunAsync(this, _options);
             else if (_options.SmokeTest) await NativeSmoke.RunAsync(this, _options);
         }

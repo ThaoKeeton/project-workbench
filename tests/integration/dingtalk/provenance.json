@@ -1,0 +1,85 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "com.projectworkbench.dingtalk-insights",
+  "version": "0.3.1",
+  "packageFile": "package.zip",
+  "sha256": "1e744a83ff85287de7acd43509b7df4822d99a9781e9af98dd3e0a448b4cad0f",
+  "packageBytes": 166877,
+  "sourceRepository": "ThaoKeeton/dingtalk-insights",
+  "sourceCommit": "b50586ff321f9932a35235de75f8c9b4996a5a61",
+  "sourceUrl": "https://github.com/ThaoKeeton/dingtalk-insights/tree/b50586ff321f9932a35235de75f8c9b4996a5a61",
+  "workflowRunId": 42284239767,
+  "workflowUrl": "https://github.com/ThaoKeeton/dingtalk-insights/actions/runs/42284239767",
+  "workflowConclusion": "success",
+  "artifactId": 13536248929,
+  "artifactSha256": "ddae9a3801688592a9979d572f00364cb5dcbaafaa24b8f028c4db6a818f5b97",
+  "transport": "publisher-root-manifest-zip",
+  "manifest": {
+    "id": "com.projectworkbench.dingtalk-insights",
+    "name": "钉钉沟通事项",
+    "version": "0.3.1",
+    "apiVersion": 1,
+    "minimumHostVersion": "0.2.0",
+    "entryAssembly": "DingTalkInsights.Workbench.dll",
+    "entryType": "DingTalkInsights.Workbench.InsightPlugin",
+    "description": "原生监控、搜索、待核实事项、历史与设置。默认模拟；连接、采集、模型及人工发送分别确认。SDK1 停用和退出均撤销恢复，重新启用后须明确开始。",
+    "capabilities": [
+      "native-views",
+      "settings",
+      "local-files",
+      "explicit-dws-polling",
+      "explicit-model-upload",
+      "manual-webhook"
+    ]
+  },
+  "fileCount": 8,
+  "expandedBytes": 395674,
+  "files": [
+    {
+      "path": "build-info.json",
+      "bytes": 10263,
+      "sha256": "489f1352525c1fffb4a4ce63c425dcf09dce63c8e5095dce52594ddbd4f597c9"
+    },
+    {
+      "path": "DingTalkInsights.Core.dll",
+      "bytes": 165888,
+      "sha256": "a39f666097d74b4fd326bc72b3b697fa9668ab773746cd6bda05d6e30ac33daa"
+    },
+    {
+      "path": "DingTalkInsights.Runtime.dll",
+      "bytes": 94720,
+      "sha256": "381fdfb40e9392b27690010c5e8f42e9ff9c1b532db8a87b6b74e08426d5810d"
+    },
+    {
+      "path": "DingTalkInsights.Workbench.Bridge.dll",
+      "bytes": 37888,
+      "sha256": "34fbb889d86f3db87bcae0aa795b74bb8f1c7a0dafe9e44971a4588705ea60e3"
+    },
+    {
+      "path": "DingTalkInsights.Workbench.deps.json",
+      "bytes": 14916,
+      "sha256": "7f64e4529601951016491289c7d50e52bd044f13d24f3abfd25007da96de04ee"
+    },
+    {
+      "path": "DingTalkInsights.Workbench.dll",
+      "bytes": 70656,
+      "sha256": "1c4b6b85ad2437347a0ff44e365af7d656e204e2701f6222718cd9884578d6d6"
+    },
+    {
+      "path": "inventory.json",
+      "bytes": 710,
+      "sha256": "a129a070fadbf003c122427c1ba0f1a47c1e96ad1044c86373eedb528b60a9f5"
+    },
+    {
+      "path": "plugin.json",
+      "bytes": 633,
+      "sha256": "b99320e03e81fc4cf3eaabf669b12c077752740995887f49c7e7fc82358b9778"
+    }
+  ],
+  "hostSdkSourceCommit": "82bd958e220aaf94ccdbf1ea68b0ec53b770706a",
+  "maintainedWorkflowRunId": 42284239775,
+  "coverageBoundary": "Production local demo Core and real MonitorSupervisor only. Three host secret definitions; actual host secret value consumption deferred upstream. No send action.",
+  "sourceBranch": "codex/workbench-plugin",
+  "publisherPackageFile": "workbench-plugin/DingTalkInsights.Workbench-0.3.1-win-x64.zip",
+  "workflowRunAttempt": 1
+}
