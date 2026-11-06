@@ -8,30 +8,44 @@ namespace Workbench.Summary.Sample;
 
 public sealed class SummaryPlugin : IWorkbenchPlugin
 {
+    private const string EmptyDraft = "先在“命令”中运行“生成本地示例摘要”，或直接在此编辑。";
     private string _audience = "项目团队";
+    private string _draftText = EmptyDraft;
+    private bool _hasDraft;
 
     public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken)
     {
         _audience = await context.Settings.GetAsync("audience", "项目团队", cancellationToken);
+        var path = Path.Combine(context.DataDirectory, "summary-draft.txt");
+        _hasDraft = File.Exists(path);
+        _draftText = _hasDraft ? await File.ReadAllTextAsync(path, cancellationToken) : EmptyDraft;
         context.RegisterSetting(new("audience", "摘要读者", "项目团队", "仅用于本地示例草稿。"));
         context.RegisterView(new WinUiView("summary", "工作摘要 · 示例", () => CreatePage(context)));
         context.RegisterView(new WinUiView("preferences", "工作摘要", () => CreateSettings(context), WinUiViewKind.Settings));
         context.RegisterCommand(new("generate-draft", "生成本地示例摘要", async token =>
         {
             context.Lifetime.ThrowIfCancellationRequested();
+            token.ThrowIfCancellationRequested();
+            if (_hasDraft || File.Exists(path))
+                return new(false, "已有或已编辑的草稿已保留，生成命令不会覆盖。请在工作摘要页面继续编辑，并点击“保存本地草稿”保存。");
             var text = $"本地演示摘要\n读者：{_audience}\n\n已完成：原生插件页面原型。\n进行中：本地测试用例整理。\n待确认：下一次评审时间。\n\n以上均为预置示例，不来自真实业务系统，也未调用 AI。";
-            var path = Path.Combine(context.DataDirectory, "summary-draft.txt");
-            await File.WriteAllTextAsync(path, text, token);
+            // CreateNew also protects an existing file if it appears after the check above.
+            await using (var output = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.None, 4096, useAsync: true))
+            await using (var writer = new StreamWriter(output))
+                await writer.WriteAsync(text.AsMemory(), token);
+            _draftText = text;
+            _hasDraft = true;
             return new(true, $"示例草稿已写入本地：{path}。打开工作摘要页面可编辑。");
-        }, "使用预置数据写入插件自己的数据目录，不发送消息。"));
+        }, "仅在没有现有或已编辑草稿时写入本地预置示例，不覆盖草稿，不发送消息。"));
     }
 
-    private static FrameworkElement CreatePage(IPluginContext context)
+    private FrameworkElement CreatePage(IPluginContext context)
     {
         context.Lifetime.ThrowIfCancellationRequested();
         var panel = Panel("工作摘要 · 本地示例", "以下是预置演示数据；钉钉、Teambition 和 AI 尚未接入。");
         panel.Children.Add(Text("已完成 1 项  ·  进行中 1 项  ·  待确认 1 项", 20));
         panel.Children.Add(Text("• 原生插件页面原型：已完成\n• 测试用例整理：进行中\n• 下一次评审时间：待确认"));
+        panel.Children.Add(Text("切换页面会保留未保存的编辑。停用插件或退出前请保存；未保存的编辑会丢弃，重新启用时读取已保存草稿。生成命令不会覆盖现有或已编辑的草稿。"));
         var path = Path.Combine(context.DataDirectory, "summary-draft.txt");
         var draft = Named(new TextBox
         {
@@ -39,13 +53,25 @@ public sealed class SummaryPlugin : IWorkbenchPlugin
             AcceptsReturn = true,
             TextWrapping = TextWrapping.Wrap,
             MinHeight = 220,
-            Text = File.Exists(path) ? File.ReadAllText(path) : "先在“命令”中运行“生成本地示例摘要”，或直接在此编辑。"
+            Text = _draftText
         }, "工作摘要示例草稿");
+        // Synchronous text updates keep the document independent of disposable view controls.
+        draft.TextChanging += (_, _) =>
+        {
+            if (!context.Lifetime.IsCancellationRequested && draft.Text != _draftText)
+            {
+                _draftText = draft.Text;
+                _hasDraft = true;
+            }
+        };
         var status = Text($"保存位置：{path}");
         var save = Named(new Button { Content = "保存本地草稿" }, "保存工作摘要示例草稿");
         save.Click += async (_, _) => await HandleAsync(context, status, async () =>
         {
-            await File.WriteAllTextAsync(path, draft.Text, context.Lifetime);
+            var value = draft.Text;
+            _draftText = value;
+            _hasDraft = true;
+            await File.WriteAllTextAsync(path, value, context.Lifetime);
             status.Text = $"已保存到 {path}";
         });
         panel.Children.Add(draft); panel.Children.Add(save); panel.Children.Add(status);

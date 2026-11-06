@@ -7,11 +7,13 @@
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
 | Linux C# 检查 | 早期手动主程序版本参考编译通过；当前主程序 7 个 C# 文件语法与 XML 检查通过 | 采用标准 App.xaml 后，XAML 编译器必须在 Windows 执行；当前主程序没有 Linux 完整语义编译证据 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
-| Windows Core 测试/发布 | [第七轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42209148829)：Windows Core 86/86，自包含主程序与两个独立插件包构建通过；发布的 `Workbench.App.pri` 为 1,352,680 bytes | 使用 `windows-2025` runner；主程序的标准 XAML 生成、语义编译和 PRI 发布由本次 Windows 构建验证 |
-| Windows 原生自动冒烟 | 同轮 `succeeded=true`、`stage=completed`，11 项检查全部通过：原生启动、占用根失败窗口、实时主题、4 个页面/设置控件、文件命令、停用/重新启用及关闭 | 使用真实 WinUI 控件和隔离临时数据；自动检查不代替视觉与交互人工验收 |
+| Windows Core 测试/发布（历史基线） | [第八轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42209929309)：Windows Core 86/86，自包含主程序与两个独立插件包构建通过；发布的 `Workbench.App.pri` 为 1,352,680 bytes | 提交 `d615fa064c8962ed849b494b8b42d1ca54e67b0a`，使用 `windows-2025` runner |
+| Windows 原生自动冒烟（历史基线） | 同轮 `succeeded=true`、`stage=completed`，原有 11 项检查全部通过：原生启动、占用根失败窗口、实时主题、4 个页面/设置控件、文件命令、停用/重新启用及关闭 | 没有编辑/导航/重复生成回归，不能证明该行为安全；自动检查不代替人工验收 |
+| Windows 编辑回归 RED | [第九轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42213219634)，提交 `9e97dc6b596d3821803189b0c55d112f2be9ba48`：实际原生进程 exit 1，`Summary unsaved draft was lost after navigating through home.` | Windows Core 86/86、主程序与独立插件编译发布成功后，在真实 TextBox 编辑/新工厂导航断言失败；不是编译或初始化故障 |
+| 本轮编辑修复 GREEN | 尚待修复提交的 Windows CI | Linux 语法/参考编译检查不代替真实原生回归通过 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
 
-本次通过的代码提交为 `0808aa97f20b524ef5058dffeaf9aa8e9203bc0a`，CI 的 Linux 和 Windows 两个 job 均成功。Windows 证据来自 GitHub `windows-2025` runner，不是 Windows 11 人工验收。原生报告验证了同一张卡片 Light/Dark/Light 切换时实际主题与填充/描边重新解析，以及占用用户目录的失败窗口无法进入设置/首页并可安全关闭；两个样例在隔离 `DataDirectory` 下生成 235-byte 摘要与 293-byte CSV。未连接真实业务系统。
+上述历史基线的原生报告验证了同一张卡片 Light/Dark/Light 切换时实际主题与填充/描边重新解析，以及占用用户目录的失败窗口无法进入设置/首页并可安全关闭；两个样例在隔离 `DataDirectory` 下生成 235-byte 摘要与 293-byte CSV。新增编辑回归已在未修复代码上取得精确 RED；修复后的实际 GREEN 另行记录。Windows 证据来自 GitHub `windows-2025` runner，不是 Windows 11 人工验收。未连接真实业务系统。
 
 ## 干净 Windows 环境
 
@@ -38,8 +40,9 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 2. 仅对实际文件锁获取验证 Windows 共享/锁冲突；创建同隔离根目录的第二个测试窗口，检查启动失败后无法导航到设置/首页且可安全关闭。
 3. 为测试明确批准并启用这两个样例，验证共享 WinUI/WinRT 契约身份，并逐个创建、附加两个页面与两个设置控件到真实 XamlRoot。
 4. 在同一个已附加的主程序卡片上检查 Light/Dark/Light 的实际主题与填充/描边颜色重新解析，再应用系统主题。运行两个本地命令，检查隔离目录下的非空摘要与 CSV 文件。
-5. 清除控件，停用并重新启用两个样例，再次附加原生控件；检查注册撤销与恢复。
-6. 停止插件、清除注册，检查保存的 enabled 偏好仍为 true，写入 JSON 并关闭窗口。
+5. 在真实摘要 TextBox 输入不同于预置内容的文本，经过首页、命令、主程序设置和两插件设置后用新工厂返回；检查未保存文本不变。重复生成须明确拒绝且保留模型/文件，调用真实保存按钮后检查磁盘文本，再次生成仍不得覆盖。
+6. 再修改摘要但不保存；清除控件，停用并重新启用两个样例，再次附加原生控件；检查注册撤销与恢复，摘要仅恢复已保存版本且文件不变。
+7. 停止插件、清除注册，检查保存的 enabled 偏好仍为 true，写入 JSON 并关闭窗口。
 
 报告包含 `succeeded`、`stage`、`userRoot`、启动阶段/线程/时间、检查列表、文件路径/大小和完成时间；失败包含异常与 HRESULT。当前从 SDK 生成入口进入 Application 构造开始，记录编译后的 Application 资源初始化、窗口和控件阶段；更早的失败由启动器报告和进程诊断定位。进程入口前的模块初始化崩溃可能无法由 EXE 写报告，脚本会补充失败 JSON；即使原生进程已写成功报告，后续退出失败或超时也会把最终 succeeded 改为 false，并保留已有检查与原生阶段。报告不含真实用户设置或业务数据。临时根目录保留用于故障检查，可在进程退出后按报告路径自行删除。超时是失败；脚本为限制测试运行时间而终止测试进程，不表示普通停用可强制取消插件。
 
@@ -51,13 +54,13 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 | `native-smoke-report` | `artifacts/native/native-smoke.json` | 原生运行检查、启动阶段、失败层与临时数据位置 |
 | `native-host-generated-sources` | `src/Workbench.App/obj/**/App.g*.cs`、`XamlTypeInfo.g.cs` | 检查固定 SDK 实际生成的入口、元数据和 InitializeComponent |
 | `native-startup-diagnostics` | `artifacts/native/native-stdout.log`、`native-stderr.log`、失败时的 `native-crash-events.json` | 进程输出及只匹配 Workbench.App 的 Windows Application 崩溃事件；无法读事件时记录原因 |
-| `native-debugger-evidence` | 失败后生成的 `artifacts/native/native-debug/` | Microsoft 签名的 x64 CDB 就地采集 HRESULT、错误消息、原生调用栈和采集状态；独立于普通冒烟报告 |
+| `native-debugger-evidence` | 尝试失败诊断时生成的 `artifacts/native/native-debug/` | Microsoft 签名的 x64 CDB 就地采集 HRESULT、错误消息、原生调用栈和采集状态；仅在尝试采集后上传，采集失败仍上传已有部分证据 |
 | `core-linux-results` | `artifacts/tests/` | Linux TRX |
 | `core-windows-results` | `artifacts/tests/` | Windows TRX（包括 Windows 文件系统分支） |
 
 如果 Core、发布或原生启动失败，job 保持失败状态；上传已有产物供排查，缺少必需报告不会被解释为通过。
 
-原生冒烟失败后才运行 `scripts/native-debug.ps1`，默认最多采集 240 秒；如需安装官方调试器，仅安装调试工具组件并验证 Microsoft 签名。采集只发布相关文本，不生成或上传进程内存 dump，不执行堆遍历或导出完整环境。调试器及被调试程序启动前清空继承环境，仅保留明确允许的 OS、运行时和代理配置，不继承 CI token。调试采集不修改原始失败判定。第六轮通过这些文本定位了 InfoBar 默认样式资源加载失败；第七轮补齐主 PRI 发布后完整冒烟通过，成功运行无需产生调试器 artifact。
+原生冒烟失败后才运行 `scripts/native-debug.ps1`，默认最多采集 240 秒；如需安装官方调试器，仅安装调试工具组件并验证 Microsoft 签名。采集只发布相关文本，不生成或上传进程内存 dump，不执行堆遍历或导出完整环境。调试器及被调试程序启动前清空继承环境，仅保留明确允许的 OS、运行时和代理配置，不继承 CI token。调试采集不修改原始失败判定。第六轮通过这些文本定位了 InfoBar 默认样式资源加载失败；第七轮补齐主 PRI 发布后完整冒烟通过。成功运行会跳过采集及其 artifact 上传；采集已尝试但失败或取消时，仍上传已有部分证据。必需的应用目录和冒烟报告仍严格要求存在。
 
 Linux 可以执行 Core 测试、源文件语法/XML 检查，以及独立 SDK/示例的 C# 参考编译。完整主程序需要 Windows XAML 编译器，`App.xaml` 的生成代码和资源处理由 Windows 构建验证。单独 SDK 参考检查示例（不能用于发布或声称原生验收）：
 
@@ -73,7 +76,7 @@ dotnet build src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj -c Release \
 - [ ] 首次启动只展示清单；两个示例未自动启用，页面/命令入口不存在。
 - [ ] 插件详情可查看 ID、版本、能力说明、目录和诊断；取消信任对话框不运行插件，确认后才启用。
 - [ ] 两个示例各自的页面与设置作为原生控件出现在同一窗口；无外部应用窗口和 WebView。
-- [ ] 摘要生成、编辑和保存，测试用例逐行编辑和 CSV 导出，均明确标注示例；文件写到各自 data 目录。
+- [ ] 摘要生成、编辑和保存，跨页面保留未保存编辑，重复生成明确拒绝覆盖；停用/退出前保存的版本可恢复。测试用例逐行编辑和 CSV 导出均明确标注示例；文件写到各自 data 目录。
 - [ ] 各插件设置保存后，停用/重新启用恢复偏好；页面和命令停用后立即消失，停止出错时也不残留可执行入口。
 - [ ] 退出整个进程再重新启动，未变化且已信任/启用的插件恢复；停用的插件保持停用；主题与设置恢复。
 - [ ] 同时启动第二个普通实例显示用户目录占用错误；该失败窗口不能导航到需要管理器的页面并能安全关闭。隔离冒烟可与普通实例并存。

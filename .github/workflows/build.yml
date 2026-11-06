@@ -53,6 +53,7 @@ jobs:
         shell: pwsh
         run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
       - name: Collect native exception text after smoke failure
+        id: native_debug
         if: failure() && steps.native_smoke.outcome == 'failure'
         shell: pwsh
         run: ./scripts/native-debug.ps1 -TimeoutSeconds 240
@@ -78,7 +79,7 @@ jobs:
             artifacts/native/native-crash-events.json
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7.0.2
-        if: always()
+        if: always() && steps.native_debug.outcome != 'skipped' && steps.native_debug.outcome != ''
         with:
           name: native-debugger-evidence
           path: artifacts/native/native-debug/
