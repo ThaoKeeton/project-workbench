@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+.superpowers/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.log
