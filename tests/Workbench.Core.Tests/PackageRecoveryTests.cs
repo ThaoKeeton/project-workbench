@@ -144,14 +144,25 @@ public sealed class PackageRecoveryTests
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task An_occupied_metadata_directory_reports_failure_and_blocks_saved_approval(bool pendingDirectory)
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task An_occupied_metadata_directory_reports_failure_and_blocks_saved_approval(bool pendingDirectory, bool storeInstall)
     {
         using var disk = new TestDirectory();
         var target = disk.Package(Id);
         var package = await PackageValidator.ValidateAsync(target, new(0, 2, 0), default);
         await new PluginStateStore(disk.User).SaveAsync(Id, true, package.Fingerprint, default);
+        const string importId = "com.example.new-install";
+        var import = disk.Package(importId, external: true);
+        var importedPackage = await PackageValidator.ValidateAsync(import, new(0, 2, 0), default);
+        await new PluginStateStore(disk.User).SaveAsync(importId, true, importedPackage.Fingerprint, default);
+        await new PluginRuntimeState(disk.User).SaveAsync(importId, importedPackage.Fingerprint!, "job", new(true, true), _ => { }, default);
+        var approvalPath = Path.Combine(disk.User, "plugin-state.json");
+        var intentPath = Path.Combine(disk.User, "background-tasks.json");
+        var approval = File.ReadAllBytes(approvalPath);
+        var intent = File.ReadAllBytes(intentPath);
         var metadata = Path.Combine(disk.Plugins, ".workbench-packages");
         if (pendingDirectory) Directory.CreateDirectory(metadata);
         var occupied = pendingDirectory ? Path.Combine(metadata, "pending") : metadata;
@@ -161,12 +172,47 @@ public sealed class PackageRecoveryTests
         Assert.NotEmpty(store.Diagnostics);
         Assert.Equal("preserve unknown metadata bytes", File.ReadAllText(occupied));
         await using var manager = disk.Manager();
-        var import = disk.Package("com.example.new-install", external: true);
-        Assert.False((await manager.InstallAsync(import)).Succeeded);
+        var installed = storeInstall ? await store.InstallAsync(import) : await manager.InstallAsync(import);
+        Assert.False(installed.Succeeded);
+        Assert.False(Directory.Exists(Path.Combine(disk.Plugins, importId)));
+        Assert.False(File.Exists(Path.Combine(disk.Plugins, importId)));
+        Assert.Equal(approval, File.ReadAllBytes(approvalPath));
+        Assert.Equal(intent, File.ReadAllBytes(intentPath));
+        Assert.Equal("preserve unknown metadata bytes", File.ReadAllText(occupied));
         var snapshot = Assert.Single(await manager.DiscoverAsync());
         Assert.Equal(PluginState.Invalid, snapshot.State);
         Assert.False(snapshot.IsTrusted);
         Assert.True(File.Exists(Path.Combine(target, "plugin.json")));
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task An_occupied_id_journal_directory_blocks_install_without_changing_saved_approval_or_intent(bool storeInstall)
+    {
+        using var disk = new TestDirectory();
+        var source = disk.Package(Id, external: true);
+        var package = await PackageValidator.ValidateAsync(source, new(0, 2, 0), default);
+        await new PluginStateStore(disk.User).SaveAsync(Id, true, package.Fingerprint, default);
+        await new PluginRuntimeState(disk.User).SaveAsync(Id, package.Fingerprint!, "job", new(true, true), _ => { }, default);
+        var approvalPath = Path.Combine(disk.User, "plugin-state.json");
+        var intentPath = Path.Combine(disk.User, "background-tasks.json");
+        var approval = File.ReadAllBytes(approvalPath);
+        var intent = File.ReadAllBytes(intentPath);
+        var occupied = Path.Combine(disk.Plugins, ".workbench-packages", "pending", Id + ".json");
+        Directory.CreateDirectory(occupied);
+        var unknownPath = Path.Combine(occupied, "unknown.json");
+        File.WriteAllText(unknownPath, "preserve unknown journal ownership");
+        await using var manager = disk.Manager();
+        var installed = storeInstall ? await Store(disk).InstallAsync(source) : await manager.InstallAsync(source);
+        Assert.False(installed.Succeeded);
+        Assert.False(Directory.Exists(Path.Combine(disk.Plugins, Id)));
+        Assert.False(File.Exists(Path.Combine(disk.Plugins, Id)));
+        Assert.Equal(approval, File.ReadAllBytes(approvalPath));
+        Assert.Equal(intent, File.ReadAllBytes(intentPath));
+        Assert.True(Directory.Exists(occupied));
+        Assert.Equal("preserve unknown journal ownership", File.ReadAllText(unknownPath));
+        Assert.Equal(unknownPath, Assert.Single(Directory.GetFileSystemEntries(occupied)));
     }
 
     [Theory]

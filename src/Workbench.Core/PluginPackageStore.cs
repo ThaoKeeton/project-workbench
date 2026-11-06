@@ -49,7 +49,10 @@ public sealed class PluginPackageStore
             stage = FileSystemGuard.ContainedPath(_journal.Root, "imports/" + Guid.NewGuid().ToString("N"));
             var package = await PackageArchive.ImportAsync(path, stage, _hostVersion, cancellationToken);
             var id = package.Manifest!.Id;
-            if ((await FindPackagesAsync(id, cancellationToken)).Count != 0 || File.Exists(_journal.PendingPath(id)))
+            if (File.Exists(_journal.Root) || File.Exists(_journal.PendingRoot))
+                return new(false, "Package maintenance ownership cannot be read safely.");
+            var pendingPath = _journal.PendingPath(id);
+            if ((await FindPackagesAsync(id, cancellationToken)).Count != 0 || File.Exists(pendingPath) || Directory.Exists(pendingPath))
                 return new(false, "The plugin ID is already installed or has pending maintenance.");
             var target = FileSystemGuard.ContainedPath(_pluginsRoot, id);
             if (Directory.Exists(target) || File.Exists(target) || LoadedPackageRegistry.WasLoaded(target))
