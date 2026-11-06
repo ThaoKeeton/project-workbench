@@ -69,6 +69,14 @@ jobs:
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
+          name: native-host-generated-sources
+          path: |
+            src/Workbench.App/obj/**/App.g*.cs
+            src/Workbench.App/obj/**/XamlTypeInfo.g.cs
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
           name: core-windows-results
           path: artifacts/tests
           if-no-files-found: error

@@ -1,39 +1,28 @@
 using Microsoft.UI.Xaml;
-using Microsoft.UI.Xaml.Controls;
-using Microsoft.UI.Xaml.Markup;
-using Microsoft.UI.Xaml.XamlTypeInfo;
 
 namespace Workbench.App;
 
-internal sealed class WorkbenchApplication : Application, IXamlMetadataProvider
+public sealed partial class WorkbenchApplication : Application
 {
     private readonly RunOptions _options;
-    private XamlControlsXamlMetaDataProvider? _controlsMetadata;
     private MainWindow? _window;
 
-    public WorkbenchApplication(RunOptions options)
+    public WorkbenchApplication()
     {
-        _options = options;
-        _options.TraceStartup("application-constructor-entered");
+        // The SDK owns Main, COM wrappers and the UI dispatcher setup. Read the
+        // same process arguments here before loading its generated App.xaml resources.
+        _options = RunOptions.Parse(Environment.GetCommandLineArgs().Skip(1).ToArray());
+        _options.TraceStartup("sdk-generated-main-application-constructor");
         UnhandledException += (_, args) =>
         {
             Environment.ExitCode = 1;
             _options.WriteFailure("unhandled-ui-exception", args.Exception, args.Message);
             // Do not turn an unhandled native/UI failure into a successful smoke result.
         };
-        // App.xaml normally generates this metadata-provider contract. Our code-only
-        // Application must supply it before WinUI parses its standard control resources.
-        _options.TraceStartup("creating-xaml-metadata-provider");
-        _controlsMetadata = new XamlControlsXamlMetaDataProvider();
-        _options.TraceStartup("xaml-metadata-provider-ready");
-        _options.TraceStartup("adding-xaml-controls-resources");
-        Resources.MergedDictionaries.Add(new XamlControlsResources());
+        _options.TraceStartup("initializing-compiled-application-xaml");
+        InitializeComponent();
         _options.TraceStartup("application-resources-ready");
     }
-
-    IXamlType? IXamlMetadataProvider.GetXamlType(Type type) => _controlsMetadata?.GetXamlType(type);
-    IXamlType? IXamlMetadataProvider.GetXamlType(string fullName) => _controlsMetadata?.GetXamlType(fullName);
-    XmlnsDefinition[] IXamlMetadataProvider.GetXmlnsDefinitions() => _controlsMetadata?.GetXmlnsDefinitions() ?? [];
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {

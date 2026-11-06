@@ -61,7 +61,7 @@ context.RegisterCommand(new PluginCommand("export", "本地导出", async token 
 }));
 ```
 
-代码创建的主程序 `Application` 在标准控件资源初始化前提供 `IXamlMetadataProvider`，转发到 `XamlControlsXamlMetaDataProvider`；这对应通常由 App.xaml 生成的初始化契约。参见 [Microsoft 的自定义 Application 初始化说明](https://learn.microsoft.com/windows/apps/desktop/modernize/host-controls-existing-desktop-apps#set-up-the-host)。这里只采用公共的 Application 元数据契约，主程序仍是完整 WinUI 窗口，不使用 XAML Islands。
+主程序用最小的 `App.xaml` 声明标准控件资源和主程序卡片样式，由固定版本的 WinUI SDK 生成入口、XAML 元数据与 `InitializeComponent`，并构建主程序自己的资源图。业务页面及插件工厂仍由 C# 创建；这不增加外部插件 XAML/PRI 加载接口，也不改变单个 WinUI 主窗口的架构。
 
 主程序在 WinUI UI 线程调用工厂，返回的 `FrameworkElement` 直接附加到同一个窗口。使用代码创建标准控件、继承主题，给可操作控件设置 AutomationProperties.Name，并让布局随窗口尺寸伸缩。主程序卡片使用固定的主程序 ThemeResource 样式以跟随各窗口实际主题；这不增加插件资源加载接口。v0.1 不加载插件自带 XAML/PRI，不嵌入独立应用窗口，不使用 WebView。
 

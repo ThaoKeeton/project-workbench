@@ -5,10 +5,10 @@
 | 检查 | 已有证据 | 范围与限制 |
 | --- | --- | --- |
 | Linux Core Release | 86/86，通过；包括真实临时目录、独立插件 DLL、自包含子进程 | 不覆盖 Windows 文件系统分支或原生 UI |
-| Linux 全解决方案参考编译 | 零警告、零错误 | 通过命令行关闭原生资源步骤；不能用于分发 |
+| Linux C# 检查 | 早期手动主程序版本参考编译通过；当前主程序 7 个 C# 文件语法与 XML 检查通过 | 采用标准 App.xaml 后，XAML 编译器必须在 Windows 执行；当前主程序没有 Linux 完整语义编译证据 |
 | Linux 正常原生构建 | 按预期受阻：MSB6003，`MakePri.exe` 的 Exec format error | Windows 原生工具无法在此 Linux 环境运行，未修改生产目标绕过 |
 | Windows Core 测试/发布 | [第二轮分支 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42196885706)：Windows Core 86/86 和自包含发布通过；两个独立插件包构建通过 | 构建通过仍不代表原生启动 |
-| Windows 原生自动冒烟 | 第三轮仍退出 0xC000027B；阶段明确停在 XamlControlsResources 构造、尚无窗口。已补齐 Application 元数据提供器，实际 GREEN 待下一轮 Windows 冒烟 | 初始化失败或没有可用桌面会失败，不能跳过为通过 |
+| Windows 原生自动冒烟 | 第四轮仍退出 0xC000027B；标准控件资源构造失败，补齐手动元数据提供器没有解决。现改为 SDK 标准 App.xaml/生成入口/资源图，实际 GREEN 待 Windows 冒烟 | 初始化失败或没有可用桌面会失败，不能跳过为通过 |
 | Windows 人工验收 | 尚未执行；下方清单全部待验 | 主题外观、DPI、文件选择器、可访问性及真实重启仍需实机 |
 
 ## 干净 Windows 环境
@@ -39,7 +39,7 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 5. 清除控件，停用并重新启用两个样例，再次附加原生控件；检查注册撤销与恢复。
 6. 停止插件、清除注册，检查保存的 enabled 偏好仍为 true，写入 JSON 并关闭窗口。
 
-报告包含 `succeeded`、`stage`、`userRoot`、启动阶段/线程/时间、检查列表、文件路径/大小和完成时间；失败包含异常与 HRESULT。从 Main 入口、Application/资源初始化到窗口和控件创建均记录阶段。进程入口前的模块初始化崩溃可能无法由 EXE 写报告，脚本会补充失败 JSON；即使原生进程已写成功报告，后续退出失败或超时也会把最终 succeeded 改为 false，并保留已有检查与原生阶段。报告不含真实用户设置或业务数据。临时根目录保留用于故障检查，可在进程退出后按报告路径自行删除。超时是失败；脚本为限制测试运行时间而终止测试进程，不表示普通停用可强制取消插件。
+报告包含 `succeeded`、`stage`、`userRoot`、启动阶段/线程/时间、检查列表、文件路径/大小和完成时间；失败包含异常与 HRESULT。当前从 SDK 生成入口进入 Application 构造开始，记录编译后的 Application 资源初始化、窗口和控件阶段；更早的失败由启动器报告和进程诊断定位。进程入口前的模块初始化崩溃可能无法由 EXE 写报告，脚本会补充失败 JSON；即使原生进程已写成功报告，后续退出失败或超时也会把最终 succeeded 改为 false，并保留已有检查与原生阶段。报告不含真实用户设置或业务数据。临时根目录保留用于故障检查，可在进程退出后按报告路径自行删除。超时是失败；脚本为限制测试运行时间而终止测试进程，不表示普通停用可强制取消插件。
 
 `.github/workflows/build.yml` 在 PR（包括草稿）、`main`/`feat/native-plugin-workbench` push、手动触发时运行：
 
@@ -47,16 +47,17 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 | --- | --- | --- |
 | `workbench-win-x64` | `artifacts/native/app/` | 完整自包含可启动目录与两个独立插件包 |
 | `native-smoke-report` | `artifacts/native/native-smoke.json` | 原生运行检查、启动阶段、失败层与临时数据位置 |
+| `native-host-generated-sources` | `src/Workbench.App/obj/**/App.g*.cs`、`XamlTypeInfo.g.cs` | 检查固定 SDK 实际生成的入口、元数据和 InitializeComponent |
 | `native-startup-diagnostics` | `artifacts/native/native-stdout.log`、`native-stderr.log`、失败时的 `native-crash-events.json` | 进程输出及只匹配 Workbench.App 的 Windows Application 崩溃事件；无法读事件时记录原因 |
 | `core-linux-results` | `artifacts/tests/` | Linux TRX |
 | `core-windows-results` | `artifacts/tests/` | Windows TRX（包括 Windows 文件系统分支） |
 
 如果 Core、发布或原生启动失败，job 保持失败状态；上传已有产物供排查，缺少必需报告不会被解释为通过。
 
-仅供开发环境参考编译的命令如下，不能用于发布或声称原生验收：
+Linux 可以执行 Core 测试、源文件语法/XML 检查，以及独立 SDK/示例的 C# 参考编译。完整主程序需要 Windows XAML 编译器，`App.xaml` 的生成代码和资源处理由 Windows 构建验证。单独 SDK 参考检查示例（不能用于发布或声称原生验收）：
 
 ```sh
-dotnet build ProjectWorkbench.slnx -c Release \
+dotnet build src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj -c Release \
   -p:WindowsAppSDKSelfContained=false -p:AppxGeneratePriEnabled=false
 ```
 

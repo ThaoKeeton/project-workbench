@@ -19,8 +19,10 @@ internal static class NativeSmoke
             options.WriteReport(new { succeeded = false, stage = "running", userRoot = options.UserRoot, checks, startupStages = options.StartupStages });
         }
         window.AssertUiThread();
+        Require(SynchronizationContext.Current is Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext,
+            "SDK-generated startup did not install the WinUI synchronization context.");
         Record("WinUI Application.Start and UI synchronization context initialized");
-        Require(Application.Current is IXamlMetadataProvider, "Code-only Application did not expose XAML metadata.");
+        Require(Application.Current is IXamlMetadataProvider, "SDK-generated Application did not expose XAML metadata.");
         var metadata = (IXamlMetadataProvider)Application.Current;
         Require(metadata.GetXamlType(typeof(NavigationView)) is not null
             && metadata.GetXamlType("Microsoft.UI.Xaml.Controls.NavigationView") is not null,
