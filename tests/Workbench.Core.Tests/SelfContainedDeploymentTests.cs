@@ -51,7 +51,7 @@ public sealed class SelfContainedDeploymentTests
             else
             {
                 Assert.False(result.Enabled, "A missing plugin-private DLL must not resolve to the host's v2 assembly.");
-                Assert.Contains("Workbench.TestDependency", result.Message);
+                Assert.Contains("DependencyLoadFailed", result.Message);
             }
         }
         finally

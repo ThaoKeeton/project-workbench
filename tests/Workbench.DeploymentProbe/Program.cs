@@ -2,8 +2,8 @@ using System.Text.Json;
 using Workbench.Core;
 using Workbench.TestDependency;
 
-if (args.Length != 3)
-    throw new ArgumentException("Expected plugins root, user root and plugin ID.");
+if (args.Length is not (3 or 4))
+    throw new ArgumentException("Expected plugins root, user root, plugin ID and optional synthetic secret operation.");
 
 var hostMessage = DependencyProbe.GetMessage();
 await using var manager = new PluginManager(new PluginManagerOptions
@@ -13,6 +13,31 @@ await using var manager = new PluginManager(new PluginManagerOptions
 });
 await manager.DiscoverAsync();
 var enabled = await manager.EnableAsync(args[2], confirmTrust: true);
+if (args.Length == 4)
+{
+    if (!enabled.Succeeded) throw new InvalidOperationException("SyntheticSecretActivationFailed");
+    const string synthetic = "synthetic-dpapi-restart-value-only";
+    var supported = manager.IsSecretStorageSupported(args[2]);
+    var saved = false;
+    var verified = false;
+    var missingAfterDelete = false;
+    switch (args[3])
+    {
+        case "secret-write":
+            await manager.WriteSecretAsync(args[2], "openai.api-key", synthetic);
+            saved = true;
+            break;
+        case "secret-read-delete":
+            verified = await manager.ReadSecretAsync(args[2], "openai.api-key") == synthetic;
+            await manager.DeleteSecretAsync(args[2], "openai.api-key");
+            missingAfterDelete = await manager.ReadSecretAsync(args[2], "openai.api-key") is null;
+            break;
+        default: throw new ArgumentException("Unknown synthetic secret probe operation.");
+    }
+    await manager.ShutdownAsync();
+    Console.WriteLine(JsonSerializer.Serialize(new { Supported = supported, Saved = saved, Verified = verified, MissingAfterDelete = missingAfterDelete }));
+    return;
+}
 var ping = enabled.Succeeded ? await manager.ExecuteCommandAsync(args[2], "ping") : null;
 var dependencyContext = enabled.Succeeded ? await manager.ExecuteCommandAsync(args[2], "dependency-context") : null;
 await manager.ShutdownAsync();

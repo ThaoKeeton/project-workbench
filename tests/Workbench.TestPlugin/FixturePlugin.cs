@@ -105,3 +105,145 @@ public sealed class ThrowingConstructorPlugin : IWorkbenchPlugin
     public Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken) => Task.CompletedTask;
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 }
+
+public sealed class ControlledStopPlugin : IWorkbenchPlugin
+{
+    private IPluginContext _context = null!;
+    public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken)
+    {
+        _context = context;
+        await context.Settings.SetAsync("instanceCount", await context.Settings.GetAsync("instanceCount", 0) + 1);
+        context.RegisterView(new ControlledView());
+        if (await context.Settings.GetAsync("lifetimeCallback", false))
+            context.Lifetime.Register(() =>
+            {
+                context.Settings.SetAsync("callbackStarted", true).GetAwaiter().GetResult();
+                while (!context.Settings.GetAsync("releaseCancellation", false).GetAwaiter().GetResult()) Thread.Sleep(10);
+                context.Settings.SetAsync("callbackFinished", true).GetAwaiter().GetResult();
+            });
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _context.Settings.SetAsync("stopCalls", await _context.Settings.GetAsync("stopCalls", 0) + 1);
+        while (!await _context.Settings.GetAsync("releaseStop", false)) await Task.Delay(10);
+        await _context.Settings.SetAsync("stopFinished", true);
+        if (await _context.Settings.GetAsync("throwStop", false)) throw new InvalidOperationException("synthetic-secret-never-log");
+    }
+
+    private sealed class ControlledView : IPluginView
+    {
+        public string Id => "controlled";
+        public string Title => "Controlled stop";
+    }
+}
+
+public sealed class SensitiveFailurePlugin : IWorkbenchPlugin
+{
+    private string _failure = "";
+    public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken)
+    {
+        _failure = await context.Settings.GetAsync("failure", "");
+        context.RegisterCommand(new("throw", "Throw", _ => throw Failure()));
+        if (_failure.StartsWith("initialize", StringComparison.Ordinal)) throw Failure();
+    }
+    public Task StopAsync(CancellationToken cancellationToken) => _failure.StartsWith("stop", StringComparison.Ordinal)
+        ? Task.FromException(Failure()) : Task.CompletedTask;
+    private Exception Failure() => _failure.EndsWith("-virtual", StringComparison.Ordinal)
+        ? new SensitiveException() : new InvalidOperationException("synthetic-secret-never-log");
+    private sealed class SensitiveException : Exception
+    {
+        public override Exception GetBaseException() => throw new InvalidOperationException("synthetic-secret-never-log");
+    }
+}
+
+public sealed class RuntimeFixturePlugin : IWorkbenchPlugin
+{
+    private IPluginRuntimeContext _context = null!;
+    private string _mode = "";
+    private int _runCount;
+
+    public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken)
+    {
+        _context = context as IPluginRuntimeContext ?? throw new InvalidOperationException("Runtime services are unavailable.");
+        _mode = await context.Settings.GetAsync("runtimeMode", "cooperative", cancellationToken);
+        _runCount = await context.Settings.GetAsync("jobRuns", 0, cancellationToken);
+        await context.Settings.SetAsync("instanceCount", await context.Settings.GetAsync("instanceCount", 0) + 1);
+        _context.BackgroundTasks.Register(new("monitor", "Synthetic monitor", RunAsync)
+        {
+            RequiresPluginStart = await context.Settings.GetAsync("requiresPluginStart", false)
+        });
+        _context.Secrets.Register(new("openai.api-key", "Synthetic API key", "Test credential"));
+        _context.Secrets.Register(new("dingtalk.webhook-url", "Synthetic webhook URL"));
+        if (_mode is "initialize-probe" or "initialize-fail")
+        {
+            var attempted = await _context.BackgroundTasks.StartAsync("monitor", cancellationToken);
+            await context.Settings.SetAsync("startedDuringInitialize", attempted.Succeeded);
+            if (_mode == "initialize-fail") throw new InvalidOperationException("synthetic-secret-never-log");
+        }
+        if (_mode == "initialize-wait")
+        {
+            await context.Settings.SetAsync("initializing", true);
+            while (!await context.Settings.GetAsync("releaseInitialize", false)) await Task.Delay(10, cancellationToken);
+        }
+        context.RegisterCommand(new("late-task", "Late task registration", _ =>
+        {
+            _context.BackgroundTasks.Register(new("late", "Late task", _ => Task.CompletedTask));
+            return Task.FromResult(new PluginCommandResult(true, "unexpectedly registered"));
+        }));
+        context.RegisterCommand(new("late-secret", "Late secret registration", _ =>
+        {
+            _context.Secrets.Register(new("late", "Late secret"));
+            return Task.FromResult(new PluginCommandResult(true, "unexpectedly registered"));
+        }));
+        context.RegisterCommand(new("start-monitor", "Synthetic plugin confirmation completed", async token =>
+        {
+            var result = await _context.BackgroundTasks.StartAsync("monitor", token);
+            return new(result.Succeeded, result.Message);
+        }));
+        context.RegisterCommand(new("resume-monitor", "Synthetic plugin resume attempt", async token =>
+        {
+            var result = await _context.BackgroundTasks.SetResumeOnStartupAsync("monitor", true, token);
+            return new(result.Succeeded, result.Message);
+        }));
+    }
+
+    private async Task RunAsync(IPluginBackgroundExecution execution)
+    {
+        var settings = _context.Settings;
+        var run = Interlocked.Increment(ref _runCount);
+        await File.WriteAllTextAsync(Path.Combine(_context.DataDirectory, $"run-{run}.marker"), "synthetic execution");
+        await settings.SetAsync("jobRuns", run);
+        await settings.SetAsync("startReason", execution.StartReason.ToString());
+        if (_mode == "callback-held")
+            execution.CancellationToken.Register(() =>
+            {
+                settings.SetAsync("jobCallbackStarted", true).GetAwaiter().GetResult();
+                while (!settings.GetAsync("releaseJobCallback", false).GetAwaiter().GetResult()) Thread.Sleep(10);
+                settings.SetAsync("callbackFinalReason", execution.StopReason.ToString()).GetAwaiter().GetResult();
+            });
+        if (_mode == "fault") throw new InvalidOperationException("synthetic-secret-never-log");
+        if (_mode == "complete") return;
+        if (_mode == "synchronous")
+        {
+            while (!File.Exists(Path.Combine(_context.DataDirectory, "release-sync"))) Thread.Sleep(10);
+            return;
+        }
+        try { await Task.Delay(Timeout.Infinite, execution.CancellationToken); }
+        catch (OperationCanceledException)
+        {
+            await settings.SetAsync("jobStopReason", execution.StopReason.ToString());
+            if (_mode == "held")
+                while (!await settings.GetAsync("releaseJob", false)) await Task.Delay(10);
+        }
+        await settings.SetAsync("jobFinished", true);
+        await settings.SetAsync("jobFinalStopReason", execution.StopReason.ToString());
+        await settings.SetAsync("contextFinalStopReason", _context.StopReason.ToString());
+    }
+
+    public async Task StopAsync(CancellationToken cancellationToken)
+    {
+        await _context.Settings.SetAsync("stopCalls", await _context.Settings.GetAsync("stopCalls", 0) + 1);
+        await _context.Settings.SetAsync("contextStopReason", _context.StopReason.ToString());
+    }
+}

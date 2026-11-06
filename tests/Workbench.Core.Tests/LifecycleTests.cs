@@ -176,7 +176,8 @@ public sealed class LifecycleTests
         var late = await manager.ExecuteCommandAsync(Id, "late");
 
         Assert.False(thrown.Succeeded);
-        Assert.Contains("fixture command failure", thrown.Message);
+        Assert.Contains("CommandFailed", thrown.Message);
+        Assert.DoesNotContain("fixture command failure", thrown.Message);
         Assert.False(late.Succeeded);
         Assert.Single(manager.Contributions.Views);
         Assert.Contains(Assert.Single(manager.Plugins).Diagnostics, d => d.Code == PluginDiagnosticCode.CommandFailed);
@@ -195,7 +196,7 @@ public sealed class LifecycleTests
         var result = await manager.EnableAsync(Id, confirmTrust: true);
 
         Assert.False(result.Succeeded);
-        Assert.Contains("Workbench.TestDependency", result.Message);
+        Assert.Contains("DependencyLoadFailed", result.Message);
         Assert.Equal(PluginState.Failed, Assert.Single(manager.Plugins).State);
         AssertEmpty(manager);
     }
@@ -234,7 +235,8 @@ public sealed class LifecycleTests
         var result = await manager.EnableAsync(Id, confirmTrust: true);
 
         Assert.False(result.Succeeded);
-        Assert.Contains("fixture constructor failure", result.Message);
+        Assert.Contains("LoadFailed", result.Message);
+        Assert.DoesNotContain("fixture constructor failure", result.Message);
         Assert.True(Assert.Single(manager.Plugins).IsLoaded);
         Assert.Contains(Assert.Single(manager.Plugins).Diagnostics, d => d.Code == PluginDiagnosticCode.LoadFailed);
         AssertEmpty(manager);
