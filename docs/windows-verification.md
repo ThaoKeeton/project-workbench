@@ -4,6 +4,8 @@
 
 0.3 项目工作区新增 `scripts/project-workspace-probe.ps1`：源码构建后在两个实际 shipping EXE 进程中依次运行 `--workspace-probe seed|verify`，根只允许 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/`。原生报告由实际 Closed 事件写入；启动器独立核对 PID/phase/root、OS exit 0、实际根租约重新取得及完整检查列表，再允许第二进程。检查使用真实项目对话框/选择器、文本框、主题与凭据控件和文件，包含旧准备挂起、候选停止挂起、回滚新 manager 绑定、草稿、归档和重开。固定 NativeFixture 位于 `artifacts/native/fixtures/runtime`，不进入用户主程序或业务伴随包；普通下载没有此源码测试依赖。新增源码的 Linux 聚焦行为/参考编译不构成 Windows 原生通过，需本轮控制器运行完整 CI 并下载核验 `project-workspace-probes`。原有 native14、management17+theme1、platform7、business12进程51项继续保留。Windows 11 人工、真实独立 GUI/更高版本迁移/provider 验收仍延期，当前不要求用户测试。
 
+Task4 round1 增加实际 WM_SYSCOMMAND/SC_CLOSE：真实切换在旧 hook 挂起时关闭、已接纳原生 action 挂起且后排目标待运行时关闭、Initialize 前关闭后再调用初始化。前两项核对真实 factory 启动阶段和目标插件实例文件不增加、修正/原生重试关闭、实际 Closed 与租约释放；action 用例还保留一次真实主题写入故障，防止提前封闭准入绕过失败偏好。seed 报告现在必须包含原9项加这3项共12项，verify 仍3项；辅助 startup JSON 只记录实际启动观察，不是成功判据。新增 native RED/GREEN 在 Linux 均未执行，不能把参考编译或 portable callback 测试当作原生调用方通过。最终仍需 Closed、OS exit0、重获租约的共同证据。
+
 | 检查 | 已有证据 | 范围与限制 |
 | --- | --- | --- |
 | Task 3 Linux Core | 一次完整运行 221 通过、2 项明确 Windows DPAPI 跳过，共 223 项；随后新增 OS 进程用例的最终聚焦运行 12/12 通过 | 聚焦运行包含 6 个实际子进程，验证通用 opt-in Restore、RequiresPluginStart 不恢复、停用后不复活；另含 HostRuntime 持锁/Stop 重试、Apply 顺序、坏元数据独立根及只读凭据状态。未把更新后的完整套件宣称为已重新运行；TRX 在 Task 3 报告 |

@@ -83,12 +83,30 @@ actual Dispose, only the coordinator's confirmed cleanup state can reopen the
 document for correction; retry close joins it via Dispose again. The direct
 isolated legacy probes retain their distinct Stop-only persistence coverage.
 
+Native close also admits this seal while a shell action, switch, dialog or startup
+is still pending. It retains close intent before coordinator publication, and
+joins the actual shell/initialization continuations before closing the window.
+The overload `PrepareCloseAsync(flushHost, token)` executes the root-bound host
+flush callback inside the sealed queue after earlier admitted work and before
+document/hooks/Stop. A dispatcher callback returns its actual completion; it
+must not call RunCurrent recursively. A failed chosen theme write therefore
+cannot be skipped merely because new action admission has already closed.
+
 Host theme writes are root-bound and owned alongside shell actions. A failed
 chosen write retains its selected value, dirty state and fixed error category;
 switch/normal close must flush it before detachment or retirement. An untouched
 corrupt-file system-theme fallback is not a choice and does not write on leave.
 Explicit recovery retains the exact damaged bytes before replacement. Context
 and ordinary preferences autosave; credential drafts do not.
+
+Every pending theme-repair replacement checks its observed original again, even
+when a previous attempt already created a backup. Changed bytes refuse ordinary
+flush/selection/close retry and retain the chosen theme. The conditional native
+recovery action explicitly calls `ObserveRecoveryAsync()` to observe the current
+file while keeping that choice and prior backups; the new bytes require their
+own exact backup before replacement. A later change refuses again. This applies
+to intervening valid or unknown metadata; it does not claim automatic migration
+or downgrade. No existing backup is overwritten or pruned.
 
 `PluginProjectContextException` is sealed, has a fixed message, exposes ErrorCode
 and retains no raw inner exception. Its public constructor still allows a plugin

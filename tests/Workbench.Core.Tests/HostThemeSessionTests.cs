@@ -6,6 +6,85 @@ namespace Workbench.Core.Tests;
 
 public sealed class HostThemeSessionTests
 {
+    [Theory]
+    [InlineData("{\"Theme\":1}", false)]
+    [InlineData("{\"Theme\":1,\"Future\":\"synthetic-B\"}", false)]
+    [InlineData("{\"Theme\":1,\"Future\":\"synthetic-B\"}", true)]
+    public async Task Explicit_recovery_preserves_each_new_snapshot_and_choice_after_failed_replacement(string replacement, bool changeAgain)
+    {
+        using var disk = new TestDirectory();
+        Directory.CreateDirectory(disk.User);
+        var path = Path.Combine(disk.User, "host-settings.json");
+        var original = System.Text.Encoding.UTF8.GetBytes("{synthetic-A");
+        var changed = System.Text.Encoding.UTF8.GetBytes(replacement);
+        await File.WriteAllBytesAsync(path, original);
+        var session = new HostThemeSession(disk.User); session.Load(); session.Select(2);
+        Directory.CreateDirectory(path + ".tmp");
+        Assert.NotNull(await Record.ExceptionAsync(() => session.FlushAsync()));
+        await File.WriteAllBytesAsync(path, changed);
+        Assert.IsAssignableFrom<IOException>(await Record.ExceptionAsync(() => session.FlushAsync()));
+        await session.ObserveRecoveryAsync(); // Explicit conditional recovery, never ordinary flush/close.
+        Assert.Equal(2, session.SelectedTheme);
+        Assert.True(session.IsDirty);
+        Assert.Equal(changed, await File.ReadAllBytesAsync(path));
+        Assert.NotNull(await Record.ExceptionAsync(() => session.FlushAsync()));
+        var backups = Directory.GetFiles(disk.User, "host-settings.json.corrupt-*.bak");
+        Assert.Equal(2, backups.Length);
+        Assert.Contains(backups, backup => File.ReadAllBytes(backup).SequenceEqual(original));
+        Assert.Contains(backups, backup => File.ReadAllBytes(backup).SequenceEqual(changed));
+        Assert.Equal(changed, await File.ReadAllBytesAsync(path));
+        Assert.True(session.IsDirty);
+        Assert.Equal(2, session.SelectedTheme);
+        Directory.Delete(path + ".tmp");
+        if (changeAgain)
+        {
+            var third = System.Text.Encoding.UTF8.GetBytes("{\"Theme\":0,\"Future\":\"synthetic-C\"}");
+            await File.WriteAllBytesAsync(path, third);
+            Assert.IsAssignableFrom<IOException>(await Record.ExceptionAsync(() => session.FlushAsync()));
+            Assert.Equal(third, await File.ReadAllBytesAsync(path));
+            Assert.Equal(2, Directory.GetFiles(disk.User, "host-settings.json.corrupt-*.bak").Length);
+            Assert.True(session.IsDirty);
+            Assert.NotNull(session.ErrorCode);
+            await session.ObserveRecoveryAsync();
+        }
+        await session.FlushAsync();
+        using var written = JsonDocument.Parse(await File.ReadAllBytesAsync(path));
+        Assert.Equal(2, written.RootElement.GetProperty("Theme").GetInt32());
+        Assert.False(session.IsDirty);
+        Assert.False(session.NeedsRepair);
+        Assert.Null(session.ErrorCode);
+        Assert.Equal(changeAgain ? 3 : 2, Directory.GetFiles(disk.User, "host-settings.json.corrupt-*.bak").Length);
+    }
+
+    [Fact]
+    public async Task Repair_retry_refuses_changed_original_after_backup_created_write_failure()
+    {
+        using var disk = new TestDirectory();
+        Directory.CreateDirectory(disk.User);
+        var path = Path.Combine(disk.User, "host-settings.json");
+        var original = System.Text.Encoding.UTF8.GetBytes("{synthetic-damaged-A");
+        var changed = System.Text.Encoding.UTF8.GetBytes("{\"Theme\":1,\"Future\":\"synthetic-B\"}");
+        await File.WriteAllBytesAsync(path, original);
+        var session = new HostThemeSession(disk.User); session.Load(); session.Select(2);
+        var obstruction = path + ".tmp";
+        Directory.CreateDirectory(obstruction);
+        var firstFailure = await Record.ExceptionAsync(() => session.FlushAsync());
+        Assert.True(firstFailure is IOException or UnauthorizedAccessException);
+        var backup = Assert.Single(Directory.GetFiles(disk.User, "host-settings.json.corrupt-*.bak"));
+        Assert.Equal(original, await File.ReadAllBytesAsync(backup));
+        await File.WriteAllBytesAsync(path, changed);
+        Directory.Delete(obstruction);
+        var retryFailure = await Record.ExceptionAsync(() => session.FlushAsync());
+        Assert.Equal(changed, await File.ReadAllBytesAsync(path));
+        Assert.IsAssignableFrom<IOException>(retryFailure);
+        Assert.Equal(original, await File.ReadAllBytesAsync(backup));
+        Assert.Single(Directory.GetFiles(disk.User, "host-settings.json.corrupt-*.bak"));
+        Assert.True(session.IsDirty);
+        Assert.True(session.NeedsRepair);
+        Assert.Equal(2, session.SelectedTheme);
+        Assert.NotNull(session.ErrorCode);
+    }
+
     [Fact]
     public async Task Failed_autosave_retains_choice_and_dirty_intent_until_actual_retry_writes_it()
     {

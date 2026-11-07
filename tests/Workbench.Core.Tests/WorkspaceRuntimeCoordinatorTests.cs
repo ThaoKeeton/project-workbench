@@ -11,6 +11,63 @@ public sealed class WorkspaceRuntimeCoordinatorTests
     private const string PluginId = "com.example.workspace";
 
     [Fact]
+    public async Task Sealed_close_joins_admitted_action_then_flushes_root_bound_host_state_before_hooks()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var gate = fixture.Gate(fixture.Disk.User);
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        var theme = new HostThemeSession(fixture.Disk.User); theme.Load(); theme.Select(2);
+        var obstruction = Path.Combine(fixture.Disk.User, "host-settings.json.tmp");
+        Directory.CreateDirectory(obstruction);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var action = coordinator.RunCurrentAsync(async (_, _, _) => { entered.SetResult(); await release.Task; });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var change = coordinator.SwitchAsync(target.Id);
+        var callbackCalls = 0;
+        Task Flush(HostRuntime runtime, ProjectRuntimeScope scope, CancellationToken _)
+        {
+            Interlocked.Increment(ref callbackCalls);
+            Assert.Equal(fixture.Disk.User, runtime.UserRoot);
+            Assert.Same(runtime.Scope, scope);
+            Assert.False(gate.Prepared.Task.IsCompleted);
+            return theme.FlushAsync();
+        }
+        var close = coordinator.PrepareCloseAsync(Flush);
+        try
+        {
+            Assert.False(coordinator.CanUseCurrentRuntime);
+            Assert.Equal(0, callbackCalls);
+            release.TrySetResult(); await action;
+            Assert.False((await change).Succeeded);
+            var failed = await close;
+            Assert.False(failed.Succeeded);
+            Assert.False(failed.Pending);
+            Assert.Equal(1, callbackCalls);
+            Assert.True(coordinator.CanUseCurrentRuntime);
+            Assert.True(theme.IsDirty);
+            Assert.Equal(2, theme.SelectedTheme);
+            Assert.False(gate.Prepared.Task.IsCompleted);
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+            Assert.Equal(1, fixture.FactoryCalls);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+            Directory.Delete(obstruction);
+            Assert.True((await coordinator.PrepareCloseAsync(Flush)).Succeeded);
+            Assert.Equal(2, callbackCalls);
+            using var saved = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(fixture.Disk.User, "host-settings.json")));
+            Assert.Equal(2, saved.RootElement.GetProperty("Theme").GetInt32());
+            Assert.True(gate.Prepared.Task.IsCompleted);
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+            Assert.False(coordinator.CanUseCurrentRuntime);
+        }
+        finally { release.TrySetResult(); await action; await coordinator.DisposeAsync(); }
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
     public async Task Normal_close_supersedes_queued_switch_but_still_saves_live_hook_only_draft()
     {
         using var fixture = new Fixture();

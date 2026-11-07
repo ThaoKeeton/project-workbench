@@ -150,6 +150,13 @@ internal static class NativeWorkspaceProbe
         Require(Find<TextBox>(summary, "工作摘要示例草稿").Text == SummaryDraft, "Reopened first-party draft differed from the actual file.");
         Record("project-isolation");
 
+        await NativeWorkspaceCloseProbe.VerifyBusySwitchAsync(options);
+        Record("busy-switch-native-close");
+        await NativeWorkspaceCloseProbe.VerifyBusyActionAsync(options);
+        Record("busy-action-native-close");
+        await NativeWorkspaceCloseProbe.VerifyBeforeInitializeAsync(options);
+        Record("before-initialize-native-close");
+
         // Actual cooperative old hook remains owned across its finite wait; a third target cannot bypass it.
         await ConfigureFixtureAsync(window, "workspace-hold-prepare");
         var fixturePage = await window.SmokeNavigateAsync("view", Id, "fixture-page");

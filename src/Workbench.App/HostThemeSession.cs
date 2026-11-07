@@ -48,6 +48,31 @@ internal sealed class HostThemeSession(string root)
         lock (_gate) { _selected = theme; _dirty = theme != _saved || _repair || _dirty; }
     }
 
+    /// <summary>Only the explicit conditional recovery action may acknowledge newly observed bytes.
+    /// Keep the selected choice and prior backup files; ordinary Flush never rebases its snapshot.</summary>
+    internal async Task ObserveRecoveryAsync()
+    {
+        await _writes.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            lock (_gate) if (!_repair) throw new InvalidOperationException("Theme recovery is not required.");
+            HostRuntime.RejectLinks(PathName);
+            var original = await File.ReadAllBytesAsync(PathName).ConfigureAwait(false);
+            if (_damaged is null || !original.SequenceEqual(_damaged))
+            {
+                _damaged = original;
+                _backup = null; // Prior immutable backup remains on disk; these bytes need their own.
+            }
+            lock (_gate) _dirty = true;
+        }
+        catch (Exception error)
+        {
+            lock (_gate) _error = HostFailure.Describe("ThemeSettingsFailed", error);
+            throw;
+        }
+        finally { _writes.Release(); }
+    }
+
     internal async Task FlushAsync()
     {
         await _writes.WaitAsync().ConfigureAwait(false);
@@ -59,19 +84,27 @@ internal sealed class HostThemeSession(string root)
             {
                 HostRuntime.RejectLinks(PathName);
                 Directory.CreateDirectory(UserRoot);
-                if (repair && _backup is null && File.Exists(PathName))
+                if (repair)
                 {
+                    // A retained backup acknowledges only its observed original, never later bytes.
+                    if (!File.Exists(PathName)) throw new IOException();
                     var original = await File.ReadAllBytesAsync(PathName).ConfigureAwait(false);
                     if (_damaged is not null && !original.SequenceEqual(_damaged)) throw new IOException();
-                    var backup = PathName + $".corrupt-{Guid.NewGuid():N}.bak";
-                    HostRuntime.RejectLinks(backup);
-                    await using (var output = new FileStream(backup, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                        await output.WriteAsync(original).ConfigureAwait(false);
-                    _backup = backup;
+                    if (_backup is null)
+                    {
+                        var backup = PathName + $".corrupt-{Guid.NewGuid():N}.bak";
+                        HostRuntime.RejectLinks(backup);
+                        await using (var output = new FileStream(backup, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                            await output.WriteAsync(original).ConfigureAwait(false);
+                        _backup = backup;
+                    }
                 }
                 var temporary = PathName + ".tmp";
                 HostRuntime.RejectLinks(temporary);
                 await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new Preferences(selected))).ConfigureAwait(false);
+                // Validate again immediately before replacement, including retries with a backup.
+                HostRuntime.RejectLinks(PathName);
+                if (repair && !File.ReadAllBytes(PathName).SequenceEqual(_damaged ?? [])) throw new IOException();
                 File.Move(temporary, PathName, overwrite: true);
                 lock (_gate) { _saved = selected; _dirty = _selected != selected; _repair = false; _error = null; _damaged = null; }
             }

@@ -47,6 +47,14 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
     /// <summary>Normal native close first joins edits/actions and committed leave hooks. A settled
     /// correctable failure retains the same live manager; success/pending work seals admission.</summary>
     public Task<ProjectSwitchResult> PrepareCloseAsync(CancellationToken ct = default)
+        => PrepareCloseCoreAsync(null, ct);
+
+    public Task<ProjectSwitchResult> PrepareCloseAsync(
+        Func<HostRuntime, ProjectRuntimeScope, CancellationToken, Task> flushHost, CancellationToken ct = default)
+        => PrepareCloseCoreAsync(flushHost ?? throw new ArgumentNullException(nameof(flushHost)), ct);
+
+    private Task<ProjectSwitchResult> PrepareCloseCoreAsync(
+        Func<HostRuntime, ProjectRuntimeScope, CancellationToken, Task>? flushHost, CancellationToken ct)
     {
         lock (_gate)
         {
@@ -75,6 +83,9 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                 ProjectSwitchResult result;
                 try
                 {
+                    // This callback is part of the sealed operation, after accepted shell work.
+                    // The native caller returns its awaited dispatcher continuation, never RunCurrent.
+                    if (flushHost is not null) await flushHost(_current.Runtime!, _current.Scope, ct).ConfigureAwait(false);
                     await _current.Document.QuiesceAsync(ct).ConfigureAwait(false);
                     var preparation = await _current.Runtime!.Manager.PrepareProjectLeaveAsync(cancellationToken: ct).ConfigureAwait(false);
                     var pending = preparation.HasPendingWork || _current.Runtime.Manager.HasPendingProjectWork;
@@ -99,6 +110,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
             });
         }
     }
+
     private bool CanAdmitCurrent => !_closing && !_preparingClose && _current is { Stopped: false, Runtime: not null }
         && _attempt is null && _retiring is null && _transitionRequests == 0;
 

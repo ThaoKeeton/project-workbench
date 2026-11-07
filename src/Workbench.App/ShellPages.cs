@@ -134,8 +134,13 @@ internal sealed partial class MainWindow
         page.Children.Add(theme);
         if (_themeSettingsNeedRepair)
         {
+            page.Children.Add(Ui.Text("恢复会先保留当前文件的完整副本。如果文件在失败后已更改，普通自动保存或关闭重试不会覆盖它；请使用此条件恢复入口重新确认当前文件。"));
             repair = Ui.Named(new Button { Content = "恢复主题设置", IsEnabled = !_shutdownPending }, "恢复主题设置");
-            repair.Click += async (_, _) => await saveTheme();
+            BindClick(repair, async runtime =>
+            {
+                await _themePreferences!.ObserveRecoveryAsync();
+                await SaveCurrentThemeAsync(runtime);
+            });
             page.Children.Add(repair);
         }
         page.Children.Add(Ui.Text($"本地用户目录：{EffectiveRoot}"));

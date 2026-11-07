@@ -93,6 +93,7 @@ internal sealed partial class MainWindow
     {
         if (_workspace is null || _busy || _closing || _shutdownPending) return;
         _busy = true;
+        var settled = BeginShellOperation();
         _content.IsEnabled = false;
         _navigation.IsEnabled = false;
         if (_workspaceMenu is not null) _workspaceMenu.IsEnabled = false;
@@ -123,8 +124,7 @@ internal sealed partial class MainWindow
         }
         finally
         {
-            _busy = false;
-            RefreshWorkspace(reopenPage: false);
+            CompleteShellOperation(settled);
         }
     }
 
@@ -133,6 +133,7 @@ internal sealed partial class MainWindow
         if (_workspace is not { CanUseCurrentRuntime: true } || _busy || _closing || _shutdownPending) return;
         // Input collection is separate from the coordinator queue: transitions must never nest in RunCurrentAsync.
         _busy = true;
+        var settled = BeginShellOperation();
         RefreshWorkspace(reopenPage: false);
         var name = Ui.Named(new TextBox { Header = "项目名称", Text = create ? "" : _workspace.ActiveProject!.Name, MaxLength = 80 }, "项目名称");
         var dialog = new ContentDialog { XamlRoot = _root.XamlRoot, Title = create ? "新建项目" : "重命名当前项目", Content = name,
@@ -140,7 +141,7 @@ internal sealed partial class MainWindow
         ContentDialogResult result;
         try { _projectDialog = dialog; result = await dialog.ShowAsync(); }
         catch (Exception error) { Notice("无法打开项目对话框", HostFailure.Describe("ProjectDialogFailed", error), InfoBarSeverity.Warning); return; }
-        finally { _projectDialog = null; _busy = false; RefreshWorkspace(reopenPage: false); }
+        finally { _projectDialog = null; CompleteShellOperation(settled); }
         if (result == ContentDialogResult.Primary)
             await RunWorkspaceAsync(() => create ? _workspace.CreateAndSwitchAsync(name.Text) : _workspace.RenameAsync(name.Text));
     }
@@ -149,6 +150,7 @@ internal sealed partial class MainWindow
     {
         if (_workspace is not { CanUseCurrentRuntime: true } || _busy || _closing || _shutdownPending) return;
         _busy = true;
+        var settled = BeginShellOperation();
         RefreshWorkspace(reopenPage: false);
         var list = Ui.Named(new ListView { SelectionMode = ListViewSelectionMode.Single, MaxHeight = 400 }, "打开项目列表");
         foreach (var project in _workspace.Catalog!.Projects)
@@ -157,11 +159,12 @@ internal sealed partial class MainWindow
         try { recoverable = await _workspace.GetRecoverableAsync(); }
         catch (Exception error)
         {
-            _busy = false; RefreshWorkspace(reopenPage: false);
+            CompleteShellOperation(settled);
             Notice("项目列表暂不能读取", HostFailure.Describe("ProjectCatalogReadFailed", error), InfoBarSeverity.Warning);
             return;
         }
         var orphanIds = recoverable.Select(project => project.Id).ToHashSet(StringComparer.Ordinal);
+        if (_workspaceCloseRequested) { CompleteShellOperation(settled); return; }
         foreach (var project in recoverable)
             list.Items.Add(new ListViewItem { Content = project.Name + "（待恢复）", Tag = project });
         var body = new StackPanel { Spacing = 12 };
@@ -180,7 +183,7 @@ internal sealed partial class MainWindow
         ContentDialogResult result;
         try { _projectDialog = dialog; result = await dialog.ShowAsync(); }
         catch (Exception error) { Notice("无法打开项目对话框", HostFailure.Describe("ProjectDialogFailed", error), InfoBarSeverity.Warning); return; }
-        finally { _projectDialog = null; _busy = false; RefreshWorkspace(reopenPage: false); }
+        finally { _projectDialog = null; CompleteShellOperation(settled); }
         if ((list.SelectedItem as ListViewItem)?.Tag is not ProjectWorkspaceInfo selected) return;
         if (result == ContentDialogResult.Secondary) await RunWorkspaceAsync(() => _workspace.SetArchivedAsync(selected.Id, true));
         else if (result == ContentDialogResult.Primary) await RunWorkspaceAsync(async () =>

@@ -32,11 +32,14 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
         if (_mode.StartsWith("workspace-", StringComparison.Ordinal) && context is IPluginProjectContext project)
             project.RegisterBeforeProjectLeave(async _ =>
             {
-                await context.Settings.SetAsync("prepare-calls", await context.Settings.GetAsync("prepare-calls", 0) + 1);
+                var calls = await context.Settings.GetAsync("prepare-calls", 0) + 1;
+                await context.Settings.SetAsync("prepare-calls", calls);
                 await File.WriteAllTextAsync(Path.Combine(context.DataDirectory, "prepare-started"), "synthetic");
-                if (_mode == "workspace-hold-prepare")
+                if (_mode == "workspace-hold-prepare" || _mode == "workspace-hold-first-then-fail" && calls == 1)
                     while (!File.Exists(Path.Combine(context.DataDirectory, "release-prepare"))) await Task.Delay(10);
                 if (_mode == "workspace-fail-prepare" && !File.Exists(Path.Combine(context.DataDirectory, "corrected-prepare")))
+                    throw new InvalidOperationException("synthetic-private-workspace-failure");
+                if (_mode == "workspace-hold-first-then-fail" && calls > 1 && !File.Exists(Path.Combine(context.DataDirectory, "corrected-prepare")))
                     throw new InvalidOperationException("synthetic-private-workspace-failure");
                 await File.WriteAllTextAsync(Path.Combine(context.DataDirectory, "prepared-draft.txt"), _workspaceDraft);
             });

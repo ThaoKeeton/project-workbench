@@ -30,6 +30,9 @@ internal sealed partial class MainWindow : Window
     private bool _allowClose;
     private bool _stopped;
     private bool _shutdownPending;
+    private bool _workspaceCloseRequested;
+    private TaskCompletionSource? _shellOperationSettled;
+    private readonly TaskCompletionSource _initializationSettled = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private TaskCompletionSource<bool> _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly int _uiThread = Environment.CurrentManagedThreadId;
 
@@ -79,6 +82,7 @@ internal sealed partial class MainWindow : Window
 
     public async Task InitializeAsync()
     {
+        if (UsesWorkspace && _workspaceCloseRequested) { _initializationSettled.TrySetResult(); return; }
         _initializing = true;
         try
         {
@@ -86,10 +90,16 @@ internal sealed partial class MainWindow : Window
             if (UsesWorkspace)
             {
                 if (_options.WorkspaceProbe is not null && !_options.SkipAutomaticProbe) await NativeWorkspaceProbe.PrepareAsync(_options);
-                _workspace = new(_options, (_, scope, owner) => new HostRuntime(HostRuntimeOptions.Create(_options, scope), owner));
+                if (_workspaceCloseRequested) return; // Close may have arrived before coordinator publication.
+                _workspace = new(_options, (_, scope, owner) =>
+                {
+                    _options.TraceStartup("constructing-project-runtime");
+                    return new HostRuntime(HostRuntimeOptions.Create(_options, scope), owner);
+                });
                 var result = await _workspace.InitializeAsync();
                 RefreshWorkspace();
                 _initializing = false;
+                if (_workspaceCloseRequested) return; // The admitted close owns initialization cleanup.
                 if (!result.Succeeded)
                 {
                     ShowWorkspaceRecovery();
@@ -97,8 +107,7 @@ internal sealed partial class MainWindow : Window
                     return;
                 }
                 _options.TraceStartup("host-initialization-completed");
-                if (_shutdownPending) await CloseAsync();
-                else if (_options.WorkspaceProbe is not null && !_options.SkipAutomaticProbe) await NativeWorkspaceProbe.RunAsync(this, _options);
+                if (_options.WorkspaceProbe is not null && !_options.SkipAutomaticProbe) await NativeWorkspaceProbe.RunAsync(this, _options);
                 return;
             }
             _runtime = new HostRuntime(HostRuntimeOptions.Create(_options));
@@ -142,9 +151,10 @@ internal sealed partial class MainWindow : Window
             {
                 Environment.ExitCode = 1;
                 _options.WriteFailure("initialize-or-native-smoke", error);
-                await FinishSmokeAsync();
+                if (!(UsesWorkspace && _workspaceCloseRequested)) await FinishSmokeAsync();
             }
         }
+        finally { _initializing = false; _initializationSettled.TrySetResult(); }
     }
 
     private void RefreshNavigation()
@@ -246,6 +256,7 @@ internal sealed partial class MainWindow : Window
     {
         if (!_initialized || _busy || _closing || _shutdownPending || _workspace is { CanUseCurrentRuntime: false }) return;
         _busy = true;
+        var settled = BeginShellOperation();
         _navigation.IsEnabled = false;
         _content.IsEnabled = false;
         if (_workspace is not null) RefreshWorkspace(reopenPage: false);
@@ -258,15 +269,28 @@ internal sealed partial class MainWindow : Window
         }
         finally
         {
-            _busy = false;
-            if (_workspace is not null) RefreshWorkspace(reopenPage: false);
-            if (_initialized && !_closing)
+            try
             {
-                _navigation.IsEnabled = _workspace?.CanUseCurrentRuntime ?? true;
-                _content.IsEnabled = _workspace?.CanUseCurrentRuntime ?? true;
-                if (_shutdownPending) { RefreshNavigation(); Navigate(new("background")); }
+                _busy = false;
+                if (_workspace is not null) RefreshWorkspace(reopenPage: false);
+                if (_initialized && !_closing)
+                {
+                    _navigation.IsEnabled = _workspace?.CanUseCurrentRuntime ?? true;
+                    _content.IsEnabled = _workspace?.CanUseCurrentRuntime ?? true;
+                    if (_shutdownPending) { RefreshNavigation(); Navigate(new("background")); }
+                }
             }
+            finally { settled.TrySetResult(); }
         }
+    }
+
+    private TaskCompletionSource BeginShellOperation()
+        => _shellOperationSettled = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    private void CompleteShellOperation(TaskCompletionSource settled)
+    {
+        try { _busy = false; RefreshWorkspace(reopenPage: false); }
+        finally { settled.TrySetResult(); }
     }
 
     private Func<Task> BindCurrentAction(Func<HostRuntime, Task> action)
@@ -365,46 +389,50 @@ internal sealed partial class MainWindow : Window
     private async Task<bool> CloseAsync()
     {
         if (_closing) return await _closeCompleted.Task;
-        if (_busy || _initializing)
+        if (!UsesWorkspace && (_busy || _initializing))
         {
             // A package write or startup recovery is known work too. Decline this close until it settles.
             _shutdownPending = true;
             ShowCloseRetry("正在等待当前操作完成", "保留用户目录租约。当前操作完成后请重试关闭。不会在写入仍进行时释放存储所有权。");
             return false;
         }
+        var shellSettled = _shellOperationSettled?.Task ?? Task.CompletedTask;
+        var initializationSettled = _initializing ? _initializationSettled.Task : Task.CompletedTask;
         _closing = true;
+        if (UsesWorkspace) { _workspaceCloseRequested = true; _shutdownPending = true; }
         _body.IsEnabled = false;
-        if (_workspace is not null) RefreshWorkspace(reopenPage: false);
         _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
-            if (_workspace is not null)
+            if (UsesWorkspace)
             {
-                if (_themePreferences?.IsDirty == true && _workspace.CanUseCurrentRuntime)
+                Task FlushOwnedTheme(HostRuntime runtime, Workbench.Core.Projects.ProjectRuntimeScope scope, CancellationToken token)
+                    => OnUiAsync(() => _themePreferences?.IsDirty == true ? FlushThemeAsync(runtime) : Task.CompletedTask);
+                // Seal immediately, even during an action/switch. This callback runs inside the
+                // queued close after accepted work, so it must never recursively call RunCurrent.
+                var preparation = _workspace?.PrepareCloseAsync(FlushOwnedTheme);
+                if (_workspace is not null) RefreshWorkspace(reopenPage: false);
+                _projectDialog?.Hide();
+                if (preparation is null)
                 {
-                    try { await _workspace.RunCurrentAsync((runtime, _, _) => OnUiAsync(() => FlushThemeAsync(runtime))); }
-                    catch (Exception)
-                    {
-                        _shutdownPending = false;
-                        _closing = false;
-                        _body.IsEnabled = true;
-                        RefreshWorkspace(reopenPage: false);
-                        ShowCloseRetry("主题选择尚未保存", "已保留当前选择。请检查项目目录，或改选主题自动重试，再重试关闭。");
-                        _closeCompleted.TrySetResult(false);
-                        return false;
-                    }
+                    await initializationSettled;
+                    preparation = _workspace?.PrepareCloseAsync(FlushOwnedTheme);
                 }
-                var preparation = _workspace.PrepareCloseAsync();
-                RefreshWorkspace(reopenPage: false);
-                var prepared = await preparation;
+                var prepared = preparation is null ? new ProjectSwitchResult(true, false, null) : await preparation;
+                // Retain this window/dispatcher until the actual shell continuations have settled.
+                await shellSettled;
+                await initializationSettled;
                 if (!prepared.Succeeded && prepared.ErrorCode != "ProjectCloseCleanupRequired")
                 {
                     _shutdownPending = prepared.Pending;
+                    _workspaceCloseRequested = prepared.Pending;
                     _closing = false;
                     _body.IsEnabled = true;
                     RefreshWorkspace(reopenPage: false);
                     if (prepared.Pending) ShowWorkspaceRecovery();
-                    ShowCloseRetry(prepared.Pending ? "正在等待离开前准备" : "请修正后重试关闭", WorkspaceGuidance(prepared.ErrorCode));
+                    ShowCloseRetry(prepared.Pending ? "正在等待离开前准备" : "请修正后重试关闭", _themePreferences?.IsDirty == true
+                        ? "主题选择尚未保存，当前选择和目录仍保留。请检查目录；如原文件已更改，请使用设置中的条件恢复，再重试关闭。"
+                        : WorkspaceGuidance(prepared.ErrorCode));
                     _closeCompleted.TrySetResult(false);
                     return false;
                 }

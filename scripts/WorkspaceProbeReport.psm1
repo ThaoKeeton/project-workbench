@@ -20,7 +20,8 @@ function Complete-WorkspaceProbeReport {
         $result['actualWindowClosed'] -ne $true -or $result['rootsRetired'] -ne $true)) { $reason = 'WorkspaceIdentityOrRetirementMissing' }
     $required = if ($ExpectedPhase -eq 'seed') {
         @('legacy-adoption', 'single-native-ui', 'multi-native-ui', 'project-isolation', 'draft-retention',
-          'old-pending-refusal', 'candidate-pending-refusal', 'archive-retention', 'native-reopen')
+          'old-pending-refusal', 'candidate-pending-refusal', 'archive-retention', 'native-reopen',
+          'busy-switch-native-close', 'busy-action-native-close', 'before-initialize-native-close')
     } else { @('process-restore', 'restored-native-ui', 'restored-project-isolation') }
     if ($null -eq $reason) {
         foreach ($check in $required) {
