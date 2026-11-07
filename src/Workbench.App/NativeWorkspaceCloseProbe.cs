@@ -207,11 +207,17 @@ internal static class NativeWorkspaceCloseProbe
                 catch (ProjectWorkspaceStoreException) { rejected = true; }
                 observed.RuntimeActionRejected = rejected;
                 Require(rejected, "Failed actual Dispose reopened plugin action admission.");
-                evidence.At(NativeProbeCheckpoint.WorkspaceEditorLookup);
-                var editor = Find<TextBox>(window.WorkspaceRoot, "项目上下文编辑器");
-                recoveryEditor = editor;
-                evidence.At(NativeProbeCheckpoint.WorkspaceEditorReady);
-                await WaitAsync(() => Task.FromResult(editor.IsLoaded && editor.IsEnabled && editor.XamlRoot is not null));
+                // Recovery content can be constructed before its visual tree is realized. Use
+                // the same ready budget for unique lookup and loaded/enabled/root readiness.
+                await WaitAsync(() =>
+                {
+                    evidence.At(NativeProbeCheckpoint.WorkspaceEditorLookup);
+                    recoveryEditor = Descendants<TextBox>(window.WorkspaceRoot).SingleOrDefault(candidate =>
+                        Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(candidate) == "项目上下文编辑器");
+                    evidence.At(NativeProbeCheckpoint.WorkspaceEditorReady);
+                    return Task.FromResult(recoveryEditor is { IsLoaded: true, IsEnabled: true, XamlRoot: not null });
+                });
+                var editor = recoveryEditor!; // The condition above admitted this unique ready control.
                 evidence.At(NativeProbeCheckpoint.WorkspaceOriginalBuffer);
                 Require(editor.Text == original, "The actual recovery TextBox lost its retained dirty buffer.");
                 evidence.At(NativeProbeCheckpoint.WorkspaceRemoveObstruction);
