@@ -1,6 +1,8 @@
 using Workbench.Core.Testing;
 using Workbench.Sdk;
 using Workbench.Testing.Domain;
+using System.Security.Cryptography;
+using System.Text.Json;
 using Xunit;
 using Xunit.Abstractions;
 using static Workbench.Core.Tests.ProjectTestStoreTests;
@@ -204,8 +206,15 @@ public sealed class TestingControllerTests(ITestOutputHelper output)
         fixture.Controller.CaptureSetName("Corrected accepted text");await fixture.Controller.FlushAsync();await fixture.Controller.PrepareLeaveAsync();
     }
 
-    [Fact]
-    public async Task Actual_StepStarted_write_failure_never_calls_adapter_and_failed_terminal_write_does_not_fabricate_settlement()
+    public static IEnumerable<object[]> StepStartedWriteFailureBoundaries()
+    {
+        yield return [true]; // Deny head publication after the event on both real filesystems.
+        if(!OperatingSystem.IsWindows()) yield return [false]; // Also retain the existing chmod event-directory boundary.
+    }
+
+    [Theory]
+    [MemberData(nameof(StepStartedWriteFailureBoundaries))]
+    public async Task Actual_StepStarted_write_failure_never_calls_adapter_and_failed_terminal_write_does_not_fabricate_settlement(bool failHeadPublication)
     {
         var adapter=new GatedVirtualAdapter { HoldReset=true };adapter.ActionGate.Release.TrySetResult();adapter.DisposeGate.Release.TrySetResult();
         var fixture=await TestingDomainFixture.CreateAsync(adapter);
@@ -214,18 +223,45 @@ public sealed class TestingControllerTests(ITestOutputHelper output)
             var set=await fixture.ImportAndGenerateAsync();var run=await fixture.Controller.RunAsync([set.Cases[0].Id]);
             await adapter.ResetGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
             var runRoot=Path.Combine(StoreRoot(fixture.Disk.User),"runs",run.Plan.Id);
-            var obstructionPath=OperatingSystem.IsWindows() ? Path.Combine(runRoot,"head.json") : Path.Combine(runRoot,"events","0000000002.json");
+            var evidenceRoot=Path.Combine(Path.GetTempPath(),"workbench-testing-windows-integration-fix1-20261107",(failHeadPublication ? "head-" : "event-")+run.Plan.Id);
+            var before=CaptureRunPublicationFailure(runRoot,evidenceRoot,"before");
+            var obstructionPath=failHeadPublication ? Path.Combine(runRoot,"head.json") : Path.Combine(runRoot,"events","0000000002.json");
+            Dictionary<string,byte[]> failed;
             using(var obstruction=TestingAuthoringTests.WriteObstruction.Create(obstructionPath))
             {
                 adapter.ResetGate.Release.TrySetResult();var actual=Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync());
-                Assert.Equal(0,adapter.Actions);Assert.Equal(TestRunState.Running,actual.State);Assert.Equal("StoreIoFailure",fixture.Controller.Snapshot.ErrorCode);
+                failed=CaptureRunPublicationFailure(runRoot,evidenceRoot,"failed");
+                File.WriteAllText(Path.Combine(evidenceRoot,"diagnostics.json"),JsonSerializer.Serialize(new
+                { runId=run.Plan.Id,failHeadPublication,os=OperatingSystem.IsWindows() ? "Windows" : "Linux",actual.State,actual.Sequence,actual.HeadHash,errorCode=fixture.Controller.Snapshot.ErrorCode,adapter.Actions }));
+                Assert.Equal(before["head.json"],failed["head.json"]);
+                Assert.Equal(new[]{TestRunEventKind.Queued,TestRunEventKind.RunStarted},actual.Events.Select(e=>e.Kind));
+                Assert.Equal(1,actual.Sequence);
+                using var head=JsonDocument.Parse(failed["head.json"]);
+                Assert.Equal(1,head.RootElement.GetProperty("sequence").GetInt64());Assert.Equal(actual.HeadHash,head.RootElement.GetProperty("eventHash").GetString());
+                Assert.Equal(failHeadPublication ? 5 : 4,failed.Count);
+                Assert.Equal(failHeadPublication ? 3 : 2,failed.Keys.Count(p=>p.StartsWith("events/",StringComparison.Ordinal)));
+                if(failHeadPublication)
+                {
+                    using var tail=JsonDocument.Parse(failed["events/0000000002.json"]);
+                    Assert.Equal("StepStarted",tail.RootElement.GetProperty("kind").GetString());Assert.Equal(2,tail.RootElement.GetProperty("sequence").GetInt64());
+                    Assert.Equal(actual.HeadHash,tail.RootElement.GetProperty("priorHash").GetString());
+                }
+                foreach(var entry in before) Assert.Equal(entry.Value,failed[entry.Key]);
+                // Once the immutable event exists, the terminal checkpoint must refuse its unanchored tail.
+                Assert.Equal(0,adapter.Actions);Assert.Equal(TestRunState.Running,actual.State);
+                Assert.Equal(failHeadPublication ? "RecoveryRequired" : "StoreIoFailure",fixture.Controller.Snapshot.ErrorCode);
             }
-            if(OperatingSystem.IsWindows())
+            if(failHeadPublication)
+            {
                 Assert.Equal("RecoveryRequired",(await Assert.ThrowsAsync<PluginTestingException>(()=>fixture.Context.Testing.ReadRunAsync(run.Plan.Id))).ErrorCode);
+                var retained=CaptureRunPublicationFailure(runRoot,evidenceRoot,"after-refusal");
+                Assert.Equal(failed.Keys.Order(),retained.Keys.Order());foreach(var entry in failed) Assert.Equal(entry.Value,retained[entry.Key]);
+            }
             else
             {
                 var actual=await fixture.Context.Testing.ReadRunAsync(run.Plan.Id);Assert.Equal(TestRunEventKind.RunStarted,actual.Events[^1].Kind);
                 await fixture.Controller.PrepareLeaveAsync();Assert.Equal(TestRunState.Failed,(await fixture.Context.Testing.ReadRunAsync(run.Plan.Id)).State);
+                CaptureRunPublicationFailure(runRoot,evidenceRoot,"after-settlement");Assert.Equal(0,adapter.Actions);
             }
         }
         finally { adapter.ReleaseAll();await fixture.DisposeAsync(); }
@@ -354,6 +390,18 @@ public sealed class TestingControllerTests(ITestOutputHelper output)
         {
             postfix.Release.TrySetResult();_=await Record.ExceptionAsync(()=>Task.WhenAll(admitted));await fixture.DisposeAsync();
         }
+    }
+
+    private Dictionary<string,byte[]> CaptureRunPublicationFailure(string runRoot,string evidenceRoot,string phase)
+    {
+        var files=Directory.EnumerateFiles(runRoot,"*",SearchOption.AllDirectories).ToDictionary(p=>Path.GetRelativePath(runRoot,p).Replace('\\','/'),File.ReadAllBytes);
+        foreach(var (path,bytes) in files.OrderBy(p=>p.Key,StringComparer.Ordinal))
+        {
+            var destination=Path.Combine(evidenceRoot,phase,path);Directory.CreateDirectory(Path.GetDirectoryName(destination)!);File.WriteAllBytes(destination,bytes);
+            output.WriteLine($"{phase} {path} {bytes.Length} bytes SHA256={Convert.ToHexStringLower(SHA256.HashData(bytes))}");
+            if(path=="head.json" || path.StartsWith("events/",StringComparison.Ordinal)) output.WriteLine("exact UTF8 bytes (base64): "+Convert.ToBase64String(bytes));
+        }
+        output.WriteLine("Actual publication evidence: "+evidenceRoot);return files;
     }
 
     private static void CopySyntheticStore(string source,string destination)
