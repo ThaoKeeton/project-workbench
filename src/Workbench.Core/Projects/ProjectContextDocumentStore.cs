@@ -41,6 +41,25 @@ public sealed class ProjectContextDocumentStore
         return new ProjectContextDocument(ProjectWorkspaceStorage.Revision(bytes), text, false);
     });
 
+    /// <summary>Durably retains a host editor buffer without replacing or reading the current document.
+    /// The returned path is an owned receipt, never a caller-selected destination.</summary>
+    public Task<string> PreserveConflictAsync(string text, string expectedRevision, CancellationToken cancellationToken = default)
+        => ProjectWorkspaceStorage.RunAsync(async () =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            ValidateText(text);
+            if (expectedRevision != "missing" && !(expectedRevision is { Length: 64 } && ProjectWorkspaceStorage.IsLowerHex(expectedRevision)))
+                throw ProjectWorkspaceStorage.Error("InvalidContext");
+            var bytes = JsonSerializer.SerializeToUtf8Bytes(new
+            {
+                schemaVersion = 1, projectId = _projectId, baseRevision = expectedRevision, text, savedUtc = DateTimeOffset.UtcNow
+            }, ProjectWorkspaceStorage.JsonOptions);
+            if (bytes.Length > EncodedLimit) throw ProjectWorkspaceStorage.Error("ContextLimitExceeded");
+            var path = ProjectWorkspaceStorage.PathIn(_directory, "context-conflicts", $"{Guid.NewGuid():N}.json");
+            await ProjectWorkspaceStorage.AtomicWriteAsync(path, bytes, overwrite: false, cancellationToken);
+            return path;
+        });
+
     private string DocumentPath => ProjectWorkspaceStorage.PathIn(_directory, "context.json");
     private string LeasePath => ProjectWorkspaceStorage.PathIn(_directory, "context.lock");
     private Task<byte[]?> ReadBytesAsync(CancellationToken cancellationToken)

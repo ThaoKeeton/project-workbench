@@ -1,18 +1,20 @@
 using Microsoft.UI.Xaml;
 using Workbench.Core;
+using Workbench.Core.Projects;
 using Workbench.WinUI.Sdk;
 
 namespace Workbench.App;
 
 internal static class HostRuntimeOptions
 {
-    public static PluginManagerOptions Create(RunOptions options)
+    public static PluginManagerOptions Create(RunOptions options, ProjectRuntimeScope? projectScope = null)
     {
+        var userRoot = projectScope?.UserRoot ?? options.UserRoot;
         var bundled = Path.Combine(AppContext.BaseDirectory, "Plugins");
         if (options.SmokeTest)
         {
             // Curate a new root: never enumerate installed plugins or read normal user settings.
-            var isolated = Path.Combine(options.UserRoot, "bundled");
+            var isolated = Path.Combine(userRoot, "bundled");
             foreach (var id in RunOptions.SampleIds)
                 CopySample(Path.Combine(bundled, id), Path.Combine(isolated, id));
             bundled = isolated;
@@ -24,8 +26,9 @@ internal static class HostRuntimeOptions
             .Append("Microsoft.InteractiveExperiences.Projection").Distinct().ToArray();
         return new()
         {
-            PluginsRoot = Path.Combine(options.UserRoot, "Plugins"),
-            UserRoot = options.UserRoot,
+            PluginsRoot = Path.Combine(userRoot, "Plugins"),
+            UserRoot = userRoot,
+            ProjectScope = projectScope,
             AdditionalDiscoveryRoots = options.RuntimeProbe is not null || options.BusinessProbe is not null ? [] : [bundled],
             SharedAssemblies = [typeof(WinUiView).Assembly, typeof(FrameworkElement).Assembly,
                 typeof(WinRT.ComWrappersSupport).Assembly, typeof(Windows.Foundation.IAsyncAction).Assembly],

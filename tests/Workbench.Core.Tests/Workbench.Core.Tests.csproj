@@ -5,6 +5,10 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/Workbench.App/HostRuntime.cs" Link="Host/HostRuntime.cs" />
+    <Compile Include="../../src/Workbench.App/WorkspaceRootLease.cs" Link="Host/WorkspaceRootLease.cs" />
+    <Compile Include="../../src/Workbench.App/ProjectDocumentSession.cs" Link="Host/ProjectDocumentSession.cs" />
+    <Compile Include="../../src/Workbench.App/WorkspaceRuntimeCoordinator.cs" Link="Host/WorkspaceRuntimeCoordinator.cs" />
+    <Compile Include="../../src/Workbench.App/ProjectTransition.cs" Link="Host/ProjectTransition.cs" />
     <Compile Include="../../src/Workbench.App/RunOptions.cs" Link="Host/RunOptions.cs" />
     <Compile Include="../../src/Workbench.App/HostFailure.cs" Link="Host/HostFailure.cs" />
     <Compile Include="../../src/Workbench.App/PackagePresentation.cs" Link="Host/PackagePresentation.cs" />

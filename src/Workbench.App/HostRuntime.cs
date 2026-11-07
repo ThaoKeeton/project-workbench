@@ -5,15 +5,28 @@ namespace Workbench.App;
 /// <summary>Owns the single-writer store lease for the whole manager lifetime.</summary>
 internal sealed class HostRuntime : IAsyncDisposable
 {
-    private readonly FileStream _lease;
-    public PluginManager Manager { get; }
+    private readonly IDisposable _lease;
+    private readonly PluginManagerOptions _options;
+    private Task? _initialization;
+    private bool _managerRetired;
+    private bool _disposed;
+    public PluginManager Manager { get; private set; }
     public PluginPackageStore Packages { get; }
     public IReadOnlyList<PluginOperationResult> MaintenanceResults { get; private set; } = [];
     private bool _initializationStarted;
 
-    public HostRuntime(PluginManagerOptions options)
+    internal string UserRoot => Path.TrimEndingDirectorySeparator(Path.GetFullPath(_options.UserRoot));
+    internal Workbench.Core.Projects.ProjectRuntimeScope? Scope => _options.ProjectScope;
+
+    public HostRuntime(PluginManagerOptions options) : this(options, AcquireLease(options.UserRoot)) { }
+
+    public HostRuntime(PluginManagerOptions options, WorkspaceRootLease baseOwner)
+        : this(options, baseOwner.AcquireRuntimeLease(options.UserRoot)) { }
+
+    private HostRuntime(PluginManagerOptions options, IDisposable lease)
     {
-        _lease = AcquireLease(options.UserRoot);
+        _lease = lease;
+        _options = options;
         try
         {
             Packages = new PluginPackageStore(options);
@@ -22,15 +35,45 @@ internal sealed class HostRuntime : IAsyncDisposable
         catch { _lease.Dispose(); throw; }
     }
 
-    public async Task InitializeAsync(Action<string>? trace = null)
+    public Task InitializeAsync(Action<string>? trace = null)
     {
         if (_initializationStarted) throw new InvalidOperationException("Host initialization has already started.");
         _initializationStarted = true;
+        return _initialization = InitializeCoreAsync(trace);
+    }
+
+    private async Task InitializeCoreAsync(Action<string>? trace)
+    {
         trace?.Invoke("applying-pending-package-maintenance");
         MaintenanceResults = await Packages.ApplyPendingAsync();
         trace?.Invoke("discovering-packages");
         await Manager.DiscoverAsync();
         trace?.Invoke("restoring-enabled-packages");
+        await Manager.RestoreEnabledAsync();
+    }
+
+    // Terminal manager retirement revokes old host/plugin actions, but keeps this root leased
+    // until selection commits or rollback has safely retired the candidate.
+    internal async Task StopForProjectLeaveAsync()
+    {
+        if (_initialization is { } initialization)
+            try { await initialization; } catch (Exception) { /* Cleanup still owns this manager. */ }
+        await Manager.DisposeAsync();
+        _managerRetired = true;
+    }
+
+    internal Task RestoreAfterProjectLeaveAsync()
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (!_managerRetired) throw new InvalidOperationException("The previous manager must retire before restoration.");
+        Manager = new(_options);
+        _managerRetired = false;
+        return _initialization = RestoreCoreAsync();
+    }
+
+    private async Task RestoreCoreAsync()
+    {
+        await Manager.DiscoverAsync();
         await Manager.RestoreEnabledAsync();
     }
 
@@ -57,8 +100,10 @@ internal sealed class HostRuntime : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         // A failed dispose is retryable. Known work and its user-root lease remain owned.
-        await Manager.DisposeAsync();
+        if (_disposed) return;
+        await StopForProjectLeaveAsync();
         _lease.Dispose();
+        _disposed = true;
     }
 }
 

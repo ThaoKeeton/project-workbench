@@ -10,6 +10,7 @@
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="../../src/Workbench.App/HostRuntime.cs" Link="Host/HostRuntime.cs" />
+    <Compile Include="../../src/Workbench.App/WorkspaceRootLease.cs" Link="Host/WorkspaceRootLease.cs" />
     <ProjectReference Include="../../src/Workbench.Core/Workbench.Core.csproj" />
     <ProjectReference Include="../Workbench.HostTestDependency/Workbench.HostTestDependency.csproj" />
   </ItemGroup>

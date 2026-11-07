@@ -1,0 +1,495 @@
+using System.Text.Json;
+using Workbench.App;
+using Workbench.Core.Projects;
+using Workbench.TestDependency;
+using Xunit;
+
+namespace Workbench.Core.Tests;
+
+public sealed class WorkspaceRuntimeCoordinatorTests
+{
+    private const string PluginId = "com.example.workspace";
+
+    [Fact]
+    public async Task Close_joins_admitted_action_and_prevents_queued_target_activation()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var action = coordinator.RunCurrentAsync(async (_, _, _) => { entered.SetResult(); await release.Task; });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var change = coordinator.SwitchAsync(target.Id);
+        Assert.False(coordinator.CanUseCurrentRuntime);
+        Assert.Throws<ProjectWorkspaceStoreException>(() => { _ = coordinator.RunCurrentAsync((_, _, _) => Task.CompletedTask); });
+        var close = coordinator.DisposeAsync().AsTask();
+        Assert.False(close.IsCompleted);
+        Assert.Equal(1, fixture.FactoryCalls);
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        release.SetResult();
+        await action;
+        var result = await change;
+        await close;
+        Assert.False(result.Succeeded);
+        Assert.Equal(1, fixture.FactoryCalls);
+        using var next = HostRuntime.AcquireLease(fixture.Disk.User);
+    }
+
+    [Fact]
+    public async Task BaseLeaseExcludesLegacyWhileSecondaryActive()
+    {
+        using var fixture = new Fixture();
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.CreateAndSwitchAsync("Second")).Succeeded);
+        Assert.NotEqual("default", coordinator.ActiveProject!.Id);
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(coordinator.Scope!.UserRoot); });
+    }
+
+    [Fact]
+    public async Task SwitchFlushesLatestTextBeforeStoppingAndStartsOnlyOneRuntime()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var oldGate = fixture.Gate(fixture.Disk.User, holdStop: true);
+        await using var coordinator = fixture.Coordinator(root => Assert.Equal(0, oldGate.Live));
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        coordinator.Document!.Edit("latest before stop");
+        var change = coordinator.SwitchAsync(target.Id);
+        await Task.WhenAny(change, oldGate.StopStarted.Task).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(oldGate.StopStarted.Task.IsCompleted);
+        Assert.Equal("latest before stop", (await coordinator.Scope!.Documents.ReadAsync()).Text);
+        Assert.False((await change).Succeeded);
+        Assert.Equal(1, fixture.FactoryCalls);
+        oldGate.StopRelease.TrySetResult();
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.Equal(0, oldGate.Live);
+        Assert.Equal(2, fixture.FactoryCalls);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task PendingOldStopOrPreparationDoesNotOpenTarget(bool preparation)
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var gate = fixture.Gate(fixture.Disk.User, holdPrepare: preparation, holdStop: !preparation);
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        try
+        {
+            var pending = await coordinator.SwitchAsync(target.Id);
+            Assert.True(pending.Pending);
+            Assert.Equal(1, fixture.FactoryCalls);
+            Assert.False((await coordinator.SwitchAsync("default")).Succeeded);
+            Assert.Equal("default", coordinator.ActiveProject!.Id);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        }
+        finally { gate.PrepareRelease.TrySetResult(); gate.StopRelease.TrySetResult(); }
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
+    public async Task Quiesced_editor_refuses_fresh_recovery_io_while_old_stop_is_pending()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var gate = fixture.Gate(fixture.Disk.User, holdStop: true);
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        try
+        {
+            Assert.True((await coordinator.SwitchAsync(target.Id)).Pending);
+            Assert.False(coordinator.Document!.IsEditable);
+            Assert.Throws<InvalidOperationException>(() => { _ = coordinator.Document.PreserveConflictAndReloadAsync(); });
+        }
+        finally { gate.StopRelease.TrySetResult(); }
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+    }
+
+    [Fact]
+    public async Task Preparation_failure_is_safe_and_keeps_document_correctable_until_retry()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var gate = fixture.Gate(fixture.Disk.User);
+        gate.FailPreparation = true;
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        var failure = await coordinator.SwitchAsync(target.Id);
+        Assert.Equal("ProjectPreparationFailed", failure.ErrorCode);
+        Assert.False(failure.Pending);
+        Assert.Equal(1, fixture.FactoryCalls);
+        Assert.Equal(1, gate.Live);
+        Assert.True(coordinator.Document!.IsEditable);
+        coordinator.Document.Edit("correction after preparation failed");
+        gate.FailPreparation = false;
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.Equal("correction after preparation failed", (await new ProjectContextDocumentStore(fixture.Disk.User, "default").ReadAsync()).Text);
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
+    public async Task CandidateFailureDoesNotRestoreOldBeforeCandidateActuallyRetires()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync(seedEnabled: true);
+        using var old = fixture.Gate(fixture.Disk.User);
+        using var candidate = fixture.Gate(fixture.Root(target.Id), holdStop: true);
+        candidate.FailInitialization = true;
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        var oldManager = coordinator.Runtime.Manager;
+        var generation = coordinator.RuntimeGeneration;
+        try
+        {
+            var result = await coordinator.SwitchAsync(target.Id);
+            Assert.True(result.Pending);
+            Assert.Equal("default", coordinator.ActiveProject!.Id);
+            Assert.Equal(0, old.Live);
+            Assert.Equal(1, candidate.Live);
+            Assert.False((await coordinator.SwitchAsync("default")).Succeeded);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(target.Id)); });
+        }
+        finally { candidate.StopRelease.TrySetResult(); }
+        var retired = await coordinator.RetryAsync();
+        Assert.False(retired.Succeeded);
+        Assert.False(retired.Pending);
+        Assert.Equal(0, candidate.Live);
+        Assert.Equal(1, old.Live);
+        Assert.NotSame(oldManager, coordinator.Runtime!.Manager);
+        Assert.True(coordinator.RuntimeGeneration > generation);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+        await Assert.ThrowsAsync<ObjectDisposedException>(() => oldManager.EnableAsync(PluginId));
+        await coordinator.DisposeAsync();
+    }
+
+    [Fact]
+    public async Task Admitted_host_action_finishes_before_replacement_runtime_starts()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        var finished = false;
+        await using var coordinator = fixture.Coordinator(_ => Assert.True(finished));
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var action = coordinator.RunCurrentAsync(async (runtime, _, _) =>
+        {
+            entered.SetResult();
+            await release.Task;
+            await runtime.Manager.GetSettings(PluginId).SetAsync("completed-action", "owned");
+            finished = true;
+        });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var change = coordinator.SwitchAsync(target.Id);
+        Assert.Equal(1, fixture.FactoryCalls);
+        Assert.False(change.IsCompleted);
+        release.TrySetResult();
+        await action;
+        Assert.True((await change).Succeeded);
+        Assert.Equal(2, fixture.FactoryCalls);
+        Assert.True((await coordinator.SwitchAsync("default")).Succeeded);
+        Assert.Equal("owned", await coordinator.Runtime!.Manager.GetSettings(PluginId).GetAsync("completed-action", "missing"));
+    }
+
+    [Fact]
+    public async Task Canceled_candidate_startup_stays_owned_and_close_joins_the_actual_initializer()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync(seedEnabled: true);
+        using var candidate = fixture.Gate(fixture.Root(target.Id), holdInitialize: true);
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        using var cancel = new CancellationTokenSource();
+        var change = coordinator.SwitchAsync(target.Id, cancel.Token);
+        await candidate.Initialized.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancel.Cancel();
+        Assert.True((await change).Pending);
+        Assert.False((await coordinator.SwitchAsync("default")).Succeeded);
+        var close = coordinator.DisposeAsync().AsTask();
+        Assert.False(close.IsCompleted);
+        Assert.Equal(1, candidate.Live);
+        Assert.False(candidate.StopStarted.Task.IsCompleted);
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        candidate.InitializeRelease.TrySetResult();
+        await close.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal(0, candidate.Live);
+        using var next = HostRuntime.AcquireLease(fixture.Disk.User);
+    }
+
+    [Fact]
+    public async Task Catalog_rename_archive_and_explicit_recovery_preserve_scope_and_owned_roots()
+    {
+        using var fixture = new Fixture();
+        var store = new ProjectWorkspaceCatalog(fixture.Disk.User);
+        await store.OpenAsync();
+        var original = await File.ReadAllBytesAsync(Path.Combine(fixture.Disk.User, ".workspaces", "catalog.json"));
+        var orphan = await fixture.CreateTargetAsync();
+        await File.WriteAllBytesAsync(Path.Combine(fixture.Disk.User, ".workspaces", "catalog.json"), original);
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.Equal(orphan.Id, Assert.Single(await coordinator.GetRecoverableAsync()).Id);
+        Assert.True((await coordinator.RecoverProjectAsync(orphan.Id)).Succeeded);
+        Assert.Equal(orphan.Id, coordinator.Scope!.Id);
+        Assert.True((await coordinator.RenameAsync("  Renamed  ")).Succeeded);
+        Assert.Equal("Renamed", coordinator.Scope.Identity.Name);
+        var snapshot = await store.OpenAsync();
+        await store.RenameAsync("default", "Outside", snapshot.Revision);
+        Assert.Equal("RevisionConflict", (await coordinator.RenameAsync("Must not become identity")).ErrorCode);
+        Assert.Equal("Renamed", coordinator.Scope.Identity.Name);
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.Equal("ActiveProjectArchived", (await coordinator.SetArchivedAsync(orphan.Id, true)).ErrorCode);
+        Assert.True((await coordinator.SwitchAsync("default")).Succeeded);
+        Assert.True((await coordinator.SetArchivedAsync(orphan.Id, true)).Succeeded);
+        Assert.Equal("ActiveProjectArchived", (await coordinator.SwitchAsync(orphan.Id)).ErrorCode);
+        Assert.True(Directory.Exists(fixture.Root(orphan.Id)));
+        Assert.True((await coordinator.SetArchivedAsync(orphan.Id, false)).Succeeded);
+        Assert.True((await coordinator.SwitchAsync(orphan.Id)).Succeeded);
+    }
+
+    [Fact]
+    public async Task Corrupt_catalog_stays_blocked_until_explicit_owned_history_recovery()
+    {
+        using var fixture = new Fixture();
+        await fixture.CreateTargetAsync();
+        var path = Path.Combine(fixture.Disk.User, ".workspaces", "catalog.json");
+        await File.WriteAllTextAsync(path, "{broken}");
+        await using var coordinator = fixture.Coordinator();
+        Assert.Equal("InvalidCatalog", (await coordinator.InitializeAsync()).ErrorCode);
+        Assert.Null(coordinator.Catalog);
+        Assert.Null(coordinator.Runtime);
+        Assert.Equal(0, fixture.FactoryCalls);
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        Assert.True((await coordinator.RecoverCatalogAsync()).Succeeded);
+        Assert.Equal("default", coordinator.ActiveProject!.Id);
+        var retained = Assert.Single(Directory.EnumerateFiles(Path.Combine(fixture.Disk.User, ".workspaces", "catalog-recovery")));
+        Assert.Equal("{broken}", await File.ReadAllTextAsync(retained));
+    }
+
+    [Fact]
+    public async Task Failed_dirty_editor_close_keeps_secondary_root_leased_until_buffer_is_preserved()
+    {
+        using var fixture = new Fixture();
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.CreateAndSwitchAsync("Second")).Succeeded);
+        var root = coordinator.Scope!.UserRoot;
+        await coordinator.Scope.Documents.WriteAsync("outside", "missing");
+        coordinator.Document!.Edit("dirty on close");
+        await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => coordinator.Document.FlushAsync());
+        await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => coordinator.DisposeAsync().AsTask());
+        Assert.True(coordinator.Document.IsDirty);
+        Assert.Equal("dirty on close", coordinator.Document.Text);
+        try
+        {
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(root); });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        }
+        finally
+        {
+            await coordinator.Document.PreserveConflictAndReloadAsync();
+            await coordinator.DisposeAsync();
+        }
+        using var next = HostRuntime.AcquireLease(root);
+        using var receipt = JsonDocument.Parse(await File.ReadAllBytesAsync(Assert.Single(Directory.EnumerateFiles(Path.Combine(root, ".workbench-project", "context-conflicts")))));
+        Assert.Equal("dirty on close", receipt.RootElement.GetProperty("text").GetString());
+    }
+
+    [Fact]
+    public async Task Failed_plugin_without_live_pending_work_remains_visible_as_a_managed_diagnostic()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync(seedEnabled: true);
+        using var candidate = fixture.Gate(fixture.Root(target.Id));
+        candidate.FailInitialization = true;
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.SwitchAsync(target.Id)).Succeeded);
+        var plugin = Assert.Single(coordinator.Runtime!.Manager.Plugins);
+        Assert.Equal(PluginState.Failed, plugin.State);
+        Assert.False(plugin.HasRuntime);
+        Assert.False(plugin.HasPendingStop);
+        Assert.Equal(0, candidate.Live);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+        Assert.Contains(plugin.Diagnostics, d => d.Code == PluginDiagnosticCode.InitializationFailed);
+    }
+
+    [Fact]
+    public async Task CatalogCommitFailureKeepsOldSelectionAndBothDataRoots()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync(seedEnabled: true);
+        using var old = fixture.Gate(fixture.Disk.User);
+        using var candidate = fixture.Gate(fixture.Root(target.Id), holdInitialize: true);
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        coordinator.Document!.Edit("old context");
+        var change = coordinator.SwitchAsync(target.Id);
+        await Task.WhenAny(change, candidate.Initialized.Task).WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.True(candidate.Initialized.Task.IsCompleted);
+        var outside = new ProjectWorkspaceCatalog(fixture.Disk.User);
+        var snapshot = await outside.OpenAsync();
+        await outside.RenameAsync(target.Id, "Outside rename", snapshot.Revision);
+        candidate.InitializeRelease.TrySetResult();
+        var result = await change;
+        Assert.False(result.Succeeded);
+        Assert.Equal("RevisionConflict", result.ErrorCode);
+        Assert.Equal("default", (await outside.OpenAsync()).ActiveProjectId);
+        Assert.Equal("default", coordinator.ActiveProject!.Id);
+        Assert.Equal(1, old.Live);
+        Assert.Equal(0, candidate.Live);
+        Assert.Equal("old context", (await new ProjectContextDocumentStore(fixture.Disk.User, "default").ReadAsync()).Text);
+        Assert.True(Directory.Exists(fixture.Root(target.Id)));
+    }
+
+    [Fact]
+    public async Task CloseJoinsFailedCandidateAndEditorTask()
+    {
+        // Failed candidate ownership is retained across close retries.
+        using (var fixture = new Fixture())
+        {
+            var target = await fixture.CreateTargetAsync(seedEnabled: true);
+            using var candidate = fixture.Gate(fixture.Root(target.Id), holdStop: true);
+            candidate.FailInitialization = true;
+            var coordinator = fixture.Coordinator();
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.SwitchAsync(target.Id)).Pending);
+            try
+            {
+                await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => coordinator.DisposeAsync().AsTask());
+                Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+                Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(target.Id)); });
+            }
+            finally { candidate.StopRelease.TrySetResult(); }
+            await coordinator.DisposeAsync();
+            using var next = HostRuntime.AcquireLease(fixture.Disk.User);
+        }
+        // Independently, a close must join an editor task that was admitted before quiescence.
+        // Fresh editor recovery during failed-candidate cleanup is prohibited by the admission test.
+        using (var fixture = new Fixture())
+        {
+            var store = new ProjectContextDocumentStore(fixture.Disk.User, "default");
+            await store.WriteAsync("before close", "missing");
+            var coordinator = fixture.Coordinator();
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            using var held = new FileStream(Path.Combine(fixture.Disk.User, ".workbench-project", "context.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            coordinator.Document!.Edit("latest on close");
+            var editor = coordinator.Document.FlushAsync();
+            var close = coordinator.DisposeAsync().AsTask();
+            Assert.False(editor.IsCompleted);
+            Assert.False(close.IsCompleted);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+            held.Dispose();
+            await editor;
+            await close;
+            using var next = HostRuntime.AcquireLease(fixture.Disk.User);
+            Assert.Equal("latest on close", (await store.ReadAsync()).Text);
+        }
+    }
+
+    [Fact]
+    public async Task ThemeSettingsSecretsAndContextRemainProjectBound()
+    {
+        using var fixture = new Fixture();
+        using var gate = fixture.Gate(fixture.Disk.User);
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        await coordinator.Runtime!.Manager.GetSettings(PluginId).SetAsync("draft", "default draft");
+        coordinator.Document!.Edit("default context");
+        // The native host stores preferences in its effective user root. Use synthetic bytes here.
+        await File.WriteAllTextAsync(Path.Combine(coordinator.Scope!.UserRoot, "host-settings.json"), "{\"theme\":1}");
+        var secretPath = Path.Combine(coordinator.Scope.UserRoot, "secrets", PluginId);
+        Directory.CreateDirectory(secretPath);
+        await File.WriteAllBytesAsync(Path.Combine(secretPath, "synthetic.bin"), [10, 20, 30]);
+        Assert.True((await coordinator.CreateAndSwitchAsync("Second")).Succeeded);
+        var second = coordinator.ActiveProject!.Id;
+        Assert.Equal(0, gate.Live);
+        var unapproved = Assert.Single(coordinator.Runtime!.Manager.Plugins);
+        Assert.False(unapproved.IsTrusted);
+        Assert.False(unapproved.DesiredEnabled);
+        Assert.Equal("empty", await coordinator.Runtime!.Manager.GetSettings(PluginId).GetAsync("draft", "empty"));
+        Assert.Empty(coordinator.Document!.Text);
+        Assert.False(File.Exists(Path.Combine(coordinator.Scope!.UserRoot, "host-settings.json")));
+        Assert.False(Directory.Exists(Path.Combine(coordinator.Scope.UserRoot, "secrets")));
+        await coordinator.Runtime.Manager.GetSettings(PluginId).SetAsync("draft", "second draft");
+        coordinator.Document.Edit("second context");
+        Assert.True((await coordinator.SwitchAsync("default")).Succeeded);
+        Assert.Equal(1, gate.Live);
+        Assert.Equal("default draft", await coordinator.Runtime!.Manager.GetSettings(PluginId).GetAsync("draft", "empty"));
+        Assert.Equal("default context", coordinator.Document!.Text);
+        Assert.Equal(new byte[] { 10, 20, 30 }, await File.ReadAllBytesAsync(Path.Combine(secretPath, "synthetic.bin")));
+        Assert.True((await coordinator.SwitchAsync(second)).Succeeded);
+        Assert.Equal("second context", coordinator.Document!.Text);
+    }
+
+    [Fact]
+    public async Task AutosaveConflictPreservesBufferAndBlocksUnsafeLeave()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        await coordinator.Scope!.Documents.WriteAsync("outside", "missing");
+        coordinator.Document!.Edit("dirty buffer");
+        var failure = await coordinator.SwitchAsync(target.Id);
+        Assert.False(failure.Succeeded);
+        Assert.Equal("RevisionConflict", failure.ErrorCode);
+        Assert.Equal(1, fixture.FactoryCalls);
+        Assert.Equal("dirty buffer", coordinator.Document.Text);
+        Assert.True(coordinator.Document.IsDirty);
+        await coordinator.Document.PreserveConflictAndReloadAsync();
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.Equal("outside", (await new ProjectContextDocumentStore(fixture.Disk.User, "default").ReadAsync()).Text);
+        using var retained = JsonDocument.Parse(await File.ReadAllBytesAsync(Assert.Single(Directory.EnumerateFiles(Path.Combine(fixture.Disk.User, ".workbench-project", "context-conflicts")))));
+        Assert.Equal("dirty buffer", retained.RootElement.GetProperty("text").GetString());
+    }
+
+    private sealed class Fixture : IDisposable
+    {
+        public TestDirectory Disk { get; } = new();
+        public int FactoryCalls { get; private set; }
+        public Fixture() => Disk.Package(PluginId, fields: new() { ["entryType"] = "Workbench.TestPlugin.WorkspaceLifecyclePlugin" });
+        public string Root(string id) => new ProjectWorkspaceCatalog(Disk.User).GetProjectRoot(id);
+        public WorkspaceLifecycleGate Gate(string root, bool holdPrepare = false, bool holdStop = false, bool holdInitialize = false)
+            => new(Path.Combine(root, "data", PluginId), holdPrepare, holdStop, holdInitialize);
+        private PluginManagerOptions Options(string root, ProjectRuntimeScope scope) => new()
+        {
+            UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+            AdditionalDiscoveryRoots = [Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100)
+        };
+        public WorkspaceRuntimeCoordinator Coordinator(Action<string>? beforeTarget = null) => new(new(false, Disk.User, null), (root, scope, owner) =>
+        {
+            if (FactoryCalls++ > 0) beforeTarget?.Invoke(root);
+            return new(Options(root, scope), owner);
+        });
+        public async Task<ProjectWorkspaceInfo> CreateTargetAsync(bool seedEnabled = false)
+        {
+            var catalog = new ProjectWorkspaceCatalog(Disk.User);
+            var snapshot = await catalog.OpenAsync();
+            var project = (await catalog.CreateAsync("Second", snapshot.Revision)).Project;
+            if (seedEnabled)
+            {
+                var root = Root(project.Id);
+                using var gate = Gate(root);
+                await using var seed = new HostRuntime(Options(root, new(project.Id, project.Name, root)));
+                await seed.InitializeAsync();
+                Assert.True((await seed.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+            }
+            return project;
+        }
+        public void Dispose() => Disk.Dispose();
+    }
+}
