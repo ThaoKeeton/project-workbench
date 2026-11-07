@@ -6,6 +6,7 @@ namespace Workbench.App;
 internal sealed class ProjectDocumentSession(ProjectContextDocumentStore store) : IAsyncDisposable
 {
     private readonly object _gate = new();
+    private readonly Func<bool> _canRecoverAfterOwnerClose = static () => true;
     private Task _tail = Task.CompletedTask;
     private Task? _initialization;
     private Task? _disposal;
@@ -14,12 +15,18 @@ internal sealed class ProjectDocumentSession(ProjectContextDocumentStore store) 
     private bool _loaded, _saveBlocked, _paused, _closing, _disposed;
     private int _reloads;
 
+    internal ProjectDocumentSession(ProjectContextDocumentStore store, Func<bool> canRecoverAfterOwnerClose) : this(store)
+        => _canRecoverAfterOwnerClose = canRecoverAfterOwnerClose;
+
     public string Text { get { lock (_gate) return _text; } }
     public bool IsDirty { get { lock (_gate) return _text != _savedText; } }
     public bool IsEditable { get { lock (_gate) return Editable; } }
     public string? ErrorCode { get { lock (_gate) return _errorCode; } }
     internal bool HasPendingWork { get { lock (_gate) return !_tail.IsCompleted; } }
-    private bool Editable => _loaded && !_paused && !_closing && !_disposed && _reloads == 0;
+    private bool Editable => _loaded && !_disposed && _reloads == 0
+        && (!_closing && !_paused || CanRecoverAfterFailedClose);
+    // The owner predicate must only read task/atomic state: it runs under the session gate.
+    private bool CanRecoverAfterFailedClose => _closing && _disposal is { IsFaulted: true } && _canRecoverAfterOwnerClose();
 
     public Task InitializeAsync(CancellationToken ct = default)
     {
@@ -52,7 +59,7 @@ internal sealed class ProjectDocumentSession(ProjectContextDocumentStore store) 
         lock (_gate)
         {
             if (_disposed) return Task.CompletedTask;
-            if (_paused && !_closing) throw new InvalidOperationException("The project document is preparing to leave.");
+            RequireOperationAdmission();
             return QueueLocked(() => SaveLatestAsync(retry: true, reportFailure: true, ct));
         }
     }
@@ -62,7 +69,7 @@ internal sealed class ProjectDocumentSession(ProjectContextDocumentStore store) 
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
-            if (_paused && !_closing) throw new InvalidOperationException("The project document is preparing to leave.");
+            RequireOperationAdmission();
             _reloads++;
             return QueueLocked(async () =>
             {
@@ -90,10 +97,17 @@ internal sealed class ProjectDocumentSession(ProjectContextDocumentStore store) 
 
     internal void SetPaused(bool paused) { lock (_gate) _paused = paused; }
 
+    private void RequireOperationAdmission()
+    {
+        if (_closing && !CanRecoverAfterFailedClose) throw new InvalidOperationException("The project document is closing.");
+        if (_paused && !_closing) throw new InvalidOperationException("The project document is preparing to leave.");
+    }
+
     internal Task QuiesceAsync(CancellationToken ct)
     {
         lock (_gate)
         {
+            ObjectDisposedException.ThrowIf(_disposed || _closing, this);
             _paused = true;
             return QueueLocked(() => SaveLatestAsync(retry: true, reportFailure: true, ct));
         }
@@ -146,6 +160,7 @@ internal sealed class ProjectDocumentSession(ProjectContextDocumentStore store) 
         return _tail = Task.Run(async () =>
         {
             try { await previous.ConfigureAwait(false); } catch (Exception) { }
+            lock (_gate) ObjectDisposedException.ThrowIf(_disposed, this);
             await action().ConfigureAwait(false);
         });
     }

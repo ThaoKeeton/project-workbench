@@ -298,12 +298,130 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         }
         finally
         {
-            await coordinator.Document.PreserveConflictAndReloadAsync();
-            await coordinator.DisposeAsync();
+            // This recovery is admitted only after the previous close fully failed.
+            // Retry must join its actual read before either retained root is released.
+            using var held = new FileStream(Path.Combine(root, ".workbench-project", "context.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+            var recovery = coordinator.Document.PreserveConflictAndReloadAsync();
+            var retry = coordinator.DisposeAsync().AsTask();
+            try
+            {
+                Assert.False(recovery.IsCompleted);
+                Assert.False(retry.IsCompleted);
+                Assert.Throws<InvalidOperationException>(() => { _ = coordinator.Document.FlushAsync(); });
+                Assert.Throws<InvalidOperationException>(() => { _ = coordinator.Document.PreserveConflictAndReloadAsync(); });
+                Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(root); });
+                Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+            }
+            finally
+            {
+                held.Dispose();
+                await recovery.WaitAsync(TimeSpan.FromSeconds(5));
+                await retry.WaitAsync(TimeSpan.FromSeconds(5));
+            }
         }
         using var next = HostRuntime.AcquireLease(root);
         using var receipt = JsonDocument.Parse(await File.ReadAllBytesAsync(Assert.Single(Directory.EnumerateFiles(Path.Combine(root, ".workbench-project", "context-conflicts")))));
         Assert.Equal("dirty on close", receipt.RootElement.GetProperty("text").GetString());
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pending_secondary_close_refuses_late_editor_work_and_retains_both_locks(bool recovery)
+    {
+        using var fixture = new Fixture();
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.CreateAndSwitchAsync("Second")).Succeeded);
+        var scope = coordinator.Scope!;
+        var editor = coordinator.Document!;
+        editor.Edit("before");
+        await editor.FlushAsync();
+        using var held = new FileStream(Path.Combine(scope.UserRoot, ".workbench-project", "context.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        editor.Edit("last admitted text");
+        // Establish the session's exact close barrier before the coordinator joins it.
+        var editorClose = editor.DisposeAsync().AsTask();
+        var close = coordinator.DisposeAsync().AsTask();
+        Task? late = null;
+        try
+        {
+            Assert.False(editorClose.IsCompleted);
+            Assert.False(close.IsCompleted);
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                late = recovery ? editor.PreserveConflictAndReloadAsync() : editor.FlushAsync();
+            });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(scope.UserRoot); });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        }
+        finally
+        {
+            held.Dispose();
+            await editorClose.WaitAsync(TimeSpan.FromSeconds(5));
+            await close.WaitAsync(TimeSpan.FromSeconds(5));
+            if (late is not null) await late.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.False(editor.HasPendingWork);
+        Assert.Equal("last admitted text", (await scope.Documents.ReadAsync()).Text);
+        using var nextSecondary = HostRuntime.AcquireLease(scope.UserRoot);
+        using var nextBase = HostRuntime.AcquireLease(fixture.Disk.User);
+    }
+
+    [Fact]
+    public async Task Oversized_secondary_close_allows_correction_only_after_runtime_cleanup_and_joins_retry_save()
+    {
+        using var fixture = new Fixture();
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.CreateAndSwitchAsync("Second")).Succeeded);
+        var scope = coordinator.Scope!;
+        var editor = coordinator.Document!;
+        var runtime = coordinator.Runtime!;
+        using var gate = fixture.Gate(scope.UserRoot, holdStop: true);
+        Assert.True((await runtime.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        editor.Edit("before invalid text");
+        await editor.FlushAsync();
+        editor.Edit(new string('x', 1024 * 1024 + 1));
+        var closeFailure = await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => coordinator.DisposeAsync().AsTask());
+        Assert.Equal("ContextLimitExceeded", closeFailure.ErrorCode);
+        try
+        {
+            Assert.True(runtime.Manager.HasPendingStops);
+            Assert.False(editor.IsEditable);
+            Assert.Throws<InvalidOperationException>(() => editor.Edit("cleanup still pending"));
+            Assert.Throws<InvalidOperationException>(() => { _ = editor.FlushAsync(); });
+            Assert.Throws<InvalidOperationException>(() => { _ = editor.PreserveConflictAndReloadAsync(); });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(scope.UserRoot); });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        }
+        finally { gate.StopRelease.TrySetResult(); }
+        // A new owned close pass joins the same actual Stop and confirms runtime cleanup.
+        // The unchanged oversized buffer still fails; no root is released or manager restarted.
+        Assert.Equal("ContextLimitExceeded", (await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => coordinator.DisposeAsync().AsTask())).ErrorCode);
+        Assert.False(runtime.Manager.HasPendingStops);
+        Assert.Equal(0, gate.Live);
+        Assert.True(editor.IsEditable);
+        Assert.False(coordinator.CanUseCurrentRuntime);
+        Assert.True(editor.IsDirty);
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(scope.UserRoot); });
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        using var held = new FileStream(Path.Combine(scope.UserRoot, ".workbench-project", "context.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        editor.Edit("corrected secondary text");
+        var retry = coordinator.DisposeAsync().AsTask();
+        Assert.False(retry.IsCompleted);
+        Assert.False(editor.IsEditable);
+        Assert.Throws<InvalidOperationException>(() => editor.Edit("after retry barrier"));
+        Assert.Throws<InvalidOperationException>(() => { _ = editor.FlushAsync(); });
+        Assert.Throws<InvalidOperationException>(() => { _ = editor.PreserveConflictAndReloadAsync(); });
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(scope.UserRoot); });
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        held.Dispose();
+        await retry.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(editor.HasPendingWork);
+        Assert.Equal("corrected secondary text", (await scope.Documents.ReadAsync()).Text);
+        Assert.Equal(2, fixture.FactoryCalls);
+        using var nextSecondary = HostRuntime.AcquireLease(scope.UserRoot);
+        using var nextBase = HostRuntime.AcquireLease(fixture.Disk.User);
     }
 
     [Fact]

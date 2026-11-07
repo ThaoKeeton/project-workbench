@@ -7,6 +7,71 @@ namespace Workbench.Core.Tests;
 
 public sealed class ProjectDocumentSessionTests
 {
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Pending_document_close_refuses_flush_or_recovery_behind_its_barrier(bool recovery)
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectContextDocumentStore(disk.User, "default");
+        await store.WriteAsync("before", "missing");
+        var editor = new ProjectDocumentSession(store);
+        await editor.InitializeAsync();
+        using var held = new FileStream(Path.Combine(disk.User, ".workbench-project", "context.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        editor.Edit("saved before retirement");
+        var close = editor.DisposeAsync().AsTask();
+        Task? late = null;
+        try
+        {
+            Assert.False(close.IsCompleted);
+            Assert.True(editor.IsDirty);
+            Assert.Throws<InvalidOperationException>(() =>
+            {
+                late = recovery ? editor.PreserveConflictAndReloadAsync() : editor.FlushAsync();
+            });
+        }
+        finally
+        {
+            held.Dispose();
+            await close.WaitAsync(TimeSpan.FromSeconds(5));
+            if (late is not null) await late.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+        Assert.False(editor.HasPendingWork);
+        Assert.Equal("saved before retirement", (await store.ReadAsync()).Text);
+        Assert.Throws<ObjectDisposedException>(() => { _ = editor.PreserveConflictAndReloadAsync(); });
+        Assert.True(editor.FlushAsync().IsCompletedSuccessfully);
+        Assert.False(editor.HasPendingWork);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Settled_failed_document_close_allows_invalid_buffer_correction_and_owned_autosave(bool invalidUnicode)
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectContextDocumentStore(disk.User, "default");
+        await store.WriteAsync("before", "missing");
+        var editor = new ProjectDocumentSession(store);
+        await editor.InitializeAsync();
+        editor.Edit(invalidUnicode ? "invalid \uD800 buffer" : new string('x', 1024 * 1024 + 1));
+        var failure = await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => editor.DisposeAsync().AsTask());
+        Assert.Equal(invalidUnicode ? "InvalidContext" : "ContextLimitExceeded", failure.ErrorCode);
+        Assert.True(editor.IsDirty);
+        Assert.True(editor.IsEditable);
+        using var held = new FileStream(Path.Combine(disk.User, ".workbench-project", "context.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+        editor.Edit("corrected after failed close");
+        var retry = editor.DisposeAsync().AsTask();
+        Assert.False(editor.IsEditable);
+        Assert.Throws<InvalidOperationException>(() => editor.Edit("too late"));
+        Assert.Throws<InvalidOperationException>(() => { _ = editor.FlushAsync(); });
+        Assert.Throws<InvalidOperationException>(() => { _ = editor.PreserveConflictAndReloadAsync(); });
+        held.Dispose();
+        await retry.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.Equal("corrected after failed close", (await store.ReadAsync()).Text);
+        Assert.False(editor.IsDirty);
+        Assert.False(editor.HasPendingWork);
+    }
+
     [Fact]
     public async Task Missing_document_is_editable_and_autosaves_latest_buffer_without_an_activation_step()
     {
@@ -72,6 +137,7 @@ public sealed class ProjectDocumentSessionTests
         Assert.Equal("RevisionConflict", failure.ErrorCode);
         Assert.Equal("my dirty copy", editor.Text);
         Assert.True(editor.IsDirty);
+        await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => editor.DisposeAsync().AsTask());
         await editor.PreserveConflictAndReloadAsync();
         var retained = Assert.Single(Directory.EnumerateFiles(Path.Combine(disk.User, ".workbench-project", "context-conflicts"), "*.json"));
         using var saved = JsonDocument.Parse(await File.ReadAllBytesAsync(retained));

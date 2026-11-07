@@ -18,6 +18,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
     private string? _retryTarget;
     private int _transitionRequests;
     private volatile bool _closing;
+    private CloseAttempt? _closeAttempt;
     private bool _disposed;
     private long _runtimeGeneration;
 
@@ -199,7 +200,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                         if (attempt.Candidate is null)
                         {
                             var scope = new ProjectRuntimeScope(attempt.Target.Id, attempt.Target.Name, _store.GetProjectRoot(attempt.Target.Id));
-                            var candidate = attempt.Candidate = new(attempt.Target, scope);
+                            var candidate = attempt.Candidate = new(attempt.Target, scope, CanRecoverDocumentAfterFailedClose);
                             candidate.Document.SetPaused(true);
                             await candidate.Document.InitializeAsync(ct).ConfigureAwait(false);
                             ct.ThrowIfCancellationRequested();
@@ -350,6 +351,14 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
         || new[] { _current, _attempt?.Candidate, _retiring }.Any(p => p is not null
             && (p.Document.HasPendingWork || p.Runtime?.Manager.HasPendingStops == true || p.Runtime?.Manager.HasPendingProjectWork == true));
 
+    // Called under an editor gate. Never take the coordinator/core gates or invoke plugin code.
+    // A pending runtime cleanup remains sealed until a later owned close pass joins it successfully.
+    private bool CanRecoverDocumentAfterFailedClose()
+    {
+        var close = Volatile.Read(ref _closeAttempt);
+        return close is { RuntimeCleanupSettled: true, Completion.IsFaulted: true };
+    }
+
     private async Task<bool> DrainRetiringAsync()
     {
         if (_retiring is not { } retired) return true;
@@ -397,12 +406,17 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
         {
             if (_disposed) return ValueTask.CompletedTask;
             _closing = true;
-            _current?.Document.SetPaused(true);
-            _attempt?.Candidate?.Document.SetPaused(true);
             if (_disposal is null || _disposal.IsCompleted)
+            {
+                // Seal failed-close correction before taking any editor gate or capturing its tail.
+                var close = new CloseAttempt();
+                Volatile.Write(ref _closeAttempt, close);
+                _current?.Document.SetPaused(true);
+                _attempt?.Candidate?.Document.SetPaused(true);
                 _disposal = QueueLocked(async () =>
                 {
                     string? failure = null;
+                    var runtimeCleanupSettled = true;
                     // Joining the operation tail also joins every admitted shell callback. No caller
                     // timeout/cancellation detaches candidate initialization, restoration, or editor IO.
                     foreach (var project in new[] { _attempt?.Candidate, _current, _retiring }.OfType<OwnedProject>().Distinct())
@@ -420,8 +434,9 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                                 else await project.Runtime.StopForProjectLeaveAsync().ConfigureAwait(false);
                             }
                         }
-                        catch (Exception) { failure ??= "ProjectClosePending"; }
+                        catch (Exception) { runtimeCleanupSettled = false; failure ??= "ProjectClosePending"; }
                     }
+                    close.RuntimeCleanupSettled = runtimeCleanupSettled;
                     if (failure is not null)
                     {
                         Block(failure, true);
@@ -433,11 +448,20 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                     _disposed = true;
                     return true;
                 });
+                // Until published, this attempt's null completion also refuses recovery. A fast
+                // failed worker cannot combine its new readiness with the previous close's task.
+                close.Completion = _disposal;
+            }
             return new(_disposal);
         }
     }
 
     private enum SwitchStage { Prepare, Stop, Start, Commit, Rollback }
+    private sealed class CloseAttempt
+    {
+        internal volatile Task? Completion;
+        internal volatile bool RuntimeCleanupSettled;
+    }
     private sealed class SwitchAttempt(ProjectWorkspaceInfo target, SwitchStage stage)
     {
         internal ProjectWorkspaceInfo Target { get; } = target;
@@ -447,11 +471,11 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
         internal Task? Restoration { get; set; }
         internal bool RestoreNeedsRetirement { get; set; }
     }
-    private sealed class OwnedProject(ProjectWorkspaceInfo project, ProjectRuntimeScope scope)
+    private sealed class OwnedProject(ProjectWorkspaceInfo project, ProjectRuntimeScope scope, Func<bool> canRecoverAfterOwnerClose)
     {
         internal ProjectWorkspaceInfo Project { get; set; } = project;
         internal ProjectRuntimeScope Scope { get; } = scope;
-        internal ProjectDocumentSession Document { get; } = new(scope.Documents);
+        internal ProjectDocumentSession Document { get; } = new(scope.Documents, canRecoverAfterOwnerClose);
         internal HostRuntime? Runtime { get; set; }
         internal Task? Startup { get; set; }
         internal bool Stopped { get; set; }
