@@ -191,6 +191,8 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
         try
         {
             await RuntimeTest.WaitAsync(() => runtime.Manager.GetSettings(Owner).GetAsync("testingInitializeEntered", false));
+            // The entry flag precedes the Testing call; wait for its actual retained admission.
+            await RuntimeTest.WaitAsync(() => Task.FromResult(runtime.Manager.HasPendingProjectWork));
             Assert.False(enable.IsCompleted);
             Assert.True(runtime.Manager.HasPendingProjectWork);
             Assert.Empty(runtime.Manager.Contributions.Views);
