@@ -3,22 +3,88 @@ using Workbench.Core.Testing;
 using Workbench.Sdk;
 using Workbench.Testing.Domain;
 using Xunit;
+using Xunit.Abstractions;
 using static Workbench.Core.Tests.PluginTestingContextTests;
 
 namespace Workbench.Core.Tests;
 
-public sealed class TestingControllerAdmissionTests
+public sealed class TestingControllerAdmissionTests(ITestOutputHelper output)
 {
+    [Fact]
+    public async Task Actual_definition_callback_completion_excludes_held_action_and_disposal_and_does_not_settle_supervisor_postfix()
+    {
+        var adapter=new GatedVirtualAdapter();var postfix=new AsyncTestGate();var stopPrefix=new AsyncTestGate();
+        var fixture=await TestingDomainFixture.CreateAsync(adapter,firstStopPrefix:stopPrefix,delegatePostfix:postfix);var admitted=new List<Task>();
+        try
+        {
+            var definitionCompletion=fixture.FirstDefinitionCallbackCompletion;
+            var set=await fixture.ImportAndGenerateAsync();var run=await fixture.Controller.RunAsync([set.Cases[0].Id]);
+            var waiting=fixture.Controller.WaitForRunSettlementAsync();admitted.Add(waiting);
+            await adapter.ActionGate.Entered.Task;
+            Assert.False(definitionCompletion.IsCompleted);Assert.False(postfix.Entered.Task.IsCompleted);Assert.False(stopPrefix.Entered.Task.IsCompleted);
+            Assert.False(waiting.IsCompleted);Assert.Equal(0,fixture.RetirementStopCalls);
+            Assert.Equal(1,adapter.Actions);Assert.Equal(0,adapter.Disposals);
+            var active=await fixture.Context.Testing.ReadRunAsync(run.Plan.Id);
+            Assert.Equal(TestRunState.Running,active.State);Assert.Equal(TestRunEventKind.StepStarted,active.Events[^1].Kind);
+            Assert.Single(await fixture.Context.Testing.ListRunsAsync());
+            adapter.ActionGate.Release.TrySetResult();
+            await adapter.DisposeGate.Entered.Task;
+            Assert.False(definitionCompletion.IsCompleted);Assert.False(postfix.Entered.Task.IsCompleted);Assert.False(stopPrefix.Entered.Task.IsCompleted);
+            Assert.False(waiting.IsCompleted);Assert.Equal(0,fixture.RetirementStopCalls);
+            Assert.Equal(4,adapter.Actions);Assert.Equal(0,adapter.Disposals);
+            var disposing=await fixture.Context.Testing.ReadRunAsync(run.Plan.Id);
+            Assert.Equal(TestRunState.Running,disposing.State);
+            Assert.Equal(4,disposing.Events.Count(e=>e.Kind==TestRunEventKind.StepFinished && e.Outcome==TestStepOutcome.Passed));
+            adapter.DisposeGate.Release.TrySetResult();
+            await definitionCompletion;
+            await postfix.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            await stopPrefix.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(waiting.IsCompleted);Assert.Equal(1,fixture.RetirementStopCalls);Assert.True(fixture.Controller.Snapshot.OwnsRun);
+            Assert.Equal(TestRunState.Completed,(await fixture.Context.Testing.ReadRunAsync(run.Plan.Id)).State);
+            stopPrefix.Release.TrySetResult();
+            Assert.False((await fixture.FirstStopReturned.WaitAsync(TimeSpan.FromSeconds(5))).Succeeded);
+            Assert.Equal(PluginBackgroundTaskState.Stopping,Assert.Single(fixture.Tasks.GetSnapshots()).State);
+            Assert.False(waiting.IsCompleted);Assert.True(fixture.Controller.Snapshot.OwnsRun);
+            Assert.Single(await fixture.Context.Testing.ListRunsAsync());
+            postfix.Release.TrySetResult();
+            var settled=Assert.IsType<TestRunSnapshot>(await waiting);
+            Assert.Equal(run.Plan.Id,settled.Plan.Id);Assert.Equal(TestRunState.Completed,settled.State);
+            Assert.Equal(4,settled.Events.Count(e=>e.Kind==TestRunEventKind.StepFinished && e.Outcome==TestStepOutcome.Passed));
+            Assert.DoesNotContain(settled.Events,e=>e.Kind is TestRunEventKind.CancelRequested or TestRunEventKind.Cancelled);
+            Assert.Equal(1,adapter.Disposals);Assert.Null(fixture.Controller.Snapshot.ErrorCode);
+        }
+        finally
+        {
+            adapter.ReleaseAll();postfix.Release.TrySetResult();stopPrefix.Release.TrySetResult();
+            _=await Record.ExceptionAsync(()=>Task.WhenAll(admitted));await fixture.DisposeAsync();
+        }
+    }
+
     [Fact]
     public async Task Old_waiter_and_next_run_share_actual_retirement_before_the_shared_task_can_start_the_next_session()
     {
-        var stopPrefix=new AsyncTestGate();var adapter=new GatedVirtualAdapter(5);adapter.DisposeGate.Release.TrySetResult();
-        var fixture=await TestingDomainFixture.CreateAsync(adapter,firstStopPrefix:stopPrefix);var admitted=new List<Task>();
+        var definitionPrefix=new AsyncTestGate();var stopPrefix=new AsyncTestGate();var adapter=new GatedVirtualAdapter(5);adapter.DisposeGate.Release.TrySetResult();
+        var fixture=await TestingDomainFixture.CreateAsync(adapter,delegatePrefix:definitionPrefix,firstStopPrefix:stopPrefix);var admitted=new List<Task>();
         try
         {
             var set=await fixture.ImportAndGenerateAsync();var runA=await fixture.Controller.RunAsync([set.Cases[0].Id]);
             var waitingA=fixture.Controller.WaitForRunSettlementAsync();admitted.Add(waitingA);
-            await stopPrefix.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(fixture.FirstDefinitionCallbackCompletion.IsCompleted);Assert.False(waitingA.IsCompleted);
+            definitionPrefix.Release.TrySetResult();
+            // Real producer IO is setup; the unchanged coordination fuse starts after the actual definition returns.
+            await fixture.FirstDefinitionCallbackCompletion;
+            try { await stopPrefix.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5)); }
+            catch(TimeoutException)
+            {
+                try
+                {
+                    var snapshot=fixture.Controller.Snapshot;var tasks=fixture.Tasks.GetSnapshots();
+                    var taskState=tasks.Count==1 ? tasks[0].State.ToString() : "unexpected-count";
+                    output.WriteLine($"coordination=first-retirement-stop-after-definition;definition={fixture.FirstDefinitionCallbackCompletion.Status};waiter={waitingA.Status};run={snapshot.SelectedRun?.State};ownsRun={snapshot.OwnsRun};closed={snapshot.IsStopped};hasError={snapshot.ErrorCode is not null};taskCount={tasks.Count};task={taskState};stopCalls={fixture.RetirementStopCalls};actions={Volatile.Read(ref adapter.Actions)};disposals={Volatile.Read(ref adapter.Disposals)}");
+                }
+                catch { } // Read-only failure context must preserve the original timeout and cleanup.
+                throw;
+            }
             Assert.Equal(TestRunState.Completed,(await fixture.Context.Testing.ReadRunAsync(runA.Plan.Id)).State);
             var nextBusy=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             fixture.Controller.Changed+=snapshot=> { if(snapshot.IsAuthoringBusy) nextBusy.TrySetResult(); };
@@ -37,12 +103,13 @@ public sealed class TestingControllerAdmissionTests
             var settledB=Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync());
             Assert.Equal(runB.Plan.Id,settledB.Plan.Id);Assert.Equal(TestRunState.Completed,settledB.State);
             Assert.Equal(4,settledB.Events.Count(e=>e.Kind==TestRunEventKind.StepFinished));
+            Assert.All(settledB.Events.Where(e=>e.Kind==TestRunEventKind.StepFinished),e=>Assert.Equal(TestStepOutcome.Passed,e.Outcome));
             Assert.DoesNotContain(settledB.Events,e=>e.Kind is TestRunEventKind.CancelRequested or TestRunEventKind.Cancelled);
             Assert.Equal(2,fixture.RetirementStopCalls);
         }
         finally
         {
-            stopPrefix.Release.TrySetResult();adapter.ReleaseAll();
+            definitionPrefix.Release.TrySetResult();stopPrefix.Release.TrySetResult();adapter.ReleaseAll();
             _=await Record.ExceptionAsync(()=>Task.WhenAll(admitted));await fixture.DisposeAsync();
         }
     }

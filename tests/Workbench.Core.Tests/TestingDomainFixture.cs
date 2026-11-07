@@ -15,6 +15,7 @@ internal sealed class TestingDomainFixture : IAsyncDisposable
     private readonly PrefixTasks? _taskBridge;
     internal int RetirementStopCalls=>_taskBridge?.StopCalls ?? 0;
     internal Task<PluginTaskOperationResult> FirstStopReturned=>_taskBridge!.FirstStopReturned.Task;
+    internal Task FirstDefinitionCallbackCompletion=>_taskBridge!.FirstDefinitionCallbackCompletion;
     internal string SettingsPath=>Path.Combine(Disk.User,"settings","testing","settings.json");
     private TestingDomainFixture(IControlledTestAdapter? adapter,AsyncTestGate? delegatePrefix,AsyncTestGate? startPersist,AsyncTestGate? firstStopPrefix,AsyncTestGate? delegatePostfix,FigmaFileReader? figmaReader)
     {
@@ -58,10 +59,17 @@ internal sealed class TestingDomainFixture : IAsyncDisposable
     {
         internal int StopCalls;
         internal TaskCompletionSource<PluginTaskOperationResult> FirstStopReturned { get; }=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private readonly TaskCompletionSource<Task> _firstDefinitionCallbackWork=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        // The actual controller definition task, excluding this forwarding wrapper's optional postfix.
+        internal Task FirstDefinitionCallbackCompletion=>_firstDefinitionCallbackWork.Task.Unwrap();
         public void Register(PluginBackgroundTask definition)=>actual.Register(definition with { RunAsync=async execution=>
         {
             if(prefix is not null) await prefix.HoldAsync();
-            try { await definition.RunAsync(execution); }
+            try
+            {
+                var work=definition.RunAsync(execution);_firstDefinitionCallbackWork.TrySetResult(work);
+                await work;
+            }
             finally { if(postfix is not null) await postfix.HoldAsync(); }
         } });
         public IReadOnlyList<PluginBackgroundTaskSnapshot> GetSnapshots()=>actual.GetSnapshots();
