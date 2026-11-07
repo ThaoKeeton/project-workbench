@@ -13,13 +13,20 @@ internal static partial class TestingNativeProbe
 {
     private static async Task<TestRunSnapshot> RunCaseAsync(MainWindow window, FrameworkElement page, string caseId, TestRunState state)
     {
+        var store = Store(window);
         await WaitReadyAsync(page); SelectCase(page, caseId);
-        var before = (await Store(window).ListRunsAsync()).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
+        var before = (await ReadStoreAsync(store, current => current.ListRunsAsync())).Select(r => r.Id).ToHashSet(StringComparer.Ordinal);
         await WaitAsync(() => Task.FromResult(Find<Button>(page, "运行选中测试用例").IsEnabled));
         Invoke(Find<Button>(page, "运行选中测试用例"));
         string? id = null;
-        await WaitAsync(async () => { id = (await Store(window).ListRunsAsync()).SingleOrDefault(r => !before.Contains(r.Id))?.Id; return id is not null; });
-        var run = await WaitRunAsync(window, id!, state);
+        await WaitAsync(async () =>
+        {
+            var observation = await NativeStoreObservation.ReadAsync(store.ListRunsAsync());
+            if (!observation.IsReady) return false;
+            id = observation.Value.SingleOrDefault(r => !before.Contains(r.Id))?.Id;
+            return id is not null;
+        });
+        var run = await WaitRunAsync(window, store, id!, state);
         await WaitReadyAsync(page); return run;
     }
     private static async Task ShowFrameAsync(FrameworkElement page, string runId, long sequence, string text, string frameHash)
@@ -39,6 +46,7 @@ internal static partial class TestingNativeProbe
     }
     private static async Task VerifyHistorySelectionAsync(MainWindow window, FrameworkElement page, TestRunSnapshot a, TestRunSnapshot b)
     {
+        var store = Store(window);
         var aFirst = a.Events.First(e => e.Kind == TestRunEventKind.StepFinished);
         var aLast = a.Events.Last(e => e.Kind == TestRunEventKind.StepFinished);
         var bSame = b.Events.Single(e => e.Sequence == aFirst.Sequence);
@@ -46,7 +54,7 @@ internal static partial class TestingNativeProbe
             && b.Events.All(e => e.Sequence != aLast.Sequence), "Native history assertion requires distinct A/B observations and an A-only event sequence.");
         foreach (var selected in new[] { (Run: a, Event: aLast), (Run: b, Event: bSame), (Run: a, Event: aFirst), (Run: a, Event: aLast) })
         {
-            var evidence = await Store(window).ReadRunEvidenceAsync(selected.Run.Plan.Id, selected.Event.EvidenceIds.Single());
+            var evidence = await ReadStoreAsync(store, current => current.ReadRunEvidenceAsync(selected.Run.Plan.Id, selected.Event.EvidenceIds.Single()));
             await ShowFrameAsync(page, selected.Run.Plan.Id, selected.Event.Sequence, selected.Event.NativePlainTextState!, evidence.Receipt.Sha256);
             var key = (KeyValuePair<string, long>)((ComboBoxItem)Find<ComboBox>(page, "测试执行事件").SelectedItem).Tag;
             Require(key.Key == selected.Run.Plan.Id && key.Value == selected.Event.Sequence
@@ -57,10 +65,11 @@ internal static partial class TestingNativeProbe
     }
     private static async Task VerifySameEventEvidenceRetryAsync(MainWindow window, FrameworkElement page, TestRunSnapshot run, TestRunEvent selected)
     {
+        var store = Store(window);
         var previous = run.Events.Last(e => e.Kind == TestRunEventKind.StepFinished);
         Require(previous.Sequence != selected.Sequence, "Evidence retry assertion needs a different initially loaded event.");
-        var previousFrame = await Store(window).ReadRunEvidenceAsync(run.Plan.Id, previous.EvidenceIds.Single());
-        var expected = await Store(window).ReadRunEvidenceAsync(run.Plan.Id, selected.EvidenceIds.Single());
+        var previousFrame = await ReadStoreAsync(store, current => current.ReadRunEvidenceAsync(run.Plan.Id, previous.EvidenceIds.Single()));
+        var expected = await ReadStoreAsync(store, current => current.ReadRunEvidenceAsync(run.Plan.Id, selected.EvidenceIds.Single()));
         await ShowFrameAsync(page, run.Plan.Id, previous.Sequence, previous.NativePlainTextState!, previousFrame.Receipt.Sha256);
         var identity = new KeyValuePair<string, long>(run.Plan.Id, selected.Sequence);
         var framePath = Path.Combine(window.SmokeRuntime.UserRoot, ".workbench-project", "testing", "runs", run.Plan.Id, "evidence", selected.EvidenceIds.Single(), "frame.bmp");
@@ -93,8 +102,9 @@ internal static partial class TestingNativeProbe
     }
     private static async Task VerifyCancelAsync(MainWindow window, FrameworkElement page, List<string> checks)
     {
+        var store = Store(window);
         await CommandAsync(window, "queue-mapped");
-        var queued = (await Store(window).ListRunsAsync()).Single(r => r.State == TestRunState.Queued);
+        var queued = (await ReadStoreAsync(store, current => current.ListRunsAsync())).Single(r => r.State == TestRunState.Queued);
         var leasePath = Path.Combine(window.SmokeRuntime.UserRoot, ".workbench-project", "testing.lock");
         Task<PluginCommandResult> cancel;
         using (var actualLease = new FileStream(leasePath, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
@@ -111,7 +121,7 @@ internal static partial class TestingNativeProbe
             catch (UserStoreInUseException) { }
         }
         Require((await cancel).Succeeded, "Actual cancel command did not settle.");
-        var cancelled = await WaitRunAsync(window, queued.Id, TestRunState.Cancelled);
+        var cancelled = await WaitRunAsync(window, store, queued.Id, TestRunState.Cancelled);
         Require(cancelled.Events.Any(e => e.Kind == TestRunEventKind.CancelRequested) && cancelled.Events.All(e => e.Kind != TestRunEventKind.StepStarted),
             "Cancel-before-first-step store IO was misreported or fabricated target work.");
         await WaitReadyAsync(page);
@@ -128,20 +138,21 @@ internal static partial class TestingNativeProbe
         await pending.WaitAsync(TimeSpan.FromSeconds(40));
         Require(window.Workspace.CanUseCurrentRuntime && window.Workspace.ActiveProject?.Id != "default", "Native New did not open isolated B.");
         var id = window.Workspace.ActiveProject!.Id;
-        Require((await Store(window).ListSourcesAsync()).Count == 0 && (await Store(window).ListCaseSetsAsync()).Count == 0
-            && (await Store(window).ListRunsAsync()).Count == 0, "Project B inherited testing records.");
+        var storeB = Store(window);
+        Require((await ReadStoreAsync(storeB, current => current.ListSourcesAsync())).Count == 0 && (await ReadStoreAsync(storeB, current => current.ListCaseSetsAsync())).Count == 0
+            && (await ReadStoreAsync(storeB, current => current.ListRunsAsync())).Count == 0, "Project B inherited testing records.");
         await window.WorkspaceActionAsync(async runtime =>
         {
             Require((await runtime.Packages.InstallAsync(PackageZip)).Succeeded, "B independent package install failed.");
             await runtime.Manager.DiscoverAsync();
         });
         await EnableAsync(window);
-        Require((await Store(window).ListSourcesAsync()).Count == 0 && !Directory.Exists(Path.Combine(window.SmokeRuntime.UserRoot, ".workbench-project", "testing")),
+        Require((await ReadStoreAsync(storeB, current => current.ListSourcesAsync())).Count == 0 && !Directory.Exists(Path.Combine(window.SmokeRuntime.UserRoot, ".workbench-project", "testing")),
             "Missing-store reads created/copied testing data.");
         var selector = window.WorkspaceSelector;
         selector.SelectedItem = selector.Items.OfType<ComboBoxItem>().Single(i => (string)i.Tag == "default");
         await WaitAsync(() => Task.FromResult(!window.SmokeActionBusy && window.Workspace.CanUseCurrentRuntime && window.Workspace.ActiveProject?.Id == "default"));
-        Require((await Store(window).ReadCaseSetAsync(setId)).Id == setId, "Switch back lost A records.");
+        Require((await ReadStoreAsync(Store(window), current => current.ReadCaseSetAsync(setId))).Id == setId, "Switch back lost A records.");
         checks.Add("native-project-isolation-empty-read");
         return id;
     }
@@ -151,16 +162,17 @@ internal static partial class TestingNativeProbe
             ?? throw new InvalidOperationException("Testing seed identity is missing.");
         Require(state.SchemaVersion == 1 && state.ProcessId != Environment.ProcessId, "Verify was not a separate actual process.");
         var page = await PageAsync(window); // Enabled intent restores actual independent plugin/context before this page.
-        var interrupted = await Store(window).ReadRunAsync(state.InterruptedSeedId);
+        var store = Store(window);
+        var interrupted = await ReadStoreAsync(store, current => current.ReadRunAsync(state.InterruptedSeedId));
         Require(interrupted.State == TestRunState.Interrupted && interrupted.Events.Last().Kind == TestRunEventKind.Interrupted
             && interrupted.Events.All(e => e.Kind != TestRunEventKind.StepFinished), "New actual context did not mark the labeled synthetic seed Interrupted.");
         checks.Add("separate-process-context-interrupted-synthetic-seed");
-        var set = await Store(window).ReadCaseSetAsync(state.SetId);
+        var set = await ReadStoreAsync(store, current => current.ReadCaseSetAsync(state.SetId));
         Require(set.Name == state.ImmediateLeaveText, "Normal previous Closed lost the last native accepted input.");
         checks.Add("restart-final-native-input-persisted");
-        var original = await Store(window).ReadRunAsync(state.PassedRunId);
+        var original = await ReadStoreAsync(store, current => current.ReadRunAsync(state.PassedRunId));
         var record = original.Events.Single(e => e.Sequence == state.ObservedSequence);
-        var frame = await Store(window).ReadRunEvidenceAsync(state.PassedRunId, state.EvidenceId);
+        var frame = await ReadStoreAsync(store, current => current.ReadRunEvidenceAsync(state.PassedRunId, state.EvidenceId));
         Require(record.NativePlainTextState == state.ObservedText && frame.Receipt.Sha256 == state.FrameSha256, "Reopened real journal/evidence changed exact text or frame bytes.");
         VerifyBmp(frame);
         await CommandAsync(window, "refresh");
@@ -174,9 +186,15 @@ internal static partial class TestingNativeProbe
         Invoke(Find<Button>(page, "重试测试执行"));
         string? retryId = null;
         progress.Admit(RetryOperation.VerifyDiscoverRetry);
-        await WaitAsync(async () => { retryId = (await Store(window).ListRunsAsync()).SingleOrDefault(r => r.ParentRunId == state.InterruptedSeedId)?.Id; return retryId is not null; });
+        await WaitAsync(async () =>
+        {
+            var observation = await NativeStoreObservation.ReadAsync(store.ListRunsAsync());
+            if (!observation.IsReady) return false;
+            retryId = observation.Value.SingleOrDefault(r => r.ParentRunId == state.InterruptedSeedId)?.Id;
+            return retryId is not null;
+        });
         progress.Admit(RetryOperation.VerifyAwaitRetryCompletion);
-        var retry = await WaitRunAsync(window, retryId!, TestRunState.Completed);
+        var retry = await WaitRunAsync(window, store, retryId!, TestRunState.Completed);
         progress.Admit(RetryOperation.VerifyValidateFrozenRetry);
         Require(retry.Plan.Id != state.InterruptedSeedId && retry.Plan.SessionId != interrupted.Plan.SessionId
             && retry.Plan.CaseRevision == state.FrozenRevision

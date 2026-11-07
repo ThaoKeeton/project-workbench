@@ -125,17 +125,31 @@ internal static partial class TestingNativeProbe
     private static async Task<TestCaseSetSnapshot> CurrentSetAsync(MainWindow window, FrameworkElement page)
     {
         var item = (ComboBoxItem)Find<ComboBox>(page, "测试用例集").SelectedItem;
-        return await Store(window).ReadCaseSetAsync((string)item.Tag);
+        var setId = (string)item.Tag;
+        return await ReadStoreAsync(Store(window), store => store.ReadCaseSetAsync(setId));
+    }
+    private static async Task<T> ReadStoreAsync<T>(ProjectTestStore store, Func<ProjectTestStore, Task<T>> read)
+    {
+        NativeStoreObservation.Result<T> observation = default;
+        await WaitAsync(async () =>
+        {
+            observation = await NativeStoreObservation.ReadAsync(read(store));
+            return observation.IsReady;
+        });
+        return observation.Value;
     }
     private static async Task WaitReadyAsync(FrameworkElement page)
         => await WaitAsync(() => Task.FromResult(Find<TextBox>(page, "测试用例集名称").IsEnabled));
-    private static async Task<TestRunSnapshot> WaitRunAsync(MainWindow window, string id, TestRunState expected)
+    private static async Task<TestRunSnapshot> WaitRunAsync(MainWindow window, ProjectTestStore store, string id, TestRunState expected)
     {
+        var manager = window.SmokeManager;
         TestRunSnapshot? current = null;
         await WaitAsync(async () =>
         {
-            current = await Store(window).ReadRunAsync(id);
-            return current.State == expected && window.SmokeManager.GetBackgroundTaskSnapshots(Id).All(t => t.State is not (PluginBackgroundTaskState.Running or PluginBackgroundTaskState.Stopping));
+            var observation = await NativeStoreObservation.ReadAsync(store.ReadRunAsync(id));
+            if (!observation.IsReady) return false;
+            current = observation.Value;
+            return current.State == expected && manager.GetBackgroundTaskSnapshots(Id).All(t => t.State is not (PluginBackgroundTaskState.Running or PluginBackgroundTaskState.Stopping));
         });
         Require(current!.State == expected, "Committed virtual run state differed."); return current;
     }

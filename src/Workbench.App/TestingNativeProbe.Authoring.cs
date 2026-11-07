@@ -16,21 +16,34 @@ internal static partial class TestingNativeProbe
         var page = await EnableAsync(window);
         Require(page.IsLoaded && page.XamlRoot is not null && window.WorkspaceMenu.Items.Count == 1
             && window.WorkspaceSelector.Visibility != Visibility.Visible, "Default same-window UI was not clean and attached.");
+        var store = Store(window);
         checks.Add("independent-zip-native-page");
         Invoke(Find<Button>(page, "导入打包需求示例"));
-        await WaitAsync(async () => (await Store(window).ListSourcesAsync()).Count == 1 && Find<Button>(page, "导入打包 Figma 示例").IsEnabled);
-        Invoke(Find<Button>(page, "导入打包 Figma 示例"));
-        await WaitAsync(async () => (await Store(window).ListSourcesAsync()).Count == 2 && Find<Button>(page, "生成测试用例").IsEnabled);
-        foreach (var source in await Store(window).ListSourcesAsync())
+        await WaitAsync(async () =>
         {
-            var actual = await Store(window).ReadSourceAsync(source.Id);
+            var observation = await NativeStoreObservation.ReadAsync(store.ListSourcesAsync());
+            return observation.IsReady && observation.Value.Count == 1 && Find<Button>(page, "导入打包 Figma 示例").IsEnabled;
+        });
+        Invoke(Find<Button>(page, "导入打包 Figma 示例"));
+        await WaitAsync(async () =>
+        {
+            var observation = await NativeStoreObservation.ReadAsync(store.ListSourcesAsync());
+            return observation.IsReady && observation.Value.Count == 2 && Find<Button>(page, "生成测试用例").IsEnabled;
+        });
+        foreach (var source in await ReadStoreAsync(store, current => current.ListSourcesAsync()))
+        {
+            var actual = await ReadStoreAsync(store, current => current.ReadSourceAsync(source.Id));
             var name = source.Kind == TestSourceKind.Requirements ? "requirements.synthetic.json" : "figma.synthetic.json";
             var packagedBytes = await File.ReadAllBytesAsync(Path.Combine(installed.PackagePath, "Fixtures", name));
             Require(actual.OriginalBytes.SequenceEqual(packagedBytes), "Import did not retain actual packaged file bytes.");
         }
         checks.Add("packaged-requirements-figma-io");
         Invoke(Find<Button>(page, "生成测试用例"));
-        await WaitAsync(async () => (await Store(window).ListCaseSetsAsync()).Count == 1 && Find<TextBox>(page, "测试用例集名称").IsEnabled);
+        await WaitAsync(async () =>
+        {
+            var observation = await NativeStoreObservation.ReadAsync(store.ListCaseSetsAsync());
+            return observation.IsReady && observation.Value.Count == 1 && Find<TextBox>(page, "测试用例集名称").IsEnabled;
+        });
         var set = await CurrentSetAsync(window, page);
         Require(set.Cases.Any(c => c.Steps.Any(s => s.Action is null)) && set.Cases.Any(c => c.Steps.All(s => s.Action is not null)), "Generation lost manual or explicit mapped cases.");
         checks.Add("traceable-manual-mapped-generation");
@@ -73,7 +86,7 @@ internal static partial class TestingNativeProbe
         Require(observed.NativePlainTextState is not null && observed.NativePlainTextState.Contains("🧪", StringComparison.Ordinal)
             && observed.NativePlainTextState.Contains('\n') && observed.NativePlainTextState != passCase.Steps[0].Action!.Value,
             "Committed actual observed state was replaced by planned action input or truncated.");
-        var frame = await Store(window).ReadRunEvidenceAsync(passed.Plan.Id, observed.EvidenceIds.Single());
+        var frame = await ReadStoreAsync(store, current => current.ReadRunEvidenceAsync(passed.Plan.Id, observed.EvidenceIds.Single()));
         VerifyBmp(frame);
         await ShowFrameAsync(page, passed.Plan.Id, observed.Sequence, observed.NativePlainTextState!, frame.Receipt.Sha256);
         checks.Add("positive-actual-journal-bmp-native-decoder");
@@ -104,6 +117,7 @@ internal static partial class TestingNativeProbe
     }
     private static async Task VerifySaveFailureAsync(MainWindow window, FrameworkElement page, TestCaseSetSnapshot set, List<string> checks)
     {
+        var store = Store(window);
         await WaitReadyAsync(page);
         var path = Path.Combine(window.SmokeRuntime.UserRoot, ".workbench-project", "testing", "cases", set.Id + ".json");
         var original = await File.ReadAllBytesAsync(path);
@@ -124,11 +138,12 @@ internal static partial class TestingNativeProbe
         editor.Text = accepted + " corrected";
         var corrected = editor.Text;
         await CommandAsync(window, "export-local-csv");
-        Require((await Store(window).ReadCaseSetAsync(set.Id)).Name == corrected, "Same native editor correction did not reach storage.");
+        Require((await ReadStoreAsync(store, current => current.ReadCaseSetAsync(set.Id))).Name == corrected, "Same native editor correction did not reach storage.");
         checks.Add("actual-file-share-save-failure-close-correction");
     }
     private static async Task VerifyConflictAsync(MainWindow window, FrameworkElement page, List<string> checks)
     {
+        var store = Store(window);
         await WaitReadyAsync(page);
         var set = await CurrentSetAsync(window, page);
         var external = await Store(window).UpdateCaseSetAsync(Id, set.Id, new("Synthetic external revision", set.Cases), set.Revision);
@@ -139,12 +154,16 @@ internal static partial class TestingNativeProbe
         await WaitAsync(() => Task.FromResult(Find<TextBlock>(page, "测试自动保存状态").Text.Contains("RevisionConflict", StringComparison.Ordinal)));
         var afterConflict = await File.ReadAllBytesAsync(path);
         Require(editor.Text == dirty && externalBytes.SequenceEqual(afterConflict), "Conflict discarded dirty input or overwrote external bytes.");
-        var count = (await Store(window).ListCaseSetsAsync()).Count;
+        var count = (await ReadStoreAsync(store, current => current.ListCaseSetsAsync())).Count;
         Invoke(Find<Button>(page, "保留测试草稿并重新加载"));
-        await WaitAsync(async () => (await Store(window).ListCaseSetsAsync()).Count == count + 1 && editor.Text == external.Name && editor.IsEnabled);
-        var preserved = (await Store(window).ListCaseSetsAsync()).Single(s => s.Name == dirty);
+        await WaitAsync(async () =>
+        {
+            var observation = await NativeStoreObservation.ReadAsync(store.ListCaseSetsAsync());
+            return observation.IsReady && observation.Value.Count == count + 1 && editor.Text == external.Name && editor.IsEnabled;
+        });
+        var preserved = (await ReadStoreAsync(store, current => current.ListCaseSetsAsync())).Single(s => s.Name == dirty);
         var afterRecovery = await File.ReadAllBytesAsync(path);
-        Require((await Store(window).ReadCaseSetAsync(preserved.Id)).Name == dirty && externalBytes.SequenceEqual(afterRecovery), "Conditional copy-as-new changed the original or failed to preserve exact input.");
+        Require((await ReadStoreAsync(store, current => current.ReadCaseSetAsync(preserved.Id))).Name == dirty && externalBytes.SequenceEqual(afterRecovery), "Conditional copy-as-new changed the original or failed to preserve exact input.");
         checks.Add("conflict-preserve-copy-reload-bytes");
     }
 }
