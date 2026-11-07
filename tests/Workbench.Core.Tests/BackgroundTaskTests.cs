@@ -1,4 +1,3 @@
-using System.Runtime.ExceptionServices;
 using System.Text.Json;
 using Workbench.Core;
 using Workbench.Sdk;
@@ -281,13 +280,16 @@ public sealed class BackgroundTaskTests
     [Fact]
     public async Task Late_registration_is_rejected_for_both_optional_services()
     {
-        using var disk = Package();
-        await using var manager = Manager(disk);
-        await EnableAsync(manager);
-        Assert.False((await manager.ExecuteCommandAsync(Id, "late-task")).Succeeded);
-        Assert.False((await manager.ExecuteCommandAsync(Id, "late-secret")).Succeeded);
-        Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
-        Assert.Equal(2, manager.GetSecretDefinitions(Id).Count);
+        var disk = Package();
+        var manager = Manager(disk);
+        await RuntimeTest.WithCleanupAsync([manager], async () =>
+        {
+            await EnableAsync(manager);
+            Assert.False((await manager.ExecuteCommandAsync(Id, "late-task")).Succeeded);
+            Assert.False((await manager.ExecuteCommandAsync(Id, "late-secret")).Succeeded);
+            Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+            Assert.Equal(2, manager.GetSecretDefinitions(Id).Count);
+        }, disk);
     }
 
     [Fact]
@@ -541,16 +543,8 @@ public sealed class BackgroundTaskTests
         finally { await RuntimeTest.DisposeAsync(manager); }
     }
 
-    private static async Task WithRuntimeCleanupAsync(PluginManager manager, Func<Task> body)
-    {
-        var bodyFailure = await Record.ExceptionAsync(body);
-        // A bounded Stop may retain ownership. Retry the same Stop through the
-        // existing test cleanup contract, without replacing a body assertion.
-        var cleanupFailure = await Record.ExceptionAsync(() => RuntimeTest.DisposeAsync(manager));
-        if (bodyFailure is not null && cleanupFailure is not null) throw new AggregateException(bodyFailure, cleanupFailure);
-        if (bodyFailure is not null) ExceptionDispatchInfo.Capture(bodyFailure).Throw();
-        if (cleanupFailure is not null) ExceptionDispatchInfo.Capture(cleanupFailure).Throw();
-    }
+    private static Task WithRuntimeCleanupAsync(PluginManager manager, Func<Task> body)
+        => RuntimeTest.WithCleanupAsync([manager], body);
 
     private static async Task<(bool Enabled, string? Fingerprint)> ReadApprovalAsync(TestDirectory disk)
     {
@@ -564,63 +558,67 @@ public sealed class BackgroundTaskTests
     [InlineData(true)]
     public async Task Incomplete_package_revocation_retries_before_fresh_approval(bool blockApprovalFile)
     {
-        using var disk = Package();
-        await using (var first = Manager(disk))
+        var disk = Package();
+        List<PluginManager> managers = [];
+        await RuntimeTest.WithCleanupAsync(managers, RunAsync, disk);
+        async Task RunAsync()
         {
+            var first = Manager(disk);
+            managers.Add(first);
             await EnableAsync(first);
             await first.StartBackgroundTaskAsync(Id, "monitor");
             await RuntimeTest.WaitAsync(async () => await first.GetSettings(Id).GetAsync("jobRuns", 0) == 1);
             await first.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", true);
-        }
-        await File.WriteAllTextAsync(Path.Combine(disk.Plugins, Id, "pending-version.txt"), "synthetic changed package");
-        var writer = new ControlledRuntimeStateWriter();
-        writer.HoldNextWrite();
-        writer.ReleaseFirstWrite.TrySetResult();
-        var manager = new PluginManager(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User },
-            new WindowsSecretProtector(), new PluginRuntimeState(disk.User, writer.WriteAsync));
-        var blockedPath = Path.Combine(disk.User, blockApprovalFile ? "plugin-state.json" : "background-tasks.json");
-        var backup = Path.Combine(disk.User, "revocation-backup.json");
-        var failureCode = blockApprovalFile ? PluginDiagnosticCode.StatePersistenceFailed : PluginDiagnosticCode.RuntimeStatePersistenceFailed;
-        var discovery = manager.DiscoverAsync();
-        try
-        {
-            await writer.ClearWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
-            File.Move(blockedPath, backup);
-            Directory.CreateDirectory(blockedPath); // Real atomic replacement must fail.
-            writer.ReleaseClearWrite.TrySetResult();
-            await discovery;
-            Assert.Contains(Assert.Single(manager.Plugins).Diagnostics, diagnostic => diagnostic.Code == failureCode);
-            await manager.DiscoverAsync(); // The files are unchanged, but revocation is still pending.
-            Assert.Equal(2, Assert.Single(manager.Plugins).Diagnostics.Count(diagnostic => diagnostic.Code == failureCode));
-
-            Assert.False((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
-            Assert.False(Assert.Single(manager.Plugins).IsTrusted);
-            Assert.False(Assert.Single(manager.Plugins).IsLoaded);
-            if (!blockApprovalFile)
-                Assert.Null((await ReadApprovalAsync(disk)).Fingerprint); // No F2 grant before the consent clear succeeds.
-
-            Directory.Delete(blockedPath);
-            File.Move(backup, blockedPath);
-            Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
-            var task = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
-            Assert.False(task.ResumeOnStartup);
-            Assert.False(task.DesiredRunning);
-            Assert.Equal(1, await manager.GetSettings(Id).GetAsync("jobRuns", 0));
-            var approval = await ReadApprovalAsync(disk);
-            Assert.True(approval.Enabled);
-            Assert.NotNull(approval.Fingerprint);
-            await manager.DiscoverAsync();
-            Assert.Equal(approval, await ReadApprovalAsync(disk));
-            Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
-        }
-        finally
-        {
+            await RuntimeTest.DisposeAsync(first);
+            await File.WriteAllTextAsync(Path.Combine(disk.Plugins, Id, "pending-version.txt"), "synthetic changed package");
+            var writer = new ControlledRuntimeStateWriter();
+            writer.HoldNextWrite();
             writer.ReleaseFirstWrite.TrySetResult();
-            writer.ReleaseClearWrite.TrySetResult();
-            await discovery;
-            if (Directory.Exists(blockedPath)) Directory.Delete(blockedPath);
-            if (File.Exists(backup)) File.Move(backup, blockedPath, overwrite: true);
-            await RuntimeTest.DisposeAsync(manager);
+            var manager = new PluginManager(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User },
+                new WindowsSecretProtector(), new PluginRuntimeState(disk.User, writer.WriteAsync));
+            managers.Add(manager);
+            var blockedPath = Path.Combine(disk.User, blockApprovalFile ? "plugin-state.json" : "background-tasks.json");
+            var backup = Path.Combine(disk.User, "revocation-backup.json");
+            var failureCode = blockApprovalFile ? PluginDiagnosticCode.StatePersistenceFailed : PluginDiagnosticCode.RuntimeStatePersistenceFailed;
+            var discovery = manager.DiscoverAsync();
+            await RuntimeTest.WithCleanupAsync([], async () =>
+            {
+                await writer.ClearWriteEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+                File.Move(blockedPath, backup);
+                Directory.CreateDirectory(blockedPath); // Real atomic replacement must fail.
+                writer.ReleaseClearWrite.TrySetResult();
+                await discovery;
+                Assert.Contains(Assert.Single(manager.Plugins).Diagnostics, diagnostic => diagnostic.Code == failureCode);
+                await manager.DiscoverAsync(); // The files are unchanged, but revocation is still pending.
+                Assert.Equal(2, Assert.Single(manager.Plugins).Diagnostics.Count(diagnostic => diagnostic.Code == failureCode));
+
+                Assert.False((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+                Assert.False(Assert.Single(manager.Plugins).IsTrusted);
+                Assert.False(Assert.Single(manager.Plugins).IsLoaded);
+                if (!blockApprovalFile)
+                    Assert.Null((await ReadApprovalAsync(disk)).Fingerprint); // No F2 grant before the consent clear succeeds.
+
+                Directory.Delete(blockedPath);
+                File.Move(backup, blockedPath);
+                Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+                var task = Assert.Single(manager.GetBackgroundTaskSnapshots(Id));
+                Assert.False(task.ResumeOnStartup);
+                Assert.False(task.DesiredRunning);
+                Assert.Equal(1, await manager.GetSettings(Id).GetAsync("jobRuns", 0));
+                var approval = await ReadApprovalAsync(disk);
+                Assert.True(approval.Enabled);
+                Assert.NotNull(approval.Fingerprint);
+                await manager.DiscoverAsync();
+                Assert.Equal(approval, await ReadApprovalAsync(disk));
+                Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
+            }, beforeCleanup: async () =>
+            {
+                writer.ReleaseFirstWrite.TrySetResult();
+                writer.ReleaseClearWrite.TrySetResult();
+                await discovery;
+                if (Directory.Exists(blockedPath)) Directory.Delete(blockedPath);
+                if (File.Exists(backup)) File.Move(backup, blockedPath, overwrite: true);
+            });
         }
     }
 

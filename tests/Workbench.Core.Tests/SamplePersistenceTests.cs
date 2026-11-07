@@ -36,8 +36,15 @@ public sealed class SamplePersistenceTests
         Directory.CreateDirectory(path);
         var buffer = new SampleTextBuffer("initial", text => SampleTextBuffer.WriteFileAsync(path, text));
         buffer.Set("retained after failed preparation");
-        await Assert.ThrowsAnyAsync<IOException>(() => buffer.SaveAsync());
+        // File.Move over a directory reports Win32 access-denied on Windows; Unix reports IO.
+        // Both are the real obstruction, not a product change to normalize exception semantics.
+        if (OperatingSystem.IsWindows())
+            await Assert.ThrowsAsync<UnauthorizedAccessException>(() => buffer.SaveAsync());
+        else
+            await Assert.ThrowsAnyAsync<IOException>(() => buffer.SaveAsync());
         Assert.Equal("retained after failed preparation", buffer.Text);
+        Assert.True(Directory.Exists(path));
+        Assert.Empty(Directory.EnumerateFiles(disk.Root, ".*.tmp"));
         Directory.Delete(path);
         await buffer.SaveAsync();
         Assert.Equal("retained after failed preparation", await File.ReadAllTextAsync(path));

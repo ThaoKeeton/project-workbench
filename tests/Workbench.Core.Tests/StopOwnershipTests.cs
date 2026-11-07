@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using Workbench.Core;
 using Workbench.Sdk;
 using Xunit;
@@ -297,6 +298,26 @@ public sealed class StopOwnershipTests(ITestOutputHelper output)
 
 internal static class RuntimeTest
 {
+    internal static async Task WithCleanupAsync(IReadOnlyList<PluginManager> managers, Func<Task> body,
+        TestDirectory? ownedDirectory = null, Func<Task>? beforeCleanup = null)
+    {
+        List<Exception> failures = [];
+        if (await Record.ExceptionAsync(body) is { } bodyFailure) failures.Add(bodyFailure);
+        if (beforeCleanup is not null && await Record.ExceptionAsync(beforeCleanup) is { } releaseFailure) failures.Add(releaseFailure);
+        // A finite Dispose may report a retained Stop. Join that same actor before touching its
+        // directory, and preserve body/release/retirement/IO failures instead of masking them.
+        foreach (var manager in managers.Reverse().Distinct())
+            if (await Record.ExceptionAsync(() => DisposeAsync(manager)) is { } cleanupFailure) failures.Add(cleanupFailure);
+        if (ownedDirectory is not null)
+        {
+            if (managers.Any(manager => manager.HasPendingStops))
+                failures.Add(new InvalidOperationException($"RuntimeCleanupPending: known work still owns '{ownedDirectory.Root}'; the directory was retained."));
+            else if (Record.Exception(ownedDirectory.Dispose) is { } directoryFailure) failures.Add(directoryFailure);
+        }
+        if (failures.Count > 1) throw new AggregateException(failures);
+        if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+    }
+
     internal static async Task DisposeAsync(PluginManager manager)
     {
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
