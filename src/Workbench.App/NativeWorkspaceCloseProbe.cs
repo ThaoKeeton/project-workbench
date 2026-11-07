@@ -9,7 +9,7 @@ using static Workbench.App.NativeManagementProbe;
 
 namespace Workbench.App;
 
-/// <summary>Actual WM_CLOSE regressions for the native caller, including its busy branches.
+/// <summary>Actual native close/disposal regressions, including WM_CLOSE while the caller is busy.
 /// These run only in the shipping-EXE workspace seed probe with known synthetic child roots.</summary>
 internal static class NativeWorkspaceCloseProbe
 {
@@ -116,6 +116,78 @@ internal static class NativeWorkspaceCloseProbe
         await closed.WaitAsync(TimeSpan.FromSeconds(15));
         await window.InitializeAsync(); // A later launch continuation must honor the retained close intent.
         Require(FactoryCalls(local) == 0 && !Directory.Exists(root), "Close before publication later started a project runtime or touched its root.");
+    }
+
+    internal static async Task VerifyActualDisposeCorrectionAsync(RunOptions options)
+    {
+        var fixture = await OpenAsync(options, "close-actual-dispose", "workspace-normal");
+        var window = fixture.Window;
+        var data = Path.Combine(fixture.TargetRoot, "data", Id);
+        var obstruction = Path.Combine(fixture.TargetRoot, ".workbench-project", "context.json");
+        const string original = "Synthetic bounded draft before failed actual Dispose";
+        const string correction = "Synthetic correction through the actual recovery TextBox";
+        try
+        {
+            window.WorkspaceSelector.SelectedItem = window.WorkspaceSelector.Items.OfType<ComboBoxItem>()
+                .Single(item => (string)item.Tag == fixture.TargetId);
+            await WaitAsync(() => Task.FromResult(!window.SmokeActionBusy && window.Workspace.CanUseCurrentRuntime
+                && window.Workspace.ActiveProject?.Id == fixture.TargetId));
+            await window.WorkspaceActionAsync(async runtime =>
+            {
+                Require((await runtime.Manager.DisableAsync(Id)).Succeeded, "Actual-dispose fixture disable failed.");
+                await runtime.Manager.GetSettings(Id).SetAsync("mode", "hold-stop");
+                Require((await runtime.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded, "Actual-dispose fixture enable failed.");
+            });
+            var manager = window.SmokeManager;
+            var generation = window.Workspace.RuntimeGeneration;
+            var document = window.Workspace.Document!;
+            var scope = window.Workspace.Scope!;
+            // A real bounded IO obstruction, not a huge TextBox or an injected failure result.
+            Directory.CreateDirectory(obstruction);
+            var page = await window.SmokeNavigateAsync("context");
+            Find<TextBox>(page, "项目上下文编辑器").Text = original;
+            await WaitAsync(() => Task.FromResult(document.ErrorCode == "UnsafePath" && !document.HasPendingWork));
+            var failed = false;
+            // This existing native probe entry invokes shipping StopAsync -> actual Dispose,
+            // deliberately bypassing normal preparation to exercise retained cleanup recovery.
+            try { await window.SmokeStopAsync().WaitAsync(TimeSpan.FromSeconds(40)); }
+            catch (ProjectWorkspaceStoreException error) when (error.ErrorCode == "UnsafePath") { failed = true; }
+            Require(failed && manager.HasPendingStops && !document.IsEditable && !window.Workspace.CanUseCurrentRuntime
+                && !fixture.Closed.IsCompleted, "Failed actual Dispose did not retain pending cleanup and editor ownership.");
+            AssertHeld(fixture.Root); AssertHeld(fixture.TargetRoot);
+            await File.WriteAllTextAsync(Path.Combine(data, "release-stop"), "synthetic");
+            // A second owned actual Dispose pass confirms the same Stop has settled. The same
+            // IO obstruction still fails document retirement, exposing document-only recovery.
+            Require(!await window.SmokeCloseAttemptAsync().WaitAsync(TimeSpan.FromSeconds(40))
+                && !manager.HasPendingStops && document.IsEditable && !window.Workspace.CanUseCurrentRuntime
+                && ReferenceEquals(document, window.Workspace.Document) && ReferenceEquals(manager, window.SmokeManager)
+                && generation == window.Workspace.RuntimeGeneration && FactoryCalls(fixture.Options) == 2,
+                "Actual cleanup did not open only the retained document while keeping runtime actions sealed.");
+            AssertHeld(fixture.Root); AssertHeld(fixture.TargetRoot);
+            var rejected = false;
+            try { await window.Workspace.RunCurrentAsync((_, _, _) => Task.CompletedTask); }
+            catch (ProjectWorkspaceStoreException) { rejected = true; }
+            Require(rejected, "Failed actual Dispose reopened plugin action admission.");
+            var editor = Find<TextBox>(window.WorkspaceRoot, "项目上下文编辑器");
+            await WaitAsync(() => Task.FromResult(editor.IsLoaded && editor.IsEnabled && editor.XamlRoot is not null));
+            Require(editor.Text == original, "The actual recovery TextBox lost its retained dirty buffer.");
+            Directory.Delete(obstruction);
+            editor.Text = correction;
+            Require(document.Text == correction && !window.Workspace.CanUseCurrentRuntime,
+                "The real recovery TextBox silently dropped document-only correction.");
+            Invoke(window.SmokeCloseRetryButton ?? throw new InvalidOperationException("Actual-dispose recovery lost close retry."));
+            editor.Text = "Synthetic fresh edit refused after actual Dispose retry seal";
+            await fixture.Closed.WaitAsync(TimeSpan.FromSeconds(20));
+            Require((await scope.Documents.ReadAsync()).Text == correction && FactoryCalls(fixture.Options) == 2,
+                "Actual Dispose retry lost the exact native correction or restarted a runtime.");
+            AssertReleased(fixture);
+        }
+        finally
+        {
+            if (Directory.Exists(obstruction)) Directory.Delete(obstruction);
+            await File.WriteAllTextAsync(Path.Combine(data, "release-stop"), "synthetic");
+            await RetireAsync(fixture);
+        }
     }
 
     private static async Task<Fixture> OpenAsync(RunOptions options, string name, string mode)

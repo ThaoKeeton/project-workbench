@@ -10,7 +10,8 @@ function Seed([string]$name) {
        actualWindowClosed = $true; rootsRetired = $true; checks = @('legacy-adoption', 'single-native-ui', 'multi-native-ui',
        'project-isolation', 'draft-retention', 'old-pending-refusal', 'candidate-pending-refusal', 'archive-retention', 'native-reopen',
        'busy-switch-native-close', 'busy-action-native-close', 'before-initialize-native-close',
-       'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction') } |
+       'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction',
+       'actual-dispose-context-correction') } |
         ConvertTo-Json -Depth 8 | Set-Content $path
     return $path
 }
@@ -40,7 +41,8 @@ try {
     $data | ConvertTo-Json -Depth 8 | Set-Content $partial
     Reject { Complete $partial } $partial
     foreach ($required in @('busy-switch-native-close', 'busy-action-native-close', 'before-initialize-native-close',
-        'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction')) {
+        'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction',
+        'actual-dispose-context-correction')) {
         $path = Seed $required
         $data = Get-Content $path -Raw | ConvertFrom-Json -AsHashtable
         $data.checks = @($data.checks | Where-Object { $_ -cne $required })
@@ -50,6 +52,6 @@ try {
     $valid = Seed valid; Complete $valid
     $result = Get-Content $valid -Raw | ConvertFrom-Json
     if (-not $result.succeeded -or -not $result.hasExited -or -not $result.rootLeaseAvailable -or $result.exitCode -ne 0 -or $result.processId -ne 101) { throw 'Actual runner evidence was not persisted.' }
-    Write-Output 'Workspace native process report regressions: 19 passed (synthetic metadata only)'
+    Write-Output 'Workspace native process report regressions: 20 passed (synthetic metadata only)'
 }
 finally { Remove-Item $temporary -Recurse -Force }

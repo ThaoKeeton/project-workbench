@@ -23,7 +23,8 @@ function Complete-WorkspaceProbeReport {
         @('legacy-adoption', 'single-native-ui', 'multi-native-ui', 'project-isolation', 'draft-retention',
           'old-pending-refusal', 'candidate-pending-refusal', 'archive-retention', 'native-reopen',
           'busy-switch-native-close', 'busy-action-native-close', 'before-initialize-native-close',
-          'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction')
+          'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction',
+          'actual-dispose-context-correction')
     } else { @('process-restore', 'restored-native-ui', 'restored-project-isolation') }
     if ($null -eq $reason) {
         foreach ($check in $required) {

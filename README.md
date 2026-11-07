@@ -73,7 +73,7 @@ GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbenc
 
 当前主程序及两个 SDK 预览版本为 0.3.0，程序集/API/运行服务身份保持 1；可选项目服务 1 的契约和已知工作保留规则见 [项目服务](docs/project-services.md)。真实旧 SDK 0.2 业务包与固定来源不变；新的 Windows 原生/独立业务兼容结果需由当前提交的 CI 单独验证。
 
-新增 workspace probe 只使用 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/` 的合成数据，以两个实际 EXE 进程运行 seed15/verify3；检查原生项目控件、上下文/主题/设置/空凭据分离、草稿、失败重试、归档、窗口重开与进程恢复。新增检查在实际上下文控件接受文字后立即切换/关闭，不等异步事件或自动保存，并在同一插件实例的私有编辑器内修正已结束的准备失败后显式重试。成功需同时具备实际 WinUI Closed、OS exit 0 和退出后重新取得目录锁。阶段报告只完成一次，保留原生 PID、首个拒绝原因和实际租约结果。产物为 `project-workspace-probes`。此脚本需要源码构建生成的独立测试夹具，普通下载的主程序目录不包含夹具；它不是下载用户的操作步骤。当前新增源码仍需本轮 Windows CI 的实际报告，参考编译不等于原生执行。Windows 11 人工、真实旧独立 GUI、更高版本迁移和真实 provider 验收继续延期，不要求用户现在参与测试。
+新增 workspace probe 只使用 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/` 的合成数据，以两个实际 EXE 进程运行 seed16/verify3；检查原生项目控件、上下文/主题/设置/空凭据分离、草稿、失败重试、归档、窗口重开与进程恢复。新增检查在实际上下文控件接受文字后立即切换/关闭，不等异步事件或自动保存，并在同一插件实例的私有编辑器内修正已结束的准备失败后显式重试。成功需同时具备实际 WinUI Closed、OS exit 0 和退出后重新取得目录锁。阶段报告只完成一次，保留原生 PID、首个拒绝原因和实际租约结果。产物为 `project-workspace-probes`。此脚本需要源码构建生成的独立测试夹具，普通下载的主程序目录不包含夹具；它不是下载用户的操作步骤。当前新增源码仍需本轮 Windows CI 的实际报告，参考编译不等于原生执行。Windows 11 人工、真实旧独立 GUI、更高版本迁移和真实 provider 验收继续延期，不要求用户现在参与测试。
 
 独立 SDK 导出：`pwsh ./scripts/export-sdk.ps1`。CI artifact `workbench-sdk-0.3.0` 含固定版本源码、两个 NuGet 包及提交/文件哈希清单；接入步骤见 [插件契约与独立构建](docs/integrations/plugin-contract-v1.md)。
 

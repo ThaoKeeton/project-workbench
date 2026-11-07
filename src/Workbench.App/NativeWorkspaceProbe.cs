@@ -204,6 +204,8 @@ internal static class NativeWorkspaceProbe
         Record("busy-action-native-close");
         await NativeWorkspaceCloseProbe.VerifyBeforeInitializeAsync(options);
         Record("before-initialize-native-close");
+        await NativeWorkspaceCloseProbe.VerifyActualDisposeCorrectionAsync(options);
+        Record("actual-dispose-context-correction");
 
         // Actual cooperative old hook remains owned across its finite wait; a third target cannot bypass it.
         await ConfigureFixtureAsync(window, "workspace-hold-prepare");

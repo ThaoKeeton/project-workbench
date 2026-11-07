@@ -291,8 +291,10 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         await using var coordinator = fixture.Coordinator(root => Assert.Equal(0, oldGate.Live));
         Assert.True((await coordinator.InitializeAsync()).Succeeded);
         Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
-        coordinator.Document!.Edit("latest before stop");
+        var boundDocument = coordinator.Document!;
+        Assert.True(coordinator.TryEditCurrentDocument(boundDocument, "latest before stop"));
         var change = coordinator.SwitchAsync(target.Id);
+        Assert.False(coordinator.TryEditCurrentDocument(boundDocument, "refused after switch seal"));
         await Task.WhenAny(change, oldGate.StopStarted.Task).WaitAsync(TimeSpan.FromSeconds(5));
         Assert.True(oldGate.StopStarted.Task.IsCompleted);
         Assert.Equal("latest before stop", (await coordinator.Scope!.Documents.ReadAsync()).Text);
@@ -300,6 +302,7 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         Assert.Equal(1, fixture.FactoryCalls);
         oldGate.StopRelease.TrySetResult();
         Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.False(coordinator.TryEditCurrentDocument(boundDocument, "refused from detached old editor"));
         Assert.Equal(0, oldGate.Live);
         Assert.Equal(2, fixture.FactoryCalls);
     }
@@ -321,6 +324,7 @@ public sealed class WorkspaceRuntimeCoordinatorTests
             Assert.True(pending.Pending);
             Assert.False(coordinator.CanUseCurrentRuntime);
             Assert.Throws<ProjectWorkspaceStoreException>(() => { _ = coordinator.RunCurrentAsync((_, _, _) => Task.CompletedTask); });
+            Assert.False(coordinator.TryEditCurrentDocument(coordinator.Document!, "refused while known work is pending"));
             Assert.Equal(1, fixture.FactoryCalls);
             Assert.False((await coordinator.SwitchAsync("default")).Succeeded);
             Assert.Equal("default", coordinator.ActiveProject!.Id);
@@ -684,14 +688,16 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         Assert.Equal(0, gate.Live);
         Assert.True(editor.IsEditable);
         Assert.False(coordinator.CanUseCurrentRuntime);
+        Assert.Throws<ProjectWorkspaceStoreException>(() => { _ = coordinator.RunCurrentAsync((_, _, _) => Task.CompletedTask); });
         Assert.True(editor.IsDirty);
         Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(scope.UserRoot); });
         Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
         using var held = new FileStream(Path.Combine(scope.UserRoot, ".workbench-project", "context.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None);
-        editor.Edit("corrected secondary text");
+        Assert.True(coordinator.TryEditCurrentDocument(editor, "corrected secondary text"));
         var retry = coordinator.DisposeAsync().AsTask();
         Assert.False(retry.IsCompleted);
         Assert.False(editor.IsEditable);
+        Assert.False(coordinator.TryEditCurrentDocument(editor, "refused after actual retry seal"));
         Assert.Throws<InvalidOperationException>(() => editor.Edit("after retry barrier"));
         Assert.Throws<InvalidOperationException>(() => { _ = editor.FlushAsync(); });
         Assert.Throws<InvalidOperationException>(() => { _ = editor.PreserveConflictAndReloadAsync(); });

@@ -89,6 +89,9 @@ without activating a queued target or reviving a retired manager. After a failed
 actual Dispose, only the coordinator's confirmed cleanup state can reopen the
 document for correction; retry close joins it via Dispose again. The direct
 isolated legacy probes retain their distinct Stop-only persistence coverage.
+The native editor's bound-document capture uses that document-only authority
+while runtime/plugin actions stay sealed. It still refuses a detached document,
+pending cleanup and a fresh edit after a transition or close-retry seal.
 
 Native close also admits this seal while a shell action, switch, dialog or startup
 is still pending. It retains close intent before coordinator publication, and

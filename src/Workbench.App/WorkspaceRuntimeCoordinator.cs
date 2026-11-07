@@ -114,6 +114,19 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
     private bool CanAdmitCurrent => !_closing && !_preparingClose && _current is { Stopped: false, Runtime: not null }
         && _attempt is null && _retiring is null && _transitionRequests == 0;
 
+    /// <summary>Captures a bound host editor under the transition/close gate. Confirmed failed-close
+    /// document recovery does not reopen runtime or plugin action admission.</summary>
+    public bool TryEditCurrentDocument(ProjectDocumentSession document, string text)
+    {
+        lock (_gate)
+        {
+            if (_current is not { } current || !ReferenceEquals(current.Document, document)
+                || !(CanAdmitCurrent || CanRecoverDocumentAfterFailedClose()) || !document.IsEditable) return false;
+            document.Edit(text);
+            return true;
+        }
+    }
+
     public Task<ProjectSwitchResult> InitializeAsync(CancellationToken ct = default) => TransitionAsync(async () =>
     {
         if (_attempt is not null) return await ContinueAsync(ct).ConfigureAwait(false);

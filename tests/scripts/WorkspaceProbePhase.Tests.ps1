@@ -49,7 +49,8 @@ try {
     $seedChecks = @('legacy-adoption', 'single-native-ui', 'multi-native-ui', 'project-isolation', 'draft-retention',
         'old-pending-refusal', 'candidate-pending-refusal', 'archive-retention', 'native-reopen',
         'busy-switch-native-close', 'busy-action-native-close', 'before-initialize-native-close',
-        'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction')
+        'immediate-context-switch', 'immediate-context-close', 'settled-switch-private-correction',
+        'actual-dispose-context-correction')
     $directory = Join-Path $temporary 'observation'
     New-Item $directory -ItemType Directory | Out-Null
     $observationPath = Join-Path $directory 'seed.json'
@@ -103,7 +104,7 @@ try {
             -not $result.hasExited -or -not $result.rootLeaseAvailable -or $result.exitCode -ne 0) { throw 'Accepted phase lost actual runner evidence.' }
     }
     if ($launches.Count -ne 2 -or $launches[0] -cne 'seed' -or $launches[1] -cne 'verify' -or
-        $completed.Count -ne 2 -or $completed[0].phase -cne 'seed' -or $completed[0].processId -ne 303 -or $completed[0].checks -ne 15 -or
+        $completed.Count -ne 2 -or $completed[0].phase -cne 'seed' -or $completed[0].processId -ne 303 -or $completed[0].checks -ne 16 -or
         $completed[1].phase -cne 'verify' -or $completed[1].processId -ne 404 -or $completed[1].checks -ne 3) { throw 'Accepted phases did not retain succession.' }
     Write-Output 'Workspace production phase regressions: 5 passed (synthetic metadata only)'
 }

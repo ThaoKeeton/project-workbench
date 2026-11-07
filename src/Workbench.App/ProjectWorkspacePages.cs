@@ -235,8 +235,8 @@ internal sealed partial class MainWindow
         {
             // TextChanging is synchronous and sees the new Text. Capture only the plain model:
             // a following close/switch can seal admission before asynchronous TextChanged runs.
-            if (replacing || !document.IsEditable || _closing || _workspace?.CanUseCurrentRuntime != true) return;
-            try { document.Edit(editor.Text); }
+            if (replacing || _closing) return;
+            try { _workspace?.TryEditCurrentDocument(document, editor.Text); }
             catch (Exception) { captureFailed = true; }
         };
         editor.TextChanged += (_, _) => Refresh();
