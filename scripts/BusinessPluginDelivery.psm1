@@ -141,6 +141,8 @@ function Get-DeliveryHostVersion([string]$ProductVersion, [string]$FileVersion, 
     $parsed = $null
     if (-not [Version]::TryParse($semanticVersion, [ref]$parsed) -or $parsed.Major -gt 65535 -or $parsed.Minor -gt 65535 -or $parsed.Build -gt 65535 -or
         $FileVersion -cne "$semanticVersion.0" -or $AssemblyVersion -cne '1.0.0.0') { throw 'host_metadata: Incoherent host product/file version or unsupported assembly identity.' }
+    # Both production export and verification require the frozen packages' minimum host.
+    if ($parsed -lt [Version]'0.2.0') { throw 'host_metadata: Host version must meet the frozen production minimum 0.2.0.' }
     return [ordered]@{ productVersion = $ProductVersion; fileVersion = $FileVersion; assemblyVersion = $AssemblyVersion; sourceCommit = $sourceCommit }
 }
 function Assert-DeliveryCurrentSource($HostStamp, $PackagingStamp) {
