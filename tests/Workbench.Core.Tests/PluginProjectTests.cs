@@ -267,11 +267,11 @@ public sealed class PluginProjectTests(ITestOutputHelper output)
             // Other is a fresh, independently held participant in this new cohort. Normal IO
             // speed cannot establish that a newly admitted cohort finishes in one 100ms wait.
             var fresh = await manager.PrepareProjectLeaveAsync();
-            await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(otherData, "prepare-started"))));
             output.WriteLine(Facts("New cohort", fresh));
             Assert.False(fresh.Succeeded, Facts("New cohort", fresh));
             Assert.True(fresh.HasPendingWork, Facts("New cohort", fresh));
             Assert.Equal("ProjectPreparationPending", fresh.ErrorCode);
+            await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(otherData, "prepare-started"))));
             Assert.True(manager.HasPendingProjectWork);
             Assert.Equal(1, await otherSettings.GetAsync("prepareCalls", 0));
             await File.WriteAllTextAsync(releaseOther, "release new cohort");
