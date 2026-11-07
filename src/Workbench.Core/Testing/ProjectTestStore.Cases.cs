@@ -127,7 +127,7 @@ public sealed partial class ProjectTestStore
                 var oldStep = before.Steps[s];
                 var step = after.Steps[s];
                 var textChanged = oldStep.Instruction != step.Instruction || oldStep.Expected != step.Expected;
-                if (oldStep.Id != step.Id || !oldStep.Traces.SequenceEqual(step.Traces) || (textChanged ? step.Action is not null : step.Action != oldStep.Action))
+                if (oldStep.Id != step.Id || !oldStep.Traces.SequenceEqual(step.Traces) || (textChanged ? step.Action is not null : step.Action is not null && step.Action != oldStep.Action))
                     throw TestValidation.Error("InvalidCaseSet");
             }
         }

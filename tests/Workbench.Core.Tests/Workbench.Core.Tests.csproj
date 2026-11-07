@@ -22,6 +22,7 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="../../src/Workbench.Core/Workbench.Core.csproj" />
+    <ProjectReference Include="../../plugins/Workbench.Testing.Domain/Workbench.Testing.Domain.csproj" />
     <ProjectReference Include="../Workbench.TestDependency/Workbench.TestDependency.csproj" />
     <ProjectReference Include="../Workbench.TestPlugin/Workbench.TestPlugin.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../Workbench.DeploymentProbe/Workbench.DeploymentProbe.csproj" ReferenceOutputAssembly="false" />

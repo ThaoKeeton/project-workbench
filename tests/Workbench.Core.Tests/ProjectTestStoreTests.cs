@@ -80,6 +80,20 @@ public sealed class ProjectTestStoreTests
     }
 
     [Fact]
+    public async Task Mapping_can_only_downgrade_to_manual_without_text_changes_and_cannot_be_reintroduced()
+    {
+        using var disk=new TestDirectory();var store=new ProjectTestStore(disk.User,"default");
+        var source=await store.PublishSourceAsync(Owner,Source());
+        var set=await store.CreateCaseSetAsync(Owner,Draft(source));
+        var manual=new TestCaseSetContent(set.Name,[set.Cases[0] with { Steps=set.Cases[0].Steps.Select(s=>s with { Action=null }).ToArray() }]);
+        var downgraded=await store.UpdateCaseSetAsync(Owner,set.Id,manual,set.Revision);
+        Assert.Null(downgraded.Cases[0].Steps[0].Action);
+        await Code("InvalidCaseSet",()=>store.UpdateCaseSetAsync(Owner,set.Id,new(set.Name,set.Cases),downgraded.Revision));
+        var substituted=new TestCaseSetContent(set.Name,[set.Cases[0] with { Steps=[set.Cases[0].Steps[0] with { Action=new(TestActionKind.SetText,"task.title","different") }] }]);
+        await Code("InvalidCaseSet",()=>store.UpdateCaseSetAsync(Owner,set.Id,substituted,downgraded.Revision));
+    }
+
+    [Fact]
     public async Task ExactTraceReopensAndMetadataPreservesBindingWhileTextRequiresManual()
     {
         using var disk = new TestDirectory();

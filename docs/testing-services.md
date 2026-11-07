@@ -387,10 +387,15 @@ leave a durable nonterminal run for next-generation owner initialization.
 
 Portable tests exercise the real captured facade, package-loaded fixture,
 manager/HostRuntime/root leases, held caller prefixes, filesystem initialization
-gates, defensive copies and safe lifecycle errors. Remaining gates include real domain
-parsers/generator/CSV/virtual adapter/runner and autosave, native detail rendering
-from committed state, independent plugin packaging and installation in actual
-WinUI, and the full Windows workflow/PRI artifact checks. Existing native,
+gates, defensive copies and safe lifecycle errors. The portable SDK-only `Workbench.Testing.Domain` now implements and consumes the local providers, rule generator, CSV exporter, coalesced CAS editor, typed virtual adapter, passive renderer and supervised controller. Task4 tests compose the real Core registration/facade/supervisor before Commit and use actual filesystem gates and write obstructions. The entry-facing controller and immutable models live under `plugins/Workbench.Testing.Domain`. Remaining gates include native detail rendering from committed state, independent plugin packaging and installation in actual WinUI, and the full Windows workflow/PRI artifact checks. Existing native,
 management/theme/restart/workspace/business/process checks remain required;
 portable Core tests do not substitute for them. Windows Server automation stays
 separate from deferred Windows 11 human/picker/IME/DPI/accessibility/device checks.
+
+### Monotonic mapping removal
+
+Case updates may remove an existing action to manual even when instruction and expected text equal the stored text. This preserves permanent invalidation when a changed or invalid edit is restored before autosave. Metadata-only editor operations still preserve the binding. A non-null action may never be introduced or substituted by an update, and changed step text still requires null. Owner, revision CAS, IDs, order and exact traces remain enforced.
+
+### Portable CSV trace rows
+
+The domain exporter writes UTF8 with BOM, CRLF records, quoted fields and doubled internal quotes. Each step emits the complete stored case-trace list, followed by its stored step-trace list, preserving each list's order and duplicates. `traceScope` is `case` or `step`; `traceOrdinal` is one-based within that scope. Repeating case references for another step is deliberate. `caseId`/`stepId`/`traceScope`/`traceOrdinal` identify each trace entry. Every text data cell receives one apostrophe, including IDs, revisions, locators, scope and empty text. Only the validated numeric `stepOrdinal`, zero-based `criterionIndex` and positive `traceOrdinal` omit it. This changes exported cell values for spreadsheet viewing; stored text and trace arrays remain exact. It does not promise safety after arbitrary spreadsheet resaves.
