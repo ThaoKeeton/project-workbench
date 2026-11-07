@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
+using Workbench.App;
 using Workbench.Core;
 using Workbench.Sdk;
 using Xunit;
@@ -298,24 +299,79 @@ public sealed class StopOwnershipTests(ITestOutputHelper output)
 
 internal static class RuntimeTest
 {
-    internal static async Task WithCleanupAsync(IReadOnlyList<PluginManager> managers, Func<Task> body,
+    internal static Task WithCleanupAsync(IReadOnlyList<PluginManager> managers, Func<Task> body,
         TestDirectory? ownedDirectory = null, Func<Task>? beforeCleanup = null)
+        => WithCleanupCoreAsync(managers, body, ownedDirectory, beforeCleanup, null);
+
+    internal static Task WithCleanupAsync(HostRuntime runtime, Func<Task> body,
+        TestDirectory? ownedDirectory = null, Func<Task>? beforeCleanup = null)
+        => WithCleanupCoreAsync([runtime.Manager], body, ownedDirectory, beforeCleanup, () => runtime.DisposeAsync().AsTask());
+
+    private static async Task WithCleanupCoreAsync(IReadOnlyList<PluginManager> managers, Func<Task> body,
+        TestDirectory? ownedDirectory, Func<Task>? beforeCleanup, Func<Task>? retireRoot)
     {
         List<Exception> failures = [];
         if (await Record.ExceptionAsync(body) is { } bodyFailure) failures.Add(bodyFailure);
         if (beforeCleanup is not null && await Record.ExceptionAsync(beforeCleanup) is { } releaseFailure) failures.Add(releaseFailure);
         // A finite Dispose may report a retained Stop. Join that same actor before touching its
         // directory, and preserve body/release/retirement/IO failures instead of masking them.
+        var retired = true;
         foreach (var manager in managers.Reverse().Distinct())
-            if (await Record.ExceptionAsync(() => DisposeAsync(manager)) is { } cleanupFailure) failures.Add(cleanupFailure);
+            if (await Record.ExceptionAsync(() => DisposeAsync(manager)) is { } cleanupFailure)
+            {
+                failures.Add(cleanupFailure);
+                retired = false;
+            }
+        // Manager retirement alone does not release a HostRuntime's user-root lease.
+        if (retired && retireRoot is not null && await Record.ExceptionAsync(retireRoot) is { } rootFailure)
+        {
+            failures.Add(rootFailure);
+            retired = false;
+        }
         if (ownedDirectory is not null)
         {
-            if (managers.Any(manager => manager.HasPendingStops))
-                failures.Add(new InvalidOperationException($"RuntimeCleanupPending: known work still owns '{ownedDirectory.Root}'; the directory was retained."));
+            if (!retired || managers.Any(manager => manager.HasPendingStops))
+                failures.Add(new InvalidOperationException($"RuntimeCleanupPending: retirement did not complete for '{ownedDirectory.Root}'; the directory was retained."));
             else if (Record.Exception(ownedDirectory.Dispose) is { } directoryFailure) failures.Add(directoryFailure);
         }
         if (failures.Count > 1) throw new AggregateException(failures);
         if (failures.Count == 1) ExceptionDispatchInfo.Capture(failures[0]).Throw();
+    }
+
+    internal static async Task<ProjectPreparationResult> CompletePreparationAsync(PluginManager manager,
+        string? pluginId = null, ITestOutputHelper? output = null)
+        => await CompletePreparationAsync(manager, await manager.PrepareProjectLeaveAsync(pluginId), pluginId, output);
+
+    internal static async Task<ProjectPreparationResult> CompletePreparationAsync(PluginManager manager,
+        ProjectPreparationResult result, string? pluginId = null, ITestOutputHelper? output = null)
+    {
+        Trace("Initial", result);
+        if (result.ErrorCode == "ProjectPreparationPending")
+        {
+            Assert.False(result.Succeeded);
+            await WaitAsync(() => Task.FromResult(!manager.HasPendingProjectWork));
+            // Consume the SAME retained filter/participants once; polling Prepare would start
+            // another cycle after acknowledgement and could invoke the hook again.
+            result = await manager.PrepareProjectLeaveAsync(pluginId);
+            Trace("Acknowledged", result);
+        }
+        return result;
+
+        void Trace(string stage, ProjectPreparationResult value) => output?.WriteLine(
+            $"{stage} preparation {pluginId ?? "(all)"}: Succeeded={value.Succeeded}, HasPendingWork={value.HasPendingWork}, ErrorCode={value.ErrorCode ?? "(none)"}, ManagerPending={manager.HasPendingProjectWork}");
+    }
+
+    internal static async Task<PluginOperationResult> CompleteDisableAsync(PluginManager manager, string pluginId,
+        ITestOutputHelper? output = null)
+    {
+        var result = await manager.DisableAsync(pluginId);
+        output?.WriteLine($"Initial disable {pluginId}: Succeeded={result.Succeeded}, PendingStops={manager.HasPendingStops}");
+        if (!result.Succeeded && manager.HasPendingStops)
+        {
+            await WaitAsync(() => Task.FromResult(!manager.HasPendingStops));
+            result = await manager.DisableAsync(pluginId);
+        }
+        return result;
     }
 
     internal static async Task DisposeAsync(PluginManager manager)

@@ -14,27 +14,30 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
     [Fact]
     public async Task Package_loaded_optional_context_awaits_testing_before_commit_and_prepares_while_open()
     {
-        using var disk = Package();
+        var disk = Package();
         var scope = new ProjectRuntimeScope("33333333333333333333333333333333", "First", disk.User);
-        await using var runtime = Runtime(disk, scope);
-        await runtime.InitializeAsync();
-        Assert.True((await runtime.Manager.EnableAsync(Owner, confirmTrust: true)).Succeeded);
-        var testing = Testing(runtime.Manager);
-        Assert.False(Directory.Exists(StoreRoot(disk.User)));
-        Assert.True((await runtime.Manager.ExecuteCommandAsync(Owner, "publish")).Succeeded);
-        scope.Rename("Renamed first");
-        var prepared = await runtime.Manager.PrepareProjectLeaveAsync(Owner);
-        Assert.True(prepared.Succeeded);
-        Assert.False(prepared.HasPendingWork);
-        Assert.False(runtime.Manager.HasPendingProjectWork);
-        Assert.Equal(2, (await testing.ListSourcesAsync()).Count);
-        Assert.All(await testing.ListSourcesAsync(), source => { Assert.Equal(scope.Id, source.ProjectId); Assert.Equal(Owner, source.ProducerPluginId); });
-        Assert.True((await runtime.Manager.DisableAsync(Owner)).Succeeded);
-        Assert.Equal("TestingContextClosed", await runtime.Manager.GetSettings(Owner).GetAsync("stopTestingCode", ""));
-        await Code("TestingContextClosed", () => testing.ListSourcesAsync());
-        Assert.Equal(2, (await new ProjectTestStore(disk.User, scope.Id).ListSourcesAsync()).Count);
-        Assert.Equal(1, await runtime.Manager.GetSettings(Owner).GetAsync("stopCalls", 0));
-        output.WriteLine("Actual package Initialize awaited Testing before contributions; before-leave wrote while open; terminal Stop rejected fresh write, hook was not rerun.");
+        var runtime = Runtime(disk, scope);
+        await RuntimeTest.WithCleanupAsync(runtime, async () =>
+        {
+            await runtime.InitializeAsync();
+            Assert.True((await runtime.Manager.EnableAsync(Owner, confirmTrust: true)).Succeeded);
+            var testing = Testing(runtime.Manager);
+            Assert.False(Directory.Exists(StoreRoot(disk.User)));
+            Assert.True((await runtime.Manager.ExecuteCommandAsync(Owner, "publish")).Succeeded);
+            scope.Rename("Renamed first");
+            var prepared = await RuntimeTest.CompletePreparationAsync(runtime.Manager, Owner, output);
+            Assert.True(prepared.Succeeded);
+            Assert.False(prepared.HasPendingWork);
+            Assert.False(runtime.Manager.HasPendingProjectWork);
+            Assert.Equal(2, (await testing.ListSourcesAsync()).Count);
+            Assert.All(await testing.ListSourcesAsync(), source => { Assert.Equal(scope.Id, source.ProjectId); Assert.Equal(Owner, source.ProducerPluginId); });
+            Assert.True((await RuntimeTest.CompleteDisableAsync(runtime.Manager, Owner, output)).Succeeded);
+            Assert.Equal("TestingContextClosed", await runtime.Manager.GetSettings(Owner).GetAsync("stopTestingCode", ""));
+            await Code("TestingContextClosed", () => testing.ListSourcesAsync());
+            Assert.Equal(2, (await new ProjectTestStore(disk.User, scope.Id).ListSourcesAsync()).Count);
+            Assert.Equal(1, await runtime.Manager.GetSettings(Owner).GetAsync("stopCalls", 0));
+            output.WriteLine("Actual package Initialize awaited Testing before contributions; before-leave wrote while open; terminal Stop rejected fresh write, hook was not rerun.");
+        }, disk);
     }
 
     [Theory]
@@ -43,12 +46,12 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
     public async Task Actual_manager_root_lease_outlives_held_capture_including_failed_initialization(bool failInit)
     {
         using var workers = new CallbackWorkerHeadroom();
-        using var disk = Package();
+        var disk = Package();
         var runtime = Runtime(disk);
         var manager = runtime.Manager;
         Task<TestSourceSnapshot>? call = null;
         using var prefix = new HeldList<TestSourceItem>([new("x", "Item", "", ["Criterion"], null)]);
-        try
+        await RuntimeTest.WithCleanupAsync(runtime, async () =>
         {
             await runtime.InitializeAsync();
             await manager.GetSettings(Owner).SetAsync("testingMode", "lazy");
@@ -79,25 +82,26 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
             await runtime.DisposeAsync();
             await using var next = new HostRuntime(new() { PluginsRoot = disk.Plugins, UserRoot = disk.User });
             output.WriteLine($"Actual manager/root: initFailed={failInit}, held Count prefix retained original stop/root; released and joined, new HostRuntime acquired root.");
-        }
-        finally
+        }, disk, beforeCleanup: async () =>
         {
             prefix.Release.TrySetResult();
-            if (call is not null) _ = await Record.ExceptionAsync(() => call);
-            await RuntimeTest.DisposeAsync(manager);
-            await runtime.DisposeAsync();
-        }
+            if (call is not null)
+            {
+                if (failInit) await Code("TestStoreCorrupt", () => call);
+                else await call;
+            }
+        });
     }
 
     [Fact]
     public async Task Actual_store_IO_is_joined_by_preparation_and_terminal_stop_before_root_release()
     {
-        using var disk = Package();
+        var disk = Package();
         var runtime = Runtime(disk);
         var manager = runtime.Manager;
         FileStream? lease = null;
         Task<TestSourceSnapshot>? call = null;
-        try
+        await RuntimeTest.WithCleanupAsync(runtime, async () =>
         {
             await runtime.InitializeAsync();
             Assert.True((await manager.EnableAsync(Owner, confirmTrust: true)).Succeeded);
@@ -108,6 +112,7 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
             var prepared = await manager.PrepareProjectLeaveAsync(Owner);
             Assert.False(prepared.Succeeded);
             Assert.True(prepared.HasPendingWork);
+            Assert.Equal("ProjectPreparationPending", prepared.ErrorCode);
             Assert.True(manager.HasPendingProjectWork);
             await Assert.ThrowsAsync<PluginShutdownException>(() => runtime.DisposeAsync().AsTask());
             Assert.False(call.IsCompleted);
@@ -121,29 +126,26 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
             using var nextOwner = HostRuntime.AcquireLease(disk.User);
             Assert.Contains(await new ProjectTestStore(disk.User, "default").ListSourcesAsync(), source => source.Title == "admitted IO");
             output.WriteLine("Actual testing.lock gate retained admitted store IO through preparation timeout and terminal stop; original call joined before lease reacquisition.");
-        }
-        finally
+        }, disk, beforeCleanup: async () =>
         {
             lease?.Dispose();
-            if (call is not null) _ = await Record.ExceptionAsync(() => call);
-            await RuntimeTest.DisposeAsync(manager);
-            await runtime.DisposeAsync();
-        }
+            if (call is not null) await call;
+        });
     }
 
     [Fact]
     public async Task Canceled_first_caller_cannot_detach_actual_initialization_or_release_manager_root()
     {
-        using var disk = Package();
-        await Seed(new(disk.User, "default"));
+        var disk = Package();
         var runtime = Runtime(disk);
         var manager = runtime.Manager;
         using var cancel = new CancellationTokenSource();
         FileStream? lease = null;
         Task<IReadOnlyList<TestSourceSummary>>? first = null;
         Task<IReadOnlyList<TestRunSummary>>? second = null;
-        try
+        await RuntimeTest.WithCleanupAsync(runtime, async () =>
         {
+            await Seed(new(disk.User, "default"));
             await runtime.InitializeAsync();
             await manager.GetSettings(Owner).SetAsync("testingMode", "lazy");
             Assert.True((await manager.EnableAsync(Owner, confirmTrust: true)).Succeeded);
@@ -165,31 +167,31 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
             await runtime.DisposeAsync();
             using var nextOwner = HostRuntime.AcquireLease(disk.User);
             output.WriteLine("Actual canceled caller + shared initialization/testing.lock: both calls and original stop retained root until filesystem gate released.");
-        }
-        finally
+        }, disk, beforeCleanup: async () =>
         {
             lease?.Dispose();
-            if (first is not null) _ = await Record.ExceptionAsync(() => first);
-            if (second is not null) _ = await Record.ExceptionAsync(() => second);
-            await RuntimeTest.DisposeAsync(manager);
-            await runtime.DisposeAsync();
-        }
+            cancel.Cancel();
+            if (first is not null) await Assert.ThrowsAnyAsync<OperationCanceledException>(() => first);
+            if (second is not null) await second;
+        });
     }
 
     [Fact]
     public async Task Package_initialization_waits_for_actual_filesystem_barrier_and_preserves_foreign_live_run()
     {
-        using var disk = Package();
-        var store = new ProjectTestStore(disk.User, "default");
-        var set = await Seed(store);
-        var old = await store.CreateRunAsync(Owner, set.Id, set.Revision, [set.Cases[0].Id]);
-        var foreign = await store.CreateRunAsync(Other, set.Id, set.Revision, [set.Cases[0].Id]);
-        await using var runtime = Runtime(disk);
-        await runtime.InitializeAsync();
-        using var lease = HoldLease(disk.User);
-        var enable = runtime.Manager.EnableAsync(Owner, confirmTrust: true);
-        try
+        var disk = Package();
+        var runtime = Runtime(disk);
+        FileStream? lease = null;
+        Task<PluginOperationResult>? enable = null;
+        await RuntimeTest.WithCleanupAsync(runtime, async () =>
         {
+            var store = new ProjectTestStore(disk.User, "default");
+            var set = await Seed(store);
+            var old = await store.CreateRunAsync(Owner, set.Id, set.Revision, [set.Cases[0].Id]);
+            var foreign = await store.CreateRunAsync(Other, set.Id, set.Revision, [set.Cases[0].Id]);
+            await runtime.InitializeAsync();
+            lease = HoldLease(disk.User);
+            enable = runtime.Manager.EnableAsync(Owner, confirmTrust: true);
             await RuntimeTest.WaitAsync(() => runtime.Manager.GetSettings(Owner).GetAsync("testingInitializeEntered", false));
             // The entry flag precedes the Testing call; wait for its actual retained admission.
             await RuntimeTest.WaitAsync(() => Task.FromResult(runtime.Manager.HasPendingProjectWork));
@@ -202,8 +204,11 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
             Assert.Equal(TestRunState.Interrupted, (await testing.ReadRunAsync(old.Plan.Id)).State);
             Assert.Equal(TestRunState.Queued, (await testing.ReadRunAsync(foreign.Plan.Id)).State);
             Assert.Equal(1, (await testing.ReadRunAsync(old.Plan.Id)).Sequence);
-        }
-        finally { lease.Dispose(); _ = await enable; }
+        }, disk, beforeCleanup: async () =>
+        {
+            lease?.Dispose();
+            if (enable is not null) Assert.True((await enable).Succeeded);
+        });
     }
 
     [Theory]
@@ -211,19 +216,25 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
     [InlineData("prepare-spoof", "TestingFailed")]
     public async Task Testing_errors_use_fixed_safe_codes_in_preparation_commands_and_host_boundary(string mode, string expected)
     {
-        using var disk = Package();
-        await using var runtime = Runtime(disk);
-        await runtime.InitializeAsync();
-        await runtime.Manager.GetSettings(Owner).SetAsync("testingMode", mode);
-        Assert.True((await runtime.Manager.EnableAsync(Owner, confirmTrust: true)).Succeeded);
-        Assert.Equal(expected, (await runtime.Manager.PrepareProjectLeaveAsync(Owner)).ErrorCode);
-        Assert.Contains("TestStoreCorrupt", (await runtime.Manager.ExecuteCommandAsync(Owner, "testing-error")).Message);
-        Assert.Contains("TestingFailed", (await runtime.Manager.ExecuteCommandAsync(Owner, "testing-spoof")).Message);
-        Assert.Equal("TestStoreCorrupt", HostFailure.ProjectCode(new PluginTestingException("TestStoreCorrupt")));
-        Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new PluginTestingException("synthetic-private-provider-text")));
-        Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new PluginTestingException("InvalidContext")));
-        Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new PluginProjectContextException("TestStoreCorrupt")));
-        Assert.DoesNotContain(runtime.Manager.Plugins.SelectMany(p => p.Diagnostics), d => d.Message.Contains("synthetic-private-provider-text", StringComparison.Ordinal));
+        var disk = Package();
+        var runtime = Runtime(disk);
+        await RuntimeTest.WithCleanupAsync(runtime, async () =>
+        {
+            await runtime.InitializeAsync();
+            await runtime.Manager.GetSettings(Owner).SetAsync("testingMode", mode);
+            Assert.True((await runtime.Manager.EnableAsync(Owner, confirmTrust: true)).Succeeded);
+            var prepared = await RuntimeTest.CompletePreparationAsync(runtime.Manager, Owner, output);
+            Assert.False(prepared.Succeeded);
+            Assert.False(prepared.HasPendingWork);
+            Assert.Equal(expected, prepared.ErrorCode);
+            Assert.Contains("TestStoreCorrupt", (await runtime.Manager.ExecuteCommandAsync(Owner, "testing-error")).Message);
+            Assert.Contains("TestingFailed", (await runtime.Manager.ExecuteCommandAsync(Owner, "testing-spoof")).Message);
+            Assert.Equal("TestStoreCorrupt", HostFailure.ProjectCode(new PluginTestingException("TestStoreCorrupt")));
+            Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new PluginTestingException("synthetic-private-provider-text")));
+            Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new PluginTestingException("InvalidContext")));
+            Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new PluginProjectContextException("TestStoreCorrupt")));
+            Assert.DoesNotContain(runtime.Manager.Plugins.SelectMany(p => p.Diagnostics), d => d.Message.Contains("synthetic-private-provider-text", StringComparison.Ordinal));
+        }, disk);
     }
 
     [Theory]
@@ -231,20 +242,23 @@ public sealed class PluginTestingLifecycleTests(ITestOutputHelper output)
     [InlineData(true)]
     public async Task Initialization_testing_failure_is_readable_and_never_logs_forged_codes(bool spoof)
     {
-        using var disk = Package();
-        await using var runtime = Runtime(disk);
-        await runtime.InitializeAsync();
-        if (spoof) await runtime.Manager.GetSettings(Owner).SetAsync("testingMode", "initialize-spoof");
-        else
+        var disk = Package();
+        var runtime = Runtime(disk);
+        await RuntimeTest.WithCleanupAsync(runtime, async () =>
         {
-            Directory.CreateDirectory(StoreRoot(disk.User));
-            await File.WriteAllTextAsync(Path.Combine(StoreRoot(disk.User), "store.json"), "invalid synthetic-private-provider-text");
-        }
-        var enabled = await runtime.Manager.EnableAsync(Owner, confirmTrust: true);
-        Assert.False(enabled.Succeeded);
-        Assert.Contains(spoof ? "TestingFailed" : "TestStoreCorrupt", enabled.Message);
-        Assert.DoesNotContain("synthetic-private-provider-text", enabled.Message);
-        Assert.DoesNotContain(runtime.Manager.Plugins.SelectMany(p => p.Diagnostics), d => d.Message.Contains("synthetic-private-provider-text", StringComparison.Ordinal));
+            await runtime.InitializeAsync();
+            if (spoof) await runtime.Manager.GetSettings(Owner).SetAsync("testingMode", "initialize-spoof");
+            else
+            {
+                Directory.CreateDirectory(StoreRoot(disk.User));
+                await File.WriteAllTextAsync(Path.Combine(StoreRoot(disk.User), "store.json"), "invalid synthetic-private-provider-text");
+            }
+            var enabled = await runtime.Manager.EnableAsync(Owner, confirmTrust: true);
+            Assert.False(enabled.Succeeded);
+            Assert.Contains(spoof ? "TestingFailed" : "TestStoreCorrupt", enabled.Message);
+            Assert.DoesNotContain("synthetic-private-provider-text", enabled.Message);
+            Assert.DoesNotContain(runtime.Manager.Plugins.SelectMany(p => p.Diagnostics), d => d.Message.Contains("synthetic-private-provider-text", StringComparison.Ordinal));
+        }, disk);
     }
 
     internal static TestDirectory Package()
