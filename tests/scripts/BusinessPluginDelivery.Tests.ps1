@@ -2,6 +2,8 @@
 param([string]$AppDirectory = (Join-Path (Split-Path (Split-Path $PSScriptRoot -Parent) -Parent) 'artifacts/native/app'))
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+# Keep the entry fixture fixed while the explicit relative-path cases change PowerShell location.
+$AppDirectory = (Resolve-Path -LiteralPath $AppDirectory).ProviderPath
 $repo = Split-Path (Split-Path $PSScriptRoot -Parent) -Parent
 $export = Join-Path $repo 'scripts/export-business-plugins.ps1'
 Import-Module (Join-Path $repo 'scripts/BusinessPluginDelivery.psm1') -Force
