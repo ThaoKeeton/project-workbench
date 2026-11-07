@@ -37,3 +37,11 @@ the native testing plugin, run implementation and host testing context are not
 wired yet. Check for the derived interface; no placeholder service is exposed.
 Existing project-only plugins may keep minimumHostVersion **0.3.0**, runtime-only
 plugins **0.2.0**, and immutable business packages retain their original bytes.
+
+The UI-neutral run-event draft/event `NativePlainTextState` init properties carry
+the actual observed StepFinished state: 1–8192 valid-Unicode UTF-16 units,
+preserved exactly; other event kinds require null. Future schema1 events include
+it in exact stored bytes/hash. Native run detail must read the committed text
+after reopen even when simulated BMP glyphs omit it, without adapter replay or
+substitution of planned input. This declaration-only increment establishes no
+persistence or native rendering result.

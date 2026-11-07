@@ -58,8 +58,18 @@ public enum TestStepOutcome { Passed, Failed }
 public sealed record TestRunPlan(string Id, string SessionId, string ProjectId, string ProducerPluginId, DateTimeOffset CreatedUtc, string? ParentRunId, string CaseSetId, string CaseRevision, IReadOnlyList<TestCase> Cases, string TargetId, string PlanHash);
 public sealed record TestRunSnapshot(TestRunPlan Plan, IReadOnlyList<TestRunEvent> Events, TestRunState State, long Sequence, string HeadHash);
 public sealed record TestRunSummary(string Id, string SessionId, string ProjectId, string ProducerPluginId, DateTimeOffset CreatedUtc, string? ParentRunId, string CaseSetId, string CaseRevision, TestRunState State, long Sequence, string HeadHash);
-public sealed record TestRunEventDraft(TestRunEventKind Kind, string? CaseId = null, string? StepId = null, TestStepOutcome? Outcome = null, string? ErrorCode = null, IReadOnlyList<string>? EvidenceIds = null);
-public sealed record TestRunEvent(long Sequence, string PriorHash, string PlanHash, DateTimeOffset CreatedUtc, TestRunEventKind Kind, string? CaseId, string? StepId, TestStepOutcome? Outcome, string? ErrorCode, IReadOnlyList<string> EvidenceIds, string Hash);
+public sealed record TestRunEventDraft(TestRunEventKind Kind, string? CaseId = null, string? StepId = null, TestStepOutcome? Outcome = null, string? ErrorCode = null, IReadOnlyList<string>? EvidenceIds = null)
+{
+    /// <summary>Actual observed StepFinished state: 1..8192 UTF-16 units of valid Unicode, preserved exactly. Null for every other kind.</summary>
+    /// <remarks>Intended user text, separate from ErrorCode. The schema1 nativePlainTextState field participates in exact stored-event bytes/hash.</remarks>
+    public string? NativePlainTextState { get; init; }
+}
+public sealed record TestRunEvent(long Sequence, string PriorHash, string PlanHash, DateTimeOffset CreatedUtc, TestRunEventKind Kind, string? CaseId, string? StepId, TestStepOutcome? Outcome, string? ErrorCode, IReadOnlyList<string> EvidenceIds, string Hash)
+{
+    /// <summary>Committed observed StepFinished state: 1..8192 UTF-16 units of valid Unicode, preserved exactly. Null for every other kind.</summary>
+    /// <remarks>ReadRun returns this stored text without re-executing the adapter. It participates in exact stored-event bytes/hash.</remarks>
+    public string? NativePlainTextState { get; init; }
+}
 public sealed record TestEvidenceDraft(string MimeType, byte[] Bytes, bool IsSimulated);
 public sealed record TestEvidenceReceipt(string Id, string RunId, string MimeType, long Length, string Sha256, bool IsSimulated);
 public sealed record TestEvidence(TestEvidenceReceipt Receipt, byte[] Bytes);

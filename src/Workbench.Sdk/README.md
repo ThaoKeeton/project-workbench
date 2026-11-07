@@ -36,3 +36,11 @@ the native testing plugin, run implementation and host testing context are not
 wired yet. Check for the derived interface; no placeholder service is exposed.
 Existing project-only plugins may keep minimumHostVersion **0.3.0**, runtime-only
 plugins **0.2.0**, and immutable business packages retain their original bytes.
+
+Run-event draft/event records expose non-positional `NativePlainTextState` init
+properties. A future StepFinished commit requires the adapter's exact observed
+valid-Unicode state (1–8192 UTF-16 units); every other event kind requires null.
+Schema1 hashes the exact stored field bytes, and ReadRun must return that text
+after reopen without adapter replay. User text stays separate from diagnostic
+ErrorCode. Persistence, bound/refusal and reopened native rendering tests remain
+later-task gates; this intermediate SDK does not implement them.

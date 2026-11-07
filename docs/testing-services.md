@@ -25,6 +25,32 @@ removes the first `producerPluginId` parameter used by Core write methods.
 Cancellation does not establish rollback; after an admitted operation settles,
 reread its actual durable state.
 
+## Committed text-state contract for later run implementation
+
+`TestRunEventDraft` and `TestRunEvent` each add the nullable init-only property
+`string? NativePlainTextState`; their positional constructors and deconstruction
+shapes remain unchanged. StepFinished requires the actual
+`TestActionResult.NativePlainTextState`: 1–8192 UTF-16 code units, valid Unicode,
+preserved exactly, including astral characters, CRLF, tabs and whitespace-only
+state. No normalization or truncation applies. Every other event kind requires
+null; an unfinished step has no invented text or result.
+
+The future schema1 event field `nativePlainTextState` participates in the exact
+stored-event bytes and journal hash, within the existing 256 KiB encoded-event
+cap. AppendRunEvent must commit the adapter's observed text, and ReadRun must
+return that committed text after reopen without re-executing the adapter or
+substituting planned action values. This intended user-visible native text is
+separate from allow-listed diagnostic ErrorCode and must not contain raw
+exception messages. It remains readable when the simulated BMP glyph renderer
+cannot reproduce arbitrary Unicode.
+
+This increment declares that path; it implements no run persistence or rendering.
+Task2 must round-trip independently chosen multiline/astral/maximum8192 state
+through append, close and reopen, verify exact text/hash, and refuse invalid
+Unicode, empty/oversized state or non-null state on other kinds without changing
+existing bytes. Task4 must show reopened native detail uses the committed text
+even when the BMP omits those glyphs. These are future gates, not passed results.
+
 ## Implemented source and case behavior
 
 `ProjectTestStore(userRoot, projectId)` captures a normalized project root and
