@@ -6,6 +6,8 @@ Import-Module (Join-Path $PSScriptRoot '../../scripts/TestingPluginDelivery.psm1
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
 Test-TestingPluginDelivery -Directory $Directory -AllowReferenceOnly:$AllowReferenceOnly -RequireCurrentSource:$RequireCurrentSource
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('testing-package-regression-' + [Guid]::NewGuid().ToString('N'))
+$hiddenParent = Join-Path $temp '.hidden-parent'
+$hiddenLink = Join-Path $hiddenParent 'linked-parent'
 function Refuses([scriptblock]$Action, [string]$Expected) {
     try { & $Action | Out-Null }
     catch {
@@ -18,6 +20,28 @@ function Refresh-Sums([string]$Root) {
     @('README.md','provenance.json','workbench-testing-plugin-0.1.0.zip' | ForEach-Object { (Get-FileHash (Join-Path $Root $_) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_ }) | Set-Content (Join-Path $Root 'SHA256SUMS')
 }
 try {
+    $hiddenDelivery = Join-Path $hiddenParent 'delivery'
+    New-Item $hiddenDelivery -ItemType Directory -Force | Out-Null
+    # Dot names are Hidden on Unix; Windows requires the actual filesystem attribute.
+    if ($IsWindows) { [IO.File]::SetAttributes($hiddenParent, [IO.File]::GetAttributes($hiddenParent) -bor [IO.FileAttributes]::Hidden) }
+    $hiddenItem = Get-Item -LiteralPath $hiddenParent -Force
+    if (($hiddenItem.Attributes -band [IO.FileAttributes]::Hidden) -eq 0) { throw 'Hidden-parent regression requires an actually hidden directory.' }
+    Write-Host "Hidden ancestor confirmed: $($hiddenItem.Attributes); explicitly set on Windows: $IsWindows."
+    Copy-Item (Join-Path $Directory '*') $hiddenDelivery -Recurse
+    Test-TestingPluginDelivery -Directory $hiddenDelivery -AllowReferenceOnly:$AllowReferenceOnly
+    Write-Host 'Valid testing delivery accepted beneath the actual hidden ancestor.'
+    Add-Content (Join-Path $hiddenDelivery 'README.md') 'tamper'
+    Refuses { Test-TestingPluginDelivery -Directory $hiddenDelivery -AllowReferenceOnly:$AllowReferenceOnly } 'TestingDeliveryHashMismatch'
+    Copy-Item -LiteralPath (Join-Path $Directory 'README.md') -Destination (Join-Path $hiddenDelivery 'README.md') -Force
+    $linkTarget = Join-Path $temp 'link-target'
+    New-Item $linkTarget -ItemType Directory | Out-Null
+    Copy-Item -LiteralPath $hiddenDelivery -Destination (Join-Path $linkTarget 'delivery') -Recurse
+    if ($IsWindows) { New-Item -Path $hiddenLink -ItemType Junction -Target $linkTarget | Out-Null }
+    else { [IO.Directory]::CreateSymbolicLink($hiddenLink, $linkTarget) | Out-Null }
+    if (((Get-Item -LiteralPath $hiddenLink -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -eq 0) { throw 'Hidden-parent regression requires an actual linked ancestor.' }
+    Refuses { Test-TestingPluginDelivery -Directory (Join-Path $hiddenLink 'delivery') -AllowReferenceOnly:$AllowReferenceOnly } 'TestingDeliveryLinkRefused'
+    Remove-Item -LiteralPath $hiddenLink -Force
+    Remove-Item $temp -Recurse -Force
     New-Item $temp -ItemType Directory | Out-Null
     Copy-Item (Join-Path $Directory '*') $temp -Recurse
     Add-Content (Join-Path $temp 'README.md') 'tamper'
@@ -79,7 +103,10 @@ try {
         $expected = switch ($mutation) { 'extra-sdk' { 'TestingPayloadFileListInvalid' }; 'duplicate-manifest' { 'TestingPayloadFileListInvalid' }; 'changed-entry' { 'TestingPayloadHashMismatch' }; 'wrong-manifest' { 'TestingManifestInvalid' } }
         Refuses { Test-TestingPluginDelivery -Directory $temp -AllowReferenceOnly:$AllowReferenceOnly } $expected
     }
-    Write-Host 'Testing package regressions passed: independently attributed outer checksum, file list, ReferenceOnly, source hash/list/three identity refusals, and four ZIP/payload/manifest refusals.'
+    Write-Host 'Testing package regressions passed: actual hidden-parent acceptance/tamper/link guards, independently attributed outer checksum, file list, ReferenceOnly, source hash/list/three identity refusals, and four ZIP/payload/manifest refusals.'
 
 }
-finally { if (Test-Path $temp) { Remove-Item $temp -Recurse -Force } }
+finally {
+    if (Test-Path -LiteralPath $hiddenLink) { Remove-Item -LiteralPath $hiddenLink -Force }
+    if (Test-Path $temp) { Remove-Item $temp -Recurse -Force }
+}

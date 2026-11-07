@@ -95,7 +95,7 @@ function Test-TestingPluginDelivery {
     $repo = Split-Path $PSScriptRoot -Parent
     $files = @('README.md', 'SHA256SUMS', 'provenance.json', 'workbench-testing-plugin-0.1.0.zip')
     for ($part = [IO.Path]::GetFullPath($Directory); -not [string]::IsNullOrEmpty($part); $part = Split-Path $part -Parent) {
-        if (((Get-Item -LiteralPath $part).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'TestingDeliveryLinkRefused' }
+        if (((Get-Item -LiteralPath $part -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'TestingDeliveryLinkRefused' }
     }
     if (@(Compare-Object $files @(Get-ChildItem -LiteralPath $Directory -Force | ForEach-Object Name) -CaseSensitive).Count -ne 0) { throw 'TestingDeliveryFileListInvalid' }
     foreach ($file in Get-ChildItem -LiteralPath $Directory -Force) { if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'TestingDeliveryLinkRefused' } }
