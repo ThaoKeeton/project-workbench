@@ -35,7 +35,8 @@ internal sealed partial class TestingPage : UserControl
     private Button _retryDraft = null!, _preserveDraft = null!, _run = null!, _cancel = null!, _retryRun = null!;
     private bool _rendering, _active, _busy;
     private long _generation;
-    private string? _caseId, _stepId, _setId, _runId, _eventKey;
+    private string? _caseId, _stepId, _setId, _runId;
+    private readonly NativeEvidenceCache _evidenceCache = new();
     private TestRunSnapshot? _displayedRun;
 
     internal TestingPage(TestingPlugin plugin)

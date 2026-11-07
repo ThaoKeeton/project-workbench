@@ -47,7 +47,11 @@ public sealed class TestingPlugin : IWorkbenchPlugin
         Register("cancel-run", "取消并等待虚拟执行实际结束", async token => { await _controller.CancelAsync(token); });
         Register("retry-selected", "从第一步重试选中的历史执行", async token =>
         { await RetryAsync(_controller.Snapshot.SelectedRun?.Plan.Id ?? throw new PluginTestingException("InvalidRun"), token); });
-        Register("refresh", "刷新已提交的测试记录", async token => { await _controller.RefreshAsync(token); });
+        Register("refresh", "刷新已提交的测试记录", async token =>
+        {
+            await _controller.RefreshAsync(token);
+            foreach (var page in Pages()) await page.NotifyAsync(retryEvidence: true).ConfigureAwait(false);
+        });
     }
     private string[] MappedIds() => (_controller.Snapshot.Draft?.Content.Cases ?? []).Where(c => c.Steps.All(s => s.Action is not null)).Select(c => c.Id).ToArray();
     private void Register(string id, string title, Func<CancellationToken, Task> action) => _context.RegisterCommand(new(id, title,

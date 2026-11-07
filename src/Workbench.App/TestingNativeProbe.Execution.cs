@@ -53,6 +53,33 @@ internal static partial class TestingNativeProbe
                 && Find<TextBlock>(page, "测试执行详情").Text.Contains(selected.Run.Plan.Id, StringComparison.Ordinal),
                 "Native displayed run/event identity did not match exact observed text and decoded receipt.");
         }
+        await VerifySameEventEvidenceRetryAsync(window, page, b, bSame);
+    }
+    private static async Task VerifySameEventEvidenceRetryAsync(MainWindow window, FrameworkElement page, TestRunSnapshot run, TestRunEvent selected)
+    {
+        var previous = run.Events.Last(e => e.Kind == TestRunEventKind.StepFinished);
+        Require(previous.Sequence != selected.Sequence, "Evidence retry assertion needs a different initially loaded event.");
+        var previousFrame = await Store(window).ReadRunEvidenceAsync(run.Plan.Id, previous.EvidenceIds.Single());
+        var expected = await Store(window).ReadRunEvidenceAsync(run.Plan.Id, selected.EvidenceIds.Single());
+        await ShowFrameAsync(page, run.Plan.Id, previous.Sequence, previous.NativePlainTextState!, previousFrame.Receipt.Sha256);
+        var identity = new KeyValuePair<string, long>(run.Plan.Id, selected.Sequence);
+        var framePath = Path.Combine(window.SmokeRuntime.UserRoot, ".workbench-project", "testing", "runs", run.Plan.Id, "evidence", selected.EvidenceIds.Single(), "frame.bmp");
+        using (var obstruction = new FileStream(framePath, FileMode.Open, FileAccess.Read, FileShare.None))
+        {
+            var events = Find<ComboBox>(page, "测试执行事件");
+            events.SelectedItem = events.Items.OfType<ComboBoxItem>().Single(i => i.Tag is KeyValuePair<string, long> key && key.Equals(identity));
+            await WaitAsync(() => Task.FromResult(Find<TextBlock>(page, "测试帧状态").Text.Contains("证据加载失败", StringComparison.Ordinal)
+                && Find<TextBlock>(page, "测试帧状态").Text.Contains("StoreIoFailure", StringComparison.Ordinal)));
+            Require(Find<Image>(page, "SIMULATED 测试帧").Source is null
+                && Find<TextBlock>(page, "测试实际观察文本").Text == selected.NativePlainTextState,
+                "A refused evidence read fabricated a frame or changed its committed observed text.");
+        }
+        await CommandAsync(window, "refresh"); // Existing useful command: retry the SAME failed selection after releasing real IO obstruction.
+        await WaitAsync(() => Task.FromResult(Find<Image>(page, "SIMULATED 测试帧").Source is BitmapImage { PixelWidth: 320, PixelHeight: 180 }
+            && Find<TextBlock>(page, "测试帧状态").Text.Contains(expected.Receipt.Sha256, StringComparison.Ordinal)));
+        var refreshed = (KeyValuePair<string, long>)((ComboBoxItem)Find<ComboBox>(page, "测试执行事件").SelectedItem).Tag;
+        Require(refreshed.Equals(identity) && Find<TextBlock>(page, "测试实际观察文本").Text == selected.NativePlainTextState,
+            "Evidence recovery required a different event or lost its run/sequence/text association.");
     }
     private static void VerifyBmp(TestEvidence evidence)
     {

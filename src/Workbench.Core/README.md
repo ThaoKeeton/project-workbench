@@ -106,5 +106,9 @@ Optional testing services 1 require host 0.4.0. Real registration contexts expos
 All calls join one lazy owner-initialization barrier and remain owned through
 input capture, store work and terminal drain. Normal preparation runs while the
 service is open; terminal Close rejects fresh calls. Source/case/run/evidence
-storage is callable; the independent native testing plugin remains a later stage.
+storage is callable. Core supplies this optional workspace; the independent
+native testing entry and portable domain consume it through the SDK, without a
+built-in host dependency on that plugin. The separate package and shipping-EXE
+probes are implemented; current Windows runtime/PRI/full-CI and downloaded-byte
+acceptance remain separate gates, not established by Linux reference compilation.
 See [testing services](../../docs/testing-services.md).

@@ -10,13 +10,13 @@ namespace Workbench.Testing;
 internal sealed partial class TestingPage
 {
     private void Changed(TestingControllerSnapshot snapshot) => _ = NotifyAsync();
-    internal Task NotifyAsync(bool reopening = false) => _plugin.Owner.InternalAsync(async () =>
+    internal Task NotifyAsync(bool reopening = false, bool retryEvidence = false) => _plugin.Owner.InternalAsync(async () =>
     {
         try
         {
             await DispatchAsync(() =>
             {
-                try { if (_active) Render(reopening); }
+                try { if (_active) Render(reopening, retryEvidence); }
                 catch (Exception error) { ShowError(error); }
                 return Task.CompletedTask;
             });
@@ -40,7 +40,7 @@ internal sealed partial class TestingPage
         })) done.TrySetException(new InvalidOperationException("Native dispatcher unavailable."));
         return done.Task;
     }
-    private void Render(bool reopening = false)
+    private void Render(bool reopening = false, bool retryEvidence = false)
     {
         if (!_active) return;
         var snapshot = Controller.Snapshot; // Always latest; a queued old Changed value must never restore stale text.
@@ -105,7 +105,7 @@ internal sealed partial class TestingPage
             _runDetails.Text = current is null ? "尚未选择执行" : $"SIMULATED {current.State} · run {current.Plan.Id} · 序列 {current.Sequence} · session {current.Plan.SessionId} · 冻结版本 {current.Plan.CaseRevision}\nhead {current.HeadHash}\n错误 {snapshot.ErrorCode ?? "无"}";
             var oldEvent = SelectedEventId();
             long? eventSequence = oldEvent?.RunId == current?.Plan.Id ? oldEvent?.Sequence : null;
-            if (_runId != current?.Plan.Id) { _runId = current?.Plan.Id; eventSequence = null; _eventKey = null; _frame.Source = null; }
+            if (_runId != current?.Plan.Id) { _runId = current?.Plan.Id; eventSequence = null; _evidenceCache.Clear(); _frame.Source = null; }
             _displayedRun = current;
             _events.Items.Clear();
             if (current is not null) foreach (var e in current.Events)
@@ -120,18 +120,18 @@ internal sealed partial class TestingPage
             }
         }
         finally { _rendering = false; }
-        SelectEvidence(current, current?.Plan.Id, SelectedEventId());
+        SelectEvidence(current, current?.Plan.Id, SelectedEventId(), retryEvidence || reopening);
     }
     private static void Set(TextBox editor, string value) { if (editor.Text != value) editor.Text = value; }
     private NativeEventId? SelectedEventId() => _events.SelectedItem is ComboBoxItem { Tag: KeyValuePair<string, long> key }
         ? new(key.Key, key.Value) : null;
-    private void SelectEvidence(TestRunSnapshot? displayedRun, string? displayedRunId, NativeEventId? item)
+    private void SelectEvidence(TestRunSnapshot? displayedRun, string? displayedRunId, NativeEventId? item, bool retryFailed = false)
     {
         // Use the exact projection that populated the visible list, never an independently newer controller run.
         var selection = NativeEventSelection.Resolve(displayedRun, displayedRunId, item);
         if (selection is null)
         {
-            _eventKey = null; _observed.Text = "尚未选择当前执行的事件"; _frame.Source = null;
+            _evidenceCache.Clear(); _observed.Text = "尚未选择当前执行的事件"; _frame.Source = null;
             _frameStatus.Text = "SIMULATED — 等待当前执行的事件";
             if (item is not null) _ = NotifyAsync(); // Stale/missing item: defer to a coherent render, without a throwing lookup.
             return;
@@ -139,8 +139,8 @@ internal sealed partial class TestingPage
         var record = selection.Event;
         _observed.Text = record.NativePlainTextState ?? $"{record.Kind} · {record.ErrorCode ?? ""}";
         var key = selection.Key;
-        if (_eventKey == key) return;
-        _eventKey = key;
+        var request = _evidenceCache.Begin(key, _generation, retryFailed);
+        if (request is null) return;
         _frame.Source = null;
         _frameStatus.Text = "SIMULATED — 正在读取该事件的真实证据";
         if (record.EvidenceIds.Count == 0) { _frame.Source = null; _frameStatus.Text = "SIMULATED — 此事件没有证据"; return; }
@@ -152,21 +152,32 @@ internal sealed partial class TestingPage
                 var evidence = await Controller.ReadEvidenceAsync(selection.RunId, record.EvidenceIds[0]).ConfigureAwait(false);
                 await DispatchAsync(async () =>
                 {
-                    if (!_active || generation != _generation || _eventKey != key) return;
+                    if (!_active || generation != _generation || !_evidenceCache.IsCurrent(request)) return;
                     using var stream = new InMemoryRandomAccessStream();
                     using (var writer = new DataWriter(stream.GetOutputStreamAt(0)))
                     { writer.WriteBytes(evidence.Bytes); await writer.StoreAsync(); await writer.FlushAsync(); }
                     stream.Seek(0);
                     var bitmap = new BitmapImage();
                     await bitmap.SetSourceAsync(stream);
-                    if (!_active || generation != _generation || _eventKey != key) return;
+                    if (!_active || generation != _generation || !_evidenceCache.IsCurrent(request)) return;
                     _frame.Source = bitmap;
                     _frameStatus.Text = $"SIMULATED · 已解码 {bitmap.PixelWidth}×{bitmap.PixelHeight} · {evidence.Receipt.Length} 字节 · SHA256 {evidence.Receipt.Sha256}";
                 }).ConfigureAwait(false);
             }
             catch (Exception error)
             {
-                try { await DispatchAsync(() => { if (_active && generation == _generation && _eventKey == key) ShowError(error); return Task.CompletedTask; }); }
+                try
+                {
+                    await DispatchAsync(() =>
+                    {
+                        if (_active && generation == _generation && _evidenceCache.Failed(request))
+                        {
+                            _frameStatus.Text = "SIMULATED — 证据加载失败，可刷新重试：" + (error is PluginTestingException known ? SafeCode(known.ErrorCode) : "LocalFileOrTestingFailure");
+                            ShowError(error);
+                        }
+                        return Task.CompletedTask;
+                    });
+                }
                 catch (Exception) { /* The original owned dispatcher operation settled; a retired dispatcher cannot show an error. */ }
             }
         });
