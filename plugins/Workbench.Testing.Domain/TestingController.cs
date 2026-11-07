@@ -1,4 +1,5 @@
 using Workbench.Sdk;
+using Workbench.Testing.Domain.Sources.Figma;
 namespace Workbench.Testing.Domain;
 
 /// <summary>Portable authoring and one explicitly started supervised virtual attempt. Entry owns its one before-leave hook.</summary>
@@ -16,6 +17,7 @@ public sealed partial class TestingController
     private readonly IPluginTestingContext _context;
     private readonly IProjectTestWorkspace _testing;
     private readonly IControlledTestAdapter _adapter;
+    private readonly FigmaFileReader _figmaReader;
     private readonly string _projectId;
     private Task? _initialization,_preparation,_stop;
     private bool _initialized,_preparing,_preparationAdmission,_closed;
@@ -28,7 +30,9 @@ public sealed partial class TestingController
     private string? _error;
 
     public TestingController(IPluginTestingContext context,IControlledTestAdapter? adapter=null)
-    { _context=context;_testing=context.Testing;_projectId=context.Project.Identity.Id;_adapter=adapter ?? new VirtualTaskFormAdapter(); }
+        :this(context,adapter,new FigmaFileReader()) { }
+    public TestingController(IPluginTestingContext context,IControlledTestAdapter? adapter,FigmaFileReader reader)
+    { _context=context;_testing=context.Testing;_projectId=context.Project.Identity.Id;_adapter=adapter ?? new VirtualTaskFormAdapter();_figmaReader=reader; }
     public event Action<TestingControllerSnapshot>? Changed;
     public TestingControllerSnapshot Snapshot
     {

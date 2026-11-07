@@ -2,6 +2,7 @@ using Xunit;
 using Workbench.Core.Projects;
 using Workbench.Sdk;
 using Workbench.Testing.Domain;
+using Workbench.Testing.Domain.Sources.Figma;
 namespace Workbench.Core.Tests;
 
 // Real Core facade + real supervisor + JSON settings, composed before registration Commit.
@@ -15,7 +16,7 @@ internal sealed class TestingDomainFixture : IAsyncDisposable
     internal int RetirementStopCalls=>_taskBridge?.StopCalls ?? 0;
     internal Task<PluginTaskOperationResult> FirstStopReturned=>_taskBridge!.FirstStopReturned.Task;
     internal string SettingsPath=>Path.Combine(Disk.User,"settings","testing","settings.json");
-    private TestingDomainFixture(IControlledTestAdapter? adapter,AsyncTestGate? delegatePrefix,AsyncTestGate? startPersist,AsyncTestGate? firstStopPrefix,AsyncTestGate? delegatePostfix)
+    private TestingDomainFixture(IControlledTestAdapter? adapter,AsyncTestGate? delegatePrefix,AsyncTestGate? startPersist,AsyncTestGate? firstStopPrefix,AsyncTestGate? delegatePostfix,FigmaFileReader? figmaReader)
     {
         var settings=new JsonPluginSettings(Path.Combine(Disk.User,"settings","testing"),_=>{});
         Tasks=new(new Dictionary<string,SavedTaskIntent>(),async(id,intent,ct)=>
@@ -27,11 +28,11 @@ internal sealed class TestingDomainFixture : IAsyncDisposable
             new PluginSecretStore(Disk.User,PluginTestingContextTests.Owner,new WindowsSecretProtector(),_=>{}),new ProjectRuntimeScope("default","Default",Disk.User));
         _taskBridge=delegatePrefix is null && firstStopPrefix is null && delegatePostfix is null ? null : new(Tasks,delegatePrefix,firstStopPrefix,delegatePostfix);
         IPluginTestingContext supplied=_taskBridge is null ? Context : new PrefixContext(Context,_taskBridge);
-        Controller=new(supplied,adapter);
+        Controller=figmaReader is null ? new(supplied,adapter) : new(supplied,adapter,figmaReader);
     }
-    internal static async Task<TestingDomainFixture> CreateAsync(IControlledTestAdapter? adapter=null,AsyncTestGate? delegatePrefix=null,AsyncTestGate? startPersist=null,AsyncTestGate? firstStopPrefix=null,AsyncTestGate? delegatePostfix=null)
+    internal static async Task<TestingDomainFixture> CreateAsync(IControlledTestAdapter? adapter=null,AsyncTestGate? delegatePrefix=null,AsyncTestGate? startPersist=null,AsyncTestGate? firstStopPrefix=null,AsyncTestGate? delegatePostfix=null,FigmaFileReader? figmaReader=null)
     {
-        var fixture=new TestingDomainFixture(adapter,delegatePrefix,startPersist,firstStopPrefix,delegatePostfix);
+        var fixture=new TestingDomainFixture(adapter,delegatePrefix,startPersist,firstStopPrefix,delegatePostfix,figmaReader);
         try
         {
             await fixture.Context.Settings.SetAsync("fixtureVersion",1);

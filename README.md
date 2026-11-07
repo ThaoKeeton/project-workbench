@@ -2,7 +2,7 @@
 
 Windows 原生插件工作台基础版：同一个 WinUI 3 窗口承载独立插件提供的原生页面、设置与异步命令。使用标准 Windows 控件，不嵌入其他应用窗口，不使用 WebView。
 
-默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已通过当前发布目录主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。业务包需按需安装，下载配套 `workbench-business-plugins` 后按 [业务插件安装说明](docs/install-business-plugins.md) 选择内层 ZIP 或原厂文件夹；[固定来源与测试边界](tests/integration/README.md) 另列。另有按需安装的 [测试设计插件](docs/testing-plugin.md)：本地需求/规范化 Figma JSON、可追溯用例、自动保存/CSV 和 SIMULATED 虚拟执行；远程 Figma、AI 和真实电脑自动化尚未接入。
+默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已通过当前发布目录主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。业务包需按需安装，下载配套 `workbench-business-plugins` 后按 [业务插件安装说明](docs/install-business-plugins.md) 选择内层 ZIP 或原厂文件夹；[固定来源与测试边界](tests/integration/README.md) 另列。另有按需安装的 [测试设计插件](docs/testing-plugin.md)：本地需求/规范化 Figma JSON、可追溯用例、自动保存/CSV 和 SIMULATED 虚拟执行。源码新增[有界远程 Figma 项目导入后端](docs/figma-readonly-capture.md)，必须提供手工验收条件，生成步骤保持手工；仅以合成凭据、内存 HTTP 和真实 Core 项目存储验证，原生远程入口尚未接入、真实服务尚未验证。AI 和真实电脑自动化尚未接入。
 
 ## 在 Windows 构建和启动
 
