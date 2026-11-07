@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Reflection;
 using Workbench.Sdk;
+using Workbench.Core.Projects;
 
 namespace Workbench.Core;
 
@@ -8,11 +9,12 @@ namespace Workbench.Core;
 /// Discovers local packages and runs explicitly trusted plugins in this process.
 /// Load contexts isolate dependency resolution, not security or process failures.
 /// </summary>
-public sealed class PluginManager : IAsyncDisposable
+public sealed partial class PluginManager : IAsyncDisposable
 {
     private readonly PluginManagerOptions _options;
     private readonly string _pluginsRoot;
     private readonly string _userRoot;
+    private readonly ProjectRuntimeScope _projectScope;
     private readonly string[] _discoveryRoots;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Entry[] _entries = [];
@@ -44,6 +46,9 @@ public sealed class PluginManager : IAsyncDisposable
             throw new ArgumentException("Shared assembly names must be simple assembly names, without a path or extension.", nameof(options));
         _pluginsRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.PluginsRoot));
         _userRoot = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.UserRoot));
+        _projectScope = options.ProjectScope ?? new("default", "Default", _userRoot);
+        if (!string.Equals(_projectScope.UserRoot, _userRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
+            throw new ArgumentException("ProjectScope must be bound to UserRoot.", nameof(options));
         _stateStore = new(_userRoot);
         _runtimeState = runtimeState ?? new(_userRoot);
         _discoveryRoots = new[] { _pluginsRoot }.Concat(options.AdditionalDiscoveryRoots.Select(root => Path.TrimEndingDirectorySeparator(Path.GetFullPath(root))))
@@ -120,6 +125,7 @@ public sealed class PluginManager : IAsyncDisposable
             foreach (var entry in Volatile.Read(ref _entries))
                 await StopRuntimeAsync(entry, PluginStopReason.HostShutdown, cancellationToken);
             if (HasPendingStops) throw new PluginShutdownException();
+            if (_projectPreparation is { } preparation) await preparation.ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -298,6 +304,7 @@ public sealed class PluginManager : IAsyncDisposable
             foreach (var entry in Volatile.Read(ref _entries))
                 await StopRuntimeAsync(entry, PluginStopReason.HostShutdown, CancellationToken.None);
             if (HasPendingStops) throw new PluginShutdownException();
+            if (_projectPreparation is { } preparation) await preparation.ConfigureAwait(false);
             _disposed = true;
         }
         finally { _gate.Release(); }
@@ -363,7 +370,7 @@ public sealed class PluginManager : IAsyncDisposable
                 (id, intent, token) => _runtimeState.SaveAsync(pluginId, entry.Package.Fingerprint!, id, intent, entry.AddDiagnostic, token),
                 entry.AddDiagnostic, _options.StopTimeout);
             var context = new PluginRegistrationContext(pluginId, dataDirectory, GetSettings(pluginId), background,
-                new PluginSecretStore(_userRoot, pluginId, _secretProtector, entry.AddDiagnostic));
+                new PluginSecretStore(_userRoot, pluginId, _secretProtector, entry.AddDiagnostic), _projectScope);
             entry.FailedInitialization = false;
             entry.Context = context;
             entry.Update(s => s with { HasRuntime = true });
@@ -516,7 +523,8 @@ public sealed class PluginManager : IAsyncDisposable
         {
             if (instance is not null) await instance.StopAsync(CancellationToken.None);
         }), "PluginStopFailed");
-        var results = await Task.WhenAll(cancellation, background, plugin);
+        var project = ObserveAsync(() => context?.DrainProjectWorkAsync() ?? Task.CompletedTask, "ProjectDrainFailed");
+        var results = await Task.WhenAll(cancellation, background, plugin, project);
         return results.All(success => success) ? new(true, "Stopped.") : new(false, "StopFailed: known work completed with errors.");
     }
 

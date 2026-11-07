@@ -6,6 +6,15 @@ namespace Workbench.Core.Tests;
 
 public sealed class HostFailureTests
 {
+    [Fact]
+    public void Project_failure_codes_are_allow_listed_even_for_public_sdk_and_storage_exceptions()
+    {
+        Assert.Equal("RevisionConflict", HostFailure.ProjectCode(new Workbench.Sdk.PluginProjectContextException("RevisionConflict")));
+        Assert.Equal("InvalidContext", HostFailure.ProjectCode(new Workbench.Core.Projects.ProjectWorkspaceStoreException("InvalidContext")));
+        Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new Workbench.Sdk.PluginProjectContextException("synthetic-secret-never-log")));
+        Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new Workbench.Core.Projects.ProjectWorkspaceStoreException("synthetic-secret-never-log")));
+        Assert.Equal("Canceled", HostFailure.ProjectCode(new OperationCanceledException()));
+    }
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

@@ -6,7 +6,7 @@
 
 `Workbench.Sdk` 目标为 `net10.0`，不引用 UI。API 版本为 `WorkbenchApi.Version == 1`。入口类型是实现 `IWorkbenchPlugin` 的具体类，具有公共无参数构造函数。
 
-两个 SDK 的包版本为 `0.2.0`，文件版本为 `0.2.0.0`，程序集版本保持 `1.0.0.0`。旧的 API 1 和 `IPluginContext` 不变。可选扩展 `WorkbenchRuntimeServices.Version == 1` 提供后台任务和声明式凭据存储；使用它的插件必须声明 `minimumHostVersion: "0.2.0"`。契约、恢复语义、停止所有权和凭据安全边界见 [运行时服务 v1](runtime-services.md)。
+两个 SDK 的包版本为 `0.3.0`，文件版本为 `0.3.0.0`，程序集版本保持 `1.0.0.0`。旧的 API 1 和 `IPluginContext` 不变。可选扩展 `WorkbenchRuntimeServices.Version == 1` 提供后台任务和声明式凭据存储；使用它的插件必须声明 `minimumHostVersion: "0.2.0"`。契约、恢复语义、停止所有权和凭据安全边界见 [运行时服务 v1](runtime-services.md)。
 
 独立 CI 可使用 `scripts/export-sdk.ps1` 生成的源码/NuGet 快照；固定完整提交和 manifest.json 的文件哈希。导出命令、版本约束、源码/包引用与排除 Desktop/凭据的构建步骤见 [独立接入与 SDK 分发](integrations/plugin-contract-v1.md#固定-sdk-分发快照与独立构建)。
 
@@ -69,7 +69,7 @@ context.RegisterCommand(new PluginCommand("export", "本地导出", async token 
 
 主程序在 WinUI UI 线程调用工厂，返回的 `FrameworkElement` 直接附加到同一个窗口。使用代码创建标准控件、继承主题，给可操作控件设置 AutomationProperties.Name，并让布局随窗口尺寸伸缩。主程序卡片使用固定的主程序 ThemeResource 样式以跟随各窗口实际主题；这不增加插件资源加载接口。v0.1 不加载插件自带 XAML/PRI，不嵌入独立应用窗口，不使用 WebView。
 
-导航会重新调用视图工厂，不缓存控件。可编辑文档应由插件实例持有状态，并由控件事件更新；保存时先捕获一个值再等待写入。摘要示例在页面切换时保留未保存文本，生成命令拒绝覆盖现有或已编辑草稿。停用或退出前需要显式保存，重新启用只恢复磁盘上的草稿；主程序没有通用文档保存/丢弃协议。
+导航会重新调用视图工厂，不缓存控件。可编辑文档应由插件实例持有状态，并由控件事件同步更新。两个本地示例的普通偏好在编辑后自动保存，不再要求额外保存按钮；摘要和测试用例草稿在项目离开准备或 Stop 时序列化写入本地，失败保留缓冲以便重试。摘要仍支持立即保存，生成命令仍拒绝覆盖现有或已编辑草稿。此机制仅用于非敏感示例数据，不自动提交凭据编辑框或业务授权。项目服务与宿主准备接口见 [项目服务 v1](project-services.md)。
 
 命令通过 `PluginManager.ExecuteCommandAsync` 运行，令牌链接请求取消与插件 `Lifetime`。命令应返回简洁的可显示结果。异步 UI 事件处理器应捕获异常并显示本地错误，同时尊重 `Lifetime`；不要把未处理的 `async void` 异常抛给主程序。插件创建的后台任务、订阅和资源由插件在停止时清理，不能假定停用会强制终止代码。
 
@@ -109,6 +109,6 @@ com.example.notes/
 
 安装成功后主程序再次调用 `DiscoverAsync`。安装不覆盖现有 ID，不自动批准或启用。包错误显示在对应详情中，用户状态文件等管理器级错误也显示在首页和插件页。
 
-停用前主程序移除当前控件与导航引用，然后调用 `DisableAsync`，即使停止失败也不继续引用这些页面。关闭应用使用 `ShutdownAsync`/`DisposeAsync`，保留下次启动的启用偏好；不能通过逐个 `DisableAsync` 实现退出。程序集不可收集，更新、移除或替换包需要退出/重启。无响应或恶意的同进程插件仍可阻塞或破坏整个进程。
+使用项目服务的宿主先成功完成 `PrepareProjectLeaveAsync(id)`，再移除当前控件与导航引用并调用 `DisableAsync`，即使停止失败也不继续引用这些页面。关闭应用使用 `ShutdownAsync`/`DisposeAsync`，保留下次启动的启用偏好；不能通过逐个 `DisableAsync` 实现退出。程序集不可收集，更新、移除或替换包需要退出/重启。无响应或恶意的同进程插件仍可阻塞或破坏整个进程。
 
 可参考 [摘要示例](../plugins/Workbench.Summary.Sample/SummaryPlugin.cs)、[测试用例示例](../plugins/Workbench.TestCases.Sample/TestCasesPlugin.cs) 和 [Core 文档](../src/Workbench.Core/README.md)。

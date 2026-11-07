@@ -113,7 +113,7 @@ internal sealed partial class MainWindow
     private StackPanel SettingsPage()
     {
         var page = Ui.Page("工作台设置", "主题作用于同一个窗口内的主程序和原生插件控件。");
-        page.Children.Add(Ui.Text("Project Workbench 0.2.0 · API 1 · Runtime services 1"));
+        page.Children.Add(Ui.Text("Project Workbench 0.3.0 · API 1 · Runtime services 1 · Project services 1"));
         var theme = Ui.Named(new ComboBox { Header = "应用主题", HorizontalAlignment = HorizontalAlignment.Stretch, IsEnabled = !_shutdownPending }, "应用主题");
         theme.Items.Add("跟随系统"); theme.Items.Add("浅色"); theme.Items.Add("深色");
         theme.SelectedIndex = (int)_root.RequestedTheme;

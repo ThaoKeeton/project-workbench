@@ -63,9 +63,11 @@ pwsh -File .\scripts\native-runtime-probe.ps1 -TimeoutSeconds 180
 
 GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbench` 分支提交运行 Linux Core 测试及 Windows Core/发布/原生冒烟。产物 `workbench-win-x64` 是完整应用目录，`native-smoke-report` 是 JSON 报告，另有两平台测试结果。当前开发环境是 Linux；跨目标 C# 编译不证明 Windows 原生启动成功。[Windows 验证记录和待验清单](docs/windows-verification.md) 区分这些证据。
 
-新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除。[当前 Server 2025 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)（源码 `a54a668`）已通过 Windows Core 267 项、原生 14 项、管理 17 项、六阶段平台重启 7 项，以及独立业务插件 12 进程共 51 项检查。后六进程使用不同 ID、不同隔离根的上游模拟验收二进制；实际定时 Core 和本地模拟发送成功不代表真实送达。钉钉仅测试合成模型值保存及 commit/revision 读取，模型 key 值消费与 provider dispatch 未执行。没有真实 Webhook/HTTP/业务发送。Windows 11 的 18 项主题/DPI/选择器/可访问性等人工清单全部待验。完整 [Windows 应用目录](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547711575) 和校验值见 [验证记录](docs/windows-verification.md)。
+新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除。[历史 host/SDK 0.2 Server 2025 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)（源码 `a54a668`）已通过 Windows Core 267 项、原生 14 项、管理 17 项、六阶段平台重启 7 项，以及独立业务插件 12 进程共 51 项检查。后六进程使用不同 ID、不同隔离根的上游模拟验收二进制；实际定时 Core 和本地模拟发送成功不代表真实送达。钉钉仅测试合成模型值保存及 commit/revision 读取，模型 key 值消费与 provider dispatch 未执行。没有真实 Webhook/HTTP/业务发送。Windows 11 的 18 项主题/DPI/选择器/可访问性等人工清单全部待验。完整 [Windows 应用目录](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547711575) 和校验值见 [验证记录](docs/windows-verification.md)。
 
-独立 SDK 导出：`pwsh ./scripts/export-sdk.ps1`。CI artifact `workbench-sdk-0.2.0` 含固定版本源码、两个 NuGet 包及提交/文件哈希清单；接入步骤见 [插件契约与独立构建](docs/integrations/plugin-contract-v1.md)。
+当前主程序及两个 SDK 预览版本为 0.3.0，程序集/API/运行服务身份保持 1；可选项目服务 1 的契约和已知工作保留规则见 [项目服务](docs/project-services.md)。真实旧 SDK 0.2 业务包与固定来源不变；新的 Windows 原生/独立业务兼容结果需由当前提交的 CI 单独验证。
+
+独立 SDK 导出：`pwsh ./scripts/export-sdk.ps1`。CI artifact `workbench-sdk-0.3.0` 含固定版本源码、两个 NuGet 包及提交/文件哈希清单；接入步骤见 [插件契约与独立构建](docs/integrations/plugin-contract-v1.md)。
 
 - [插件 SDK、清单和包布局](docs/plugin-sdk.md)
 - [运行服务、停止与凭据](docs/runtime-services.md)

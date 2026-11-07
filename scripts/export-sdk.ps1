@@ -14,7 +14,7 @@ if (Test-Path -LiteralPath $archive) { Remove-Item -LiteralPath $archive -Force 
 New-Item $source, $packages -ItemType Directory -Force | Out-Null
 # Explicit source allow-list: no host/Desktop binary, private config, credentials or business data.
 $files = @('Directory.Build.props', 'global.json', 'src/Workbench.Sdk/Workbench.Sdk.csproj',
-    'src/Workbench.Sdk/PluginContracts.cs', 'src/Workbench.Sdk/RuntimeContracts.cs', 'src/Workbench.Sdk/README.md',
+    'src/Workbench.Sdk/PluginContracts.cs', 'src/Workbench.Sdk/RuntimeContracts.cs', 'src/Workbench.Sdk/ProjectContracts.cs', 'src/Workbench.Sdk/README.md',
     'src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj', 'src/Workbench.WinUI.Sdk/WinUiView.cs', 'src/Workbench.WinUI.Sdk/README.md')
 $hashes = @()
 foreach ($relative in $files) {
@@ -38,8 +38,8 @@ $packageHashes = @(Get-ChildItem -LiteralPath $packages -Filter '*.nupkg' -File 
     @{ path = "packages/$($_.Name)"; sha256 = (Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
 })
 if ($packageHashes.Count -ne 2) { throw 'Exactly two SDK packages are required.' }
-@{ sourceCommit = $commit; sdkSourcesDirty = $dirty; sdkVersion = '0.2.0'; assemblyVersion = '1.0.0.0'; workbenchApi = 1;
-    runtimeServices = 1; dotnetSdk = '10.0.403'; windowsAppSdk = '1.8.260921001'; referenceOnly = [bool]$ReferenceOnly;
+@{ sourceCommit = $commit; sdkSourcesDirty = $dirty; sdkVersion = '0.3.0'; fileVersion = '0.3.0.0'; assemblyVersion = '1.0.0.0'; workbenchApi = 1;
+    runtimeServices = 1; projectServices = 1; dotnetSdk = '10.0.403'; windowsAppSdk = '1.8.260921001'; referenceOnly = [bool]$ReferenceOnly;
     sources = $hashes; packages = $packageHashes } | ConvertTo-Json -Depth 8 | Set-Content (Join-Path $output 'manifest.json') -Encoding utf8
 # Exclude pack bin/obj; consumers get only the reviewed source list and pinned build settings.
 Get-ChildItem -LiteralPath $source -Directory -Recurse | Where-Object Name -in @('bin', 'obj') | Sort-Object { $_.FullName.Length } -Descending | Remove-Item -Recurse -Force

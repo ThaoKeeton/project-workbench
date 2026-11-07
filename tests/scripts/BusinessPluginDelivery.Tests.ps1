@@ -74,13 +74,14 @@ function New-MetadataOnlyHost([string]$SourceCommit) {
     foreach ($name in @('Workbench.App.exe', 'Workbench.App.dll')) { Copy-Item -LiteralPath (Join-Path $AppDirectory $name) -Destination $path }
     $dll = Join-Path $path 'Workbench.App.dll'
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($dll).ProductVersion
-    Assert-True ($version -match '^0[.]2[.]0[+]([0-9a-f]{40})$') 'Provide actual published host files for metadata-only packaging checks.'
+    Assert-True ($version -cmatch '^([0-9]+[.][0-9]+[.][0-9]+)[+]([0-9a-f]{40})$') 'Provide actual published host files for metadata-only packaging checks.'
+    $semanticVersion = $Matches[1]
     $bytes = [IO.File]::ReadAllBytes($dll)
     $replaced = 0
     # Windows reads the version resource; Unix reads the managed informational attribute.
     foreach ($encoding in @([Text.Encoding]::Unicode, [Text.Encoding]::UTF8)) {
         $old = $encoding.GetBytes($version)
-        $replacement = $encoding.GetBytes("0.2.0+$SourceCommit")
+        $replacement = $encoding.GetBytes("$semanticVersion+$SourceCommit")
         for ($i = 0; $i -le $bytes.Length - $old.Length; $i++) {
             $equal = $true
             for ($j = 0; $j -lt $old.Length; $j++) { if ($bytes[$i + $j] -ne $old[$j]) { $equal = $false; break } }
@@ -89,7 +90,7 @@ function New-MetadataOnlyHost([string]$SourceCommit) {
     }
     Assert-True ($replaced -gt 0) 'Metadata-only control did not change the PE product resource.'
     [IO.File]::WriteAllBytes($dll, $bytes)
-    Assert-True ([Diagnostics.FileVersionInfo]::GetVersionInfo($dll).ProductVersion -ceq "0.2.0+$SourceCommit") 'Metadata-only product resource is unreadable.'
+    Assert-True ([Diagnostics.FileVersionInfo]::GetVersionInfo($dll).ProductVersion -ceq "$semanticVersion+$SourceCommit") 'Metadata-only product resource is unreadable.'
     return $path
 }
 try {
@@ -136,9 +137,9 @@ try {
             }
         }
         $version = [Diagnostics.FileVersionInfo]::GetVersionInfo((Join-Path $AppDirectory 'Workbench.App.dll'))
-        Assert-True ($manifest.host.productVersion -ceq $version.ProductVersion -and $manifest.host.sourceCommit -ceq $version.ProductVersion.Substring(6)) 'Host stamp did not come from actual DLL.'
+        Assert-True ($manifest.host.productVersion -ceq $version.ProductVersion -and $manifest.host.sourceCommit -ceq $version.ProductVersion.Split('+')[1]) 'Host stamp did not come from actual DLL.'
         Assert-True ($manifest.host.executableSha256 -eq (Get-FileHash -LiteralPath (Join-Path $AppDirectory 'Workbench.App.exe')).Hash -and $manifest.host.dllSha256 -eq (Get-FileHash -LiteralPath (Join-Path $AppDirectory 'Workbench.App.dll')).Hash) 'Host byte identity changed.'
-        Assert-True ($manifest.host.fileVersion -ceq '0.2.0.0' -and $manifest.host.assemblyVersion -ceq '1.0.0.0') 'Wrong supported host version.'
+        Assert-True ($manifest.host.fileVersion -ceq "$($version.ProductVersion.Split('+')[0]).0" -and $manifest.host.assemblyVersion -ceq '1.0.0.0') 'Incoherent host file version or wrong stable assembly identity.'
         $head = (& git -C $repo rev-parse HEAD).Trim()
         Assert-True ($manifest.packagingSourceCommit -ceq $head -and $manifest.packagingSourcesDirty -is [bool]) 'Missing separate packaging identity/dirty state.'
         Assert-True (@($manifest.files).Count -eq 5) 'Inventory must cover five payloads, excluding manifest itself.'

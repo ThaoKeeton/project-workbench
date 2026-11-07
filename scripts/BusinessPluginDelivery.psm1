@@ -127,12 +127,21 @@ function Get-DeliveryHostStamp([string]$AppPath) {
     $dll = Join-Path $AppPath 'Workbench.App.dll'
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($dll)
     $assemblyVersion = [Reflection.AssemblyName]::GetAssemblyName($dll).Version.ToString()
-    if ($version.ProductVersion -cnotmatch '^0[.]2[.]0[+]([0-9a-f]{40})$') { throw 'host_metadata: Actual DLL must declare 0.2.0 plus a full source commit.' }
-    $sourceCommit = $Matches[1]
-    if ($version.FileVersion -cne '0.2.0.0' -or $assemblyVersion -cne '1.0.0.0') { throw 'host_metadata: Unsupported host file/assembly version.' }
-    return [ordered]@{ productVersion = $version.ProductVersion; fileVersion = $version.FileVersion; assemblyVersion = $assemblyVersion; sourceCommit = $sourceCommit;
+    $declared = Get-DeliveryHostVersion $version.ProductVersion $version.FileVersion $assemblyVersion
+    return [ordered]@{ productVersion = $declared.productVersion; fileVersion = $declared.fileVersion; assemblyVersion = $declared.assemblyVersion; sourceCommit = $declared.sourceCommit;
         executableSha256 = (Get-FileHash -LiteralPath (Join-Path $AppPath 'Workbench.App.exe') -Algorithm SHA256).Hash.ToLowerInvariant();
         dllSha256 = (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash.ToLowerInvariant() }
+}
+function Get-DeliveryHostVersion([string]$ProductVersion, [string]$FileVersion, [string]$AssemblyVersion) {
+    if ($ProductVersion -cnotmatch '^((?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*)[.](?:0|[1-9][0-9]*))[+]([0-9a-f]{40})$') {
+        throw 'host_metadata: Actual DLL must declare a three-part semantic version plus a full source commit.'
+    }
+    $semanticVersion = $Matches[1]
+    $sourceCommit = $Matches[2]
+    $parsed = $null
+    if (-not [Version]::TryParse($semanticVersion, [ref]$parsed) -or $parsed.Major -gt 65535 -or $parsed.Minor -gt 65535 -or $parsed.Build -gt 65535 -or
+        $FileVersion -cne "$semanticVersion.0" -or $AssemblyVersion -cne '1.0.0.0') { throw 'host_metadata: Incoherent host product/file version or unsupported assembly identity.' }
+    return [ordered]@{ productVersion = $ProductVersion; fileVersion = $FileVersion; assemblyVersion = $AssemblyVersion; sourceCommit = $sourceCommit }
 }
 function Assert-DeliveryCurrentSource($HostStamp, $PackagingStamp) {
     if ($HostStamp.sourceCommit -cne $PackagingStamp.packagingSourceCommit) { throw 'host_source: PE-declared host source must match the current packaging commit.' }

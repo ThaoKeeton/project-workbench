@@ -1,4 +1,4 @@
-# Workbench.Sdk 0.2.0
+# Workbench.Sdk 0.3.0
 
 Contracts for independently built, trusted in-process Project Workbench plugins.
 Target .NET 10 with SDK 10.0.403. `WorkbenchApi.Version` stays **1**,
@@ -15,7 +15,16 @@ trust its exact package fingerprint. Trust, resume preference and business
 consent are separate; same-process plugins are not sandboxed. JSON settings and
 data files are not a credential vault; secret values must not enter diagnostics.
 
-Native views additionally use `Workbench.WinUI.Sdk` 0.2.0 with Windows App SDK
+Native views additionally use `Workbench.WinUI.Sdk` 0.3.0 with Windows App SDK
 **1.8.260921001**. Distribute plugin code and private dependencies without host
 App/Core/SDK/Desktop binaries. Package updates require a host restart; hot unload
 is not supported. A `referenceOnly` source snapshot proves compilation only.
+
+Optional `IPluginProjectContext` project services **1** require host **0.3.0**
+or newer. The original context/runtime interfaces remain unchanged. Read/update
+current-project instructions with revision checks; register one before-leave
+hook during initialization to flush nonsecret document models. Hooks run off the
+UI thread and must not access controls or persist credential drafts. Failure
+keeps the current runtime available; timeout/cancellation retains actual work
+until it settles, including during Stop. See `ProjectContracts.cs` in the
+UI-neutral SDK. File version is **0.3.0.0**; assembly identity stays **1.0.0.0**.

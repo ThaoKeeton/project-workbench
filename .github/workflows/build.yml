@@ -55,7 +55,9 @@ jobs:
         run: ./scripts/build.ps1
       - name: Audited production delivery packaging regressions
         shell: pwsh
-        run: ./tests/scripts/BusinessPluginDelivery.Tests.ps1 -AppDirectory ./artifacts/native/app
+        run: |
+          ./tests/scripts/DeliveryHostVersion.Tests.ps1
+          ./tests/scripts/BusinessPluginDelivery.Tests.ps1 -AppDirectory ./artifacts/native/app
       - name: Export and verify production plugins paired with current host
         shell: pwsh
         run: |
@@ -97,7 +99,7 @@ jobs:
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7.0.2
         with:
-          name: workbench-sdk-0.2.0
+          name: workbench-sdk-0.3.0
           path: |
             artifacts/sdk-snapshot/
             artifacts/sdk-snapshot.zip

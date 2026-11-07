@@ -5,6 +5,21 @@ namespace Workbench.App;
 /// <summary>Host-caught failures never evaluate exception text or plugin-defined virtual members.</summary>
 internal static class HostFailure
 {
+    internal static string ProjectCode(Exception error)
+    {
+        var code = error switch
+        {
+            Workbench.Core.Projects.ProjectWorkspaceStoreException storage => storage.ErrorCode,
+            Workbench.Sdk.PluginProjectContextException project => project.ErrorCode,
+            OperationCanceledException => "Canceled",
+            _ => null
+        };
+        // Public exception constructors do not establish the provenance of their code.
+        return code is "InvalidId" or "InvalidName" or "InvalidCatalog" or "InvalidContext" or "RevisionConflict"
+            or "CatalogLimitExceeded" or "ContextLimitExceeded" or "RecoveryRequired" or "RecoveryUnavailable"
+            or "ActiveProjectArchived" or "ProjectNotFound" or "UnsafePath" or "StoreBusy" or "StoreIoFailure"
+            or "ProjectContextClosed" or "ProjectContextFailed" or "Canceled" ? code : "ProjectOperationFailed";
+    }
     internal static (T Theme, string? Error) ReadTheme<T>(Func<T> read, T systemTheme)
     {
         try { return (read(), null); }

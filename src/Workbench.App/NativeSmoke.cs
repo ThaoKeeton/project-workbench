@@ -14,7 +14,11 @@ namespace Workbench.App;
 internal static class NativeSmoke
 {
     private const string SummarySavedDraft = "Native smoke user draft: keep these edits.\n已编辑的本地摘要，不得由示例生成覆盖。";
-    private const string SummaryUnsavedDraft = "Native smoke unsaved edit: discard only on explicit disable or process exit.";
+    private const string SummaryPreparedDraft = "Native smoke buffered edit: preserve through project preparation.";
+    private const string SummaryStoppedDraft = "Native smoke latest edit: preserve on disable and reload.";
+    private const string SampleAudience = "Native autosaved audience";
+    private const string SampleSuite = "Native autosaved suite";
+    private const string SampleAction = "Native edited sample action";
 
     public static async Task RunAsync(MainWindow window, RunOptions options)
     {
@@ -77,8 +81,13 @@ internal static class NativeSmoke
         };
         Require(files.All(file => File.Exists(file) && new FileInfo(file).Length > 0), "Local commands did not write isolated sample files.");
         Record("Local commands wrote nonempty draft and CSV under isolated DataDirectory paths");
-        var savedSummaryDraft = await VerifySummaryDraftAsync(window, files[0]);
-        Record("Real Summary editor retained unsaved text through fresh Home/Commands/settings navigation, saved edits and refused destructive regeneration");
+        var preparedSummaryDraft = await VerifySummaryDraftAsync(window, files[0]);
+        await VerifySamplePreparationAsync(window, options.UserRoot, preparedSummaryDraft, files[0]);
+        var finalSummaryPage = await OpenSummaryAsync(window);
+        var finalSummaryEditor = FindNamed<TextBox>(finalSummaryPage, "工作摘要示例草稿");
+        await EditAsync(finalSummaryEditor, SummaryStoppedDraft);
+        var savedSummaryDraft = finalSummaryEditor.Text;
+        Record("Real Summary editor retained navigation edits, explicit Save and regeneration protection; sample preferences autosaved without activation and project preparation flushed both sample drafts");
         foreach (var id in RunOptions.SampleIds)
         {
             window.SmokeDetach();
@@ -92,14 +101,20 @@ internal static class NativeSmoke
             {
                 var page = await OpenSummaryAsync(window);
                 Require(FindNamed<TextBox>(page, "工作摘要示例草稿").Text == savedSummaryDraft,
-                    "Summary re-enable did not reload the saved draft after discarding unsaved session edits.");
+                    "Summary re-enable did not reload the latest draft retained during Stop.");
                 Require(await File.ReadAllTextAsync(files[0]) == savedSummaryDraft,
-                    "Summary disable/re-enable changed the saved draft file.");
+                    "Summary disable/re-enable lost the latest buffered draft.");
+            }
+            else
+            {
+                var view = manager.Contributions.Views.Single(v => v.PluginId == id && v.View is WinUiView { Kind: WinUiViewKind.Page });
+                var page = await window.SmokeNavigateAsync("view", id, view.View.Id);
+                Require(FindNamed<TextBox>(page, "EX-001 示例步骤").Text == SampleAction, "Sample test-case draft did not survive disable/re-enable.");
             }
         }
         await AttachAllViewsAsync(window);
         Record("Detached controls, disabled and re-enabled both samples, then attached fresh native factories");
-        Record("Summary disable discarded only unsaved session edits; re-enable loaded the unchanged saved draft");
+        Record("Summary Stop saved the latest buffered edit; both samples reloaded retained drafts after disable/re-enable");
         await window.SmokeStopAsync();
         Require(manager.Contributions.Views.Count == 0 && manager.Contributions.Commands.Count == 0, "Shutdown retained active contributions.");
         Require(manager.Plugins.All(p => p.Diagnostics.Count == 0), "Lifecycle produced diagnostics.");
@@ -184,9 +199,34 @@ internal static class NativeSmoke
         page = await OpenSummaryAsync(window);
         var editor = FindNamed<TextBox>(page, "工作摘要示例草稿");
         Require(editor.Text == afterEdit, "Summary regeneration replaced the saved draft model.");
-        // The existing lifecycle round trip below must restore the saved value, not this session-only edit.
-        await EditAsync(editor, SummaryUnsavedDraft);
-        return afterEdit;
+        await EditAsync(editor, SummaryPreparedDraft);
+        return editor.Text;
+    }
+
+    private static async Task VerifySamplePreparationAsync(MainWindow window, string userRoot, string summaryDraft, string summaryPath)
+    {
+        var manager = window.SmokeManager;
+        foreach (var (id, name, value, key) in new[]
+        {
+            (RunOptions.SampleIds[0], "示例摘要读者", SampleAudience, "audience"),
+            (RunOptions.SampleIds[1], "示例用例集名称", SampleSuite, "suiteName")
+        })
+        {
+            var view = manager.Contributions.Views.Single(v => v.PluginId == id && v.View is WinUiView { Kind: WinUiViewKind.Settings });
+            var page = await window.SmokeNavigateAsync("view", id, view.View.Id);
+            await EditAsync(FindNamed<TextBox>(page, name), value);
+            using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
+            // Observe persistence before preparation; this catches a missing autosave event.
+            while (await manager.GetSettings(id).GetAsync(key, "", timeout.Token) != value) await Task.Delay(20, timeout.Token);
+        }
+        var cases = manager.Contributions.Views.Single(v => v.PluginId == RunOptions.SampleIds[1] && v.View is WinUiView { Kind: WinUiViewKind.Page });
+        var casePage = await window.SmokeNavigateAsync("view", cases.PluginId, cases.View.Id);
+        await EditAsync(FindNamed<TextBox>(casePage, "EX-001 示例步骤"), SampleAction);
+        var prepared = await manager.PrepareProjectLeaveAsync();
+        Require(prepared.Succeeded && !prepared.HasPendingWork && !manager.HasPendingProjectWork, "Sample project preparation did not finish owned writes.");
+        Require(await File.ReadAllTextAsync(summaryPath) == summaryDraft, "Project preparation lost the buffered Summary draft.");
+        using var rows = JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(userRoot, "data", RunOptions.SampleIds[1], "sample-test-cases.json")));
+        Require(rows.RootElement[0].GetProperty("Action").GetString() == SampleAction, "Project preparation lost the edited sample test-case row.");
     }
 
     private static Task<FrameworkElement> OpenSummaryAsync(MainWindow window)

@@ -1,7 +1,7 @@
-# Workbench.WinUI.Sdk 0.2.0
+# Workbench.WinUI.Sdk 0.3.0
 
 Native WinUI view contracts for Project Workbench plugins. Use with
-`Workbench.Sdk` **0.2.0**, .NET SDK **10.0.403** and Windows App SDK
+`Workbench.Sdk` **0.3.0**, .NET SDK **10.0.403** and Windows App SDK
 **1.8.260921001**, targeting Windows x64. API **1**, the original `IPluginContext`
 and assembly identity **1.0.0.0** remain stable. Optional runtime services version
 **1** require host **0.2.0** or newer.
@@ -20,3 +20,12 @@ plugin/private dependencies, without host App/Core/SDK/Desktop binaries.
 Windows-built packages retain this SDK's generated PRI. A snapshot marked
 `referenceOnly` omits native resource generation and proves C# compilation only;
 it must not substitute for Windows packaging or actual WinUI acceptance.
+
+Optional `IPluginProjectContext` project services **1** require host **0.3.0**
+or newer. The original context/runtime interfaces remain unchanged. Read/update
+current-project instructions with revision checks; register one before-leave
+hook during initialization to flush nonsecret document models. Hooks run off the
+UI thread and must not access controls or persist credential drafts. Failure
+keeps the current runtime available; timeout/cancellation retains actual work
+until it settles, including during Stop. See `ProjectContracts.cs` in the
+UI-neutral SDK. File version is **0.3.0.0**; assembly identity stays **1.0.0.0**.

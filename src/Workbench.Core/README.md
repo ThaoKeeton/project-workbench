@@ -4,10 +4,10 @@ SDK and Core target .NET 10 and have no WinUI dependencies. Plugins run as trust
 in-process code. An AssemblyLoadContext controls dependency identity; it is not a
 security sandbox. Disabling removes contributions and cancels cooperative work,
 but does not unload assemblies. Update/remove packages only after process exit,
-then restart the application. Host version defaults to 0.2.0. Plugin settings are
+then restart the application. Host version defaults to 0.3.0. Plugin settings are
 plain JSON; optional runtime-services v1 supplies supervised tasks and a separate
 declared-key Windows DPAPI CurrentUser secret store. API 1 and SDK assembly
-identity 1.0.0.0 remain compatible; both SDK packages are version 0.2.0.
+identity 1.0.0.0 remain compatible; both SDK packages are version 0.3.0.
 See [runtime-services v1](../../docs/runtime-services.md) for the exact host APIs,
 safe diagnostics, resume consent and retained stop ownership.
 
@@ -90,3 +90,13 @@ real user path; isolated hosts and native smoke supply their own UserRoot. This
 is a storage convention, not a filesystem sandbox. The native host holds an
 exclusive user-root file lease for the manager lifetime because the JSON stores
 assume a single owning host process.
+
+Optional project services 1 use `PluginManagerOptions.ProjectScope` (or the
+actual legacy UserRoot/default identity). `PrepareProjectLeaveAsync(pluginId?,
+token)` returns Succeeded/HasPendingWork/ErrorCode. The manager retains a single
+active preparation; a different overlapping filter/participant set returns ProjectPreparationBusy.
+After timeout, a same-participant retry receives the retained result once without re-invoking its hook.
+`HasPendingProjectWork` includes admitted context I/O as well as preparation.
+Close revokes new context operations immediately; terminal Stop joins all
+admitted calls and callbacks before disposing context. This does not turn
+ExecuteCommandAsync into a generic callback/owned-task tracker.

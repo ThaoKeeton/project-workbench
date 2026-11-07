@@ -1,11 +1,13 @@
 # Runtime services v1 (host 0.2.0)
 
 `WorkbenchApi.Version` remains 1 and `IPluginContext` is unchanged. Both SDK
-packages are 0.2.0 with file version 0.2.0.0 and assembly identity 1.0.0.0. A
+packages are now 0.3.0 with file version 0.3.0.0 and assembly identity 1.0.0.0. A
 plugin that needs these services declares `minimumHostVersion: "0.2.0"` and
 casts its initialization context to the optional `IPluginRuntimeContext`.
 `WorkbenchRuntimeServices.Version` is 1. The SDK stays UI-neutral; see the exact
-types in [RuntimeContracts.cs](../src/Workbench.Sdk/RuntimeContracts.cs).
+types in [RuntimeContracts.cs](../src/Workbench.Sdk/RuntimeContracts.cs). Optional
+[project services 1](project-services.md) additionally require host 0.3.0; they
+do not change this runtime interface or the frozen business packages requiring 0.2.0.
 
 ```csharp
 var runtime = context as IPluginRuntimeContext

@@ -9,6 +9,7 @@
     <IsPublishable>false</IsPublishable>
   </PropertyGroup>
   <ItemGroup>
+    <Compile Include="../Shared/SampleTextBuffer.cs" Link="SampleTextBuffer.cs" />
     <ProjectReference Include="../../src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj" />
   </ItemGroup>
 </Project>
