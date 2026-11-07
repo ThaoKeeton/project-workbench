@@ -126,67 +126,152 @@ internal static class NativeWorkspaceCloseProbe
         var obstruction = Path.Combine(fixture.TargetRoot, ".workbench-project", "context.json");
         const string original = "Synthetic bounded draft before failed actual Dispose";
         const string correction = "Synthetic correction through the actual recovery TextBox";
-        try
-        {
-            window.WorkspaceSelector.SelectedItem = window.WorkspaceSelector.Items.OfType<ComboBoxItem>()
-                .Single(item => (string)item.Tag == fixture.TargetId);
-            await WaitAsync(() => Task.FromResult(!window.SmokeActionBusy && window.Workspace.CanUseCurrentRuntime
-                && window.Workspace.ActiveProject?.Id == fixture.TargetId));
-            await window.WorkspaceActionAsync(async runtime =>
-            {
-                Require((await runtime.Manager.DisableAsync(Id)).Succeeded, "Actual-dispose fixture disable failed.");
-                await runtime.Manager.GetSettings(Id).SetAsync("mode", "hold-stop");
-                Require((await runtime.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded, "Actual-dispose fixture enable failed.");
-            });
-            var manager = window.SmokeManager;
-            var generation = window.Workspace.RuntimeGeneration;
-            var document = window.Workspace.Document!;
-            var scope = window.Workspace.Scope!;
-            // A real bounded IO obstruction, not a huge TextBox or an injected failure result.
-            Directory.CreateDirectory(obstruction);
-            var page = await window.SmokeNavigateAsync("context");
-            Find<TextBox>(page, "项目上下文编辑器").Text = original;
-            await WaitAsync(() => Task.FromResult(document.ErrorCode == "UnsafePath" && !document.HasPendingWork));
-            var failed = false;
-            // This existing native probe entry invokes shipping StopAsync -> actual Dispose,
-            // deliberately bypassing normal preparation to exercise retained cleanup recovery.
-            try { await window.SmokeStopAsync().WaitAsync(TimeSpan.FromSeconds(40)); }
-            catch (ProjectWorkspaceStoreException error) when (error.ErrorCode == "UnsafePath") { failed = true; }
-            Require(failed && manager.HasPendingStops && !document.IsEditable && !window.Workspace.CanUseCurrentRuntime
-                && !fixture.Closed.IsCompleted, "Failed actual Dispose did not retain pending cleanup and editor ownership.");
-            AssertHeld(fixture.Root); AssertHeld(fixture.TargetRoot);
-            await File.WriteAllTextAsync(Path.Combine(data, "release-stop"), "synthetic");
-            // A second owned actual Dispose pass confirms the same Stop has settled. The same
-            // IO obstruction still fails document retirement, exposing document-only recovery.
-            Require(!await window.SmokeCloseAttemptAsync().WaitAsync(TimeSpan.FromSeconds(40))
-                && !manager.HasPendingStops && document.IsEditable && !window.Workspace.CanUseCurrentRuntime
-                && ReferenceEquals(document, window.Workspace.Document) && ReferenceEquals(manager, window.SmokeManager)
-                && generation == window.Workspace.RuntimeGeneration && FactoryCalls(fixture.Options) == 2,
-                "Actual cleanup did not open only the retained document while keeping runtime actions sealed.");
-            AssertHeld(fixture.Root); AssertHeld(fixture.TargetRoot);
-            var rejected = false;
-            try { await window.Workspace.RunCurrentAsync((_, _, _) => Task.CompletedTask); }
-            catch (ProjectWorkspaceStoreException) { rejected = true; }
-            Require(rejected, "Failed actual Dispose reopened plugin action admission.");
-            var editor = Find<TextBox>(window.WorkspaceRoot, "项目上下文编辑器");
-            await WaitAsync(() => Task.FromResult(editor.IsLoaded && editor.IsEnabled && editor.XamlRoot is not null));
-            Require(editor.Text == original, "The actual recovery TextBox lost its retained dirty buffer.");
-            Directory.Delete(obstruction);
-            editor.Text = correction;
-            Require(document.Text == correction && !window.Workspace.CanUseCurrentRuntime,
-                "The real recovery TextBox silently dropped document-only correction.");
-            Invoke(window.SmokeCloseRetryButton ?? throw new InvalidOperationException("Actual-dispose recovery lost close retry."));
-            editor.Text = "Synthetic fresh edit refused after actual Dispose retry seal";
-            await fixture.Closed.WaitAsync(TimeSpan.FromSeconds(20));
-            Require((await scope.Documents.ReadAsync()).Text == correction && FactoryCalls(fixture.Options) == 2,
-                "Actual Dispose retry lost the exact native correction or restarted a runtime.");
-            AssertReleased(fixture);
-        }
+        var evidence = new NativeProbeEvidence("workspace-actual-dispose", []);
+        var observed = new NativeWorkspaceCloseObservations { HeldLeaseChecks = 0 };
+        evidence.Observations.WorkspaceClose = observed;
+        PluginManager? expectedManager = null;
+        ProjectDocumentSession? boundDocument = null;
+        long? expectedGeneration = null;
+        TextBox? recoveryEditor = null;
+        try { await evidence.RunAsync(fixture.Options.ReportPath, RunProbeAsync); }
         finally
         {
-            if (Directory.Exists(obstruction)) Directory.Delete(obstruction);
-            await File.WriteAllTextAsync(Path.Combine(data, "release-stop"), "synthetic");
-            await RetireAsync(fixture);
+            // Preserve the first probe sidecar before cleanup mutates state. If cleanup itself
+            // fails, retain its separate checkpoint without replacing the original evidence.
+            evidence.At(NativeProbeCheckpoint.WorkspaceFixtureCleanup);
+            await evidence.RunAsync(fixture.Options.ReportPath is { } report ? report + ".cleanup" : null, CleanupAsync);
+        }
+
+        async Task RunProbeAsync()
+        {
+            try
+            {
+                evidence.At(NativeProbeCheckpoint.WorkspaceTarget);
+                window.WorkspaceSelector.SelectedItem = window.WorkspaceSelector.Items.OfType<ComboBoxItem>()
+                    .Single(item => (string)item.Tag == fixture.TargetId);
+                await WaitAsync(() => Task.FromResult(!window.SmokeActionBusy && window.Workspace.CanUseCurrentRuntime
+                    && window.Workspace.ActiveProject?.Id == fixture.TargetId));
+                evidence.At(NativeProbeCheckpoint.WorkspaceFixtureMode);
+                await window.WorkspaceActionAsync(async runtime =>
+                {
+                    Require((await runtime.Manager.DisableAsync(Id)).Succeeded, "Actual-dispose fixture disable failed.");
+                    await runtime.Manager.GetSettings(Id).SetAsync("mode", "hold-stop");
+                    Require((await runtime.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded, "Actual-dispose fixture enable failed.");
+                });
+                var manager = window.SmokeManager;
+                var generation = window.Workspace.RuntimeGeneration;
+                var document = window.Workspace.Document!;
+                var scope = window.Workspace.Scope!;
+                expectedManager = manager; boundDocument = document; expectedGeneration = generation;
+                // A real bounded IO obstruction, not a huge TextBox or an injected failure result.
+                evidence.At(NativeProbeCheckpoint.WorkspaceObstruction);
+                Directory.CreateDirectory(obstruction);
+                evidence.At(NativeProbeCheckpoint.WorkspaceContextNavigation);
+                var page = await window.SmokeNavigateAsync("context");
+                evidence.At(NativeProbeCheckpoint.WorkspaceContextEdit);
+                Find<TextBox>(page, "项目上下文编辑器").Text = original;
+                evidence.At(NativeProbeCheckpoint.WorkspaceSaveFailure);
+                await WaitAsync(() => Task.FromResult(document.ErrorCode == "UnsafePath" && !document.HasPendingWork));
+                var failed = false;
+                // This existing native probe entry invokes shipping StopAsync -> actual Dispose,
+                // deliberately bypassing normal preparation to exercise retained cleanup recovery.
+                evidence.At(NativeProbeCheckpoint.WorkspaceFirstDispose);
+                try { await window.SmokeStopAsync().WaitAsync(TimeSpan.FromSeconds(40)); }
+                catch (ProjectWorkspaceStoreException error) when (error.ErrorCode == "UnsafePath") { failed = true; }
+                observed.FirstDisposeRejected = failed;
+                evidence.At(NativeProbeCheckpoint.WorkspacePendingState);
+                Require(failed && manager.HasPendingStops && !document.IsEditable && !window.Workspace.CanUseCurrentRuntime
+                    && !fixture.Closed.IsCompleted, "Failed actual Dispose did not retain pending cleanup and editor ownership.");
+                evidence.At(NativeProbeCheckpoint.WorkspaceHeldLeases);
+                AssertHeld(fixture.Root); observed.HeldLeaseChecks++;
+                AssertHeld(fixture.TargetRoot); observed.HeldLeaseChecks++;
+                evidence.At(NativeProbeCheckpoint.WorkspaceReleaseStop);
+                await File.WriteAllTextAsync(Path.Combine(data, "release-stop"), "synthetic");
+                // A second owned actual Dispose pass confirms the same Stop has settled. The same
+                // IO obstruction still fails document retirement, exposing document-only recovery.
+                evidence.At(NativeProbeCheckpoint.WorkspaceCleanupDispose);
+                var closeSucceeded = await window.SmokeCloseAttemptAsync().WaitAsync(TimeSpan.FromSeconds(40));
+                observed.CloseAttemptSucceeded = closeSucceeded;
+                evidence.At(NativeProbeCheckpoint.WorkspaceSettledState);
+                Require(!closeSucceeded
+                    && !manager.HasPendingStops && document.IsEditable && !window.Workspace.CanUseCurrentRuntime
+                    && ReferenceEquals(document, window.Workspace.Document) && ReferenceEquals(manager, window.SmokeManager)
+                    && generation == window.Workspace.RuntimeGeneration && FactoryCalls(fixture.Options) == 2,
+                    "Actual cleanup did not open only the retained document while keeping runtime actions sealed.");
+                evidence.At(NativeProbeCheckpoint.WorkspaceHeldLeases);
+                AssertHeld(fixture.Root); observed.HeldLeaseChecks++;
+                AssertHeld(fixture.TargetRoot); observed.HeldLeaseChecks++;
+                evidence.At(NativeProbeCheckpoint.WorkspaceActionAdmission);
+                var rejected = false;
+                try { await window.Workspace.RunCurrentAsync((_, _, _) => Task.CompletedTask); }
+                catch (ProjectWorkspaceStoreException) { rejected = true; }
+                observed.RuntimeActionRejected = rejected;
+                Require(rejected, "Failed actual Dispose reopened plugin action admission.");
+                evidence.At(NativeProbeCheckpoint.WorkspaceEditorLookup);
+                var editor = Find<TextBox>(window.WorkspaceRoot, "项目上下文编辑器");
+                recoveryEditor = editor;
+                evidence.At(NativeProbeCheckpoint.WorkspaceEditorReady);
+                await WaitAsync(() => Task.FromResult(editor.IsLoaded && editor.IsEnabled && editor.XamlRoot is not null));
+                evidence.At(NativeProbeCheckpoint.WorkspaceOriginalBuffer);
+                Require(editor.Text == original, "The actual recovery TextBox lost its retained dirty buffer.");
+                evidence.At(NativeProbeCheckpoint.WorkspaceRemoveObstruction);
+                Directory.Delete(obstruction);
+                evidence.At(NativeProbeCheckpoint.WorkspaceCorrection);
+                editor.Text = correction;
+                Require(document.Text == correction && !window.Workspace.CanUseCurrentRuntime,
+                    "The real recovery TextBox silently dropped document-only correction.");
+                evidence.At(NativeProbeCheckpoint.WorkspaceCloseRetry);
+                Invoke(window.SmokeCloseRetryButton ?? throw new InvalidOperationException("Actual-dispose recovery lost close retry."));
+                editor.Text = "Synthetic fresh edit refused after actual Dispose retry seal";
+                evidence.At(NativeProbeCheckpoint.WorkspaceClosed);
+                await fixture.Closed.WaitAsync(TimeSpan.FromSeconds(20));
+                evidence.At(NativeProbeCheckpoint.WorkspacePersisted);
+                Require((await scope.Documents.ReadAsync()).Text == correction && FactoryCalls(fixture.Options) == 2,
+                    "Actual Dispose retry lost the exact native correction or restarted a runtime.");
+                evidence.At(NativeProbeCheckpoint.WorkspaceReleasedLeases);
+                AssertReleased(fixture);
+                observed.FinalLeasesReleased = true;
+            }
+            catch { CaptureFailureState(); throw; }
+        }
+
+        async Task CleanupAsync()
+        {
+            try
+            {
+                if (Directory.Exists(obstruction)) Directory.Delete(obstruction);
+                await File.WriteAllTextAsync(Path.Combine(data, "release-stop"), "synthetic");
+                await RetireAsync(fixture);
+            }
+            catch { CaptureFailureState(); throw; }
+        }
+
+        void CaptureFailureState()
+        {
+            try
+            {
+                observed.HasPendingStops = expectedManager?.HasPendingStops;
+                observed.DocumentEditable = boundDocument?.IsEditable;
+                observed.DocumentHasPendingWork = boundDocument?.HasPendingWork;
+                observed.ExpectedDocumentError = boundDocument is null ? null : boundDocument.ErrorCode == "UnsafePath";
+                observed.RuntimeAdmitted = window.Workspace.CanUseCurrentRuntime;
+                observed.WindowClosed = fixture.Closed.IsCompleted;
+                observed.WindowClosing = window.SmokeCloseInProgress;
+                observed.SameDocument = boundDocument is null ? null : ReferenceEquals(boundDocument, window.Workspace.Document);
+                observed.SameManager = expectedManager is null ? null : ReferenceEquals(expectedManager, window.SmokeManager);
+                observed.SameGeneration = expectedGeneration is null ? null : expectedGeneration == window.Workspace.RuntimeGeneration;
+                observed.FactoryCalls = FactoryCalls(fixture.Options);
+                observed.DocumentMatchesOriginal = boundDocument is null ? null : boundDocument.Text == original;
+                observed.DocumentMatchesCorrection = boundDocument is null ? null : boundDocument.Text == correction;
+                observed.CloseRetryAvailable = window.SmokeCloseRetryButton is not null;
+                observed.EditorLoaded = recoveryEditor?.IsLoaded;
+                observed.EditorEnabled = recoveryEditor?.IsEnabled;
+                observed.EditorHasRoot = recoveryEditor is null ? null : recoveryEditor.XamlRoot is not null;
+                observed.EditorMatchesOriginal = recoveryEditor is null ? null : recoveryEditor.Text == original;
+                observed.RecoveryEditorMatches = Descendants<TextBox>(window.WorkspaceRoot).Count(editor =>
+                    Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(editor) == "项目上下文编辑器");
+            }
+            catch (Exception) { /* Partial primitive observations must never replace the probe failure. */ }
         }
     }
 

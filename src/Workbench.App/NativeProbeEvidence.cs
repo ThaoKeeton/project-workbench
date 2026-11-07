@@ -5,14 +5,49 @@ using Workbench.Sdk;
 
 namespace Workbench.App;
 
-internal enum NativeProbePhase { Unknown, Management, RestartSeed, RestartVerify, RestartDisabled, UpdateVerify, RollbackVerify, RemoveVerify }
+internal enum NativeProbePhase { Unknown, Management, RestartSeed, RestartVerify, RestartDisabled, UpdateVerify, RollbackVerify, RemoveVerify, WorkspaceActualDispose }
 internal enum NativeProbeReason { Unknown, UserRequest, Restore, HostShutdown, PluginDisabled, InitializationFailed, PackageChanged }
 internal enum NativeProbeCheckpoint
 {
     Enter, UiThread, Management, RestartChecks, SettingsLookup, RestorePublications, RestoreStartReason,
     GuardedLookup, GuardedAuthority, PersistenceData, PersistenceNote, PersistenceSecret,
     CredentialNavigation, CredentialLookup, CredentialEmpty, CredentialMetadata, FixturePage, FixtureSettings,
-    Disable, DisableReason, FinalStop, FinalStopCompleted, FinalReport, FinalClose, Completed
+    Disable, DisableReason, FinalStop, FinalStopCompleted, FinalReport, FinalClose, Completed,
+    WorkspaceTarget, WorkspaceFixtureMode, WorkspaceObstruction, WorkspaceContextNavigation, WorkspaceContextEdit,
+    WorkspaceSaveFailure, WorkspaceFirstDispose, WorkspacePendingState, WorkspaceHeldLeases,
+    WorkspaceReleaseStop, WorkspaceCleanupDispose, WorkspaceSettledState, WorkspaceActionAdmission,
+    WorkspaceEditorLookup, WorkspaceEditorReady, WorkspaceOriginalBuffer, WorkspaceRemoveObstruction,
+    WorkspaceCorrection, WorkspaceCloseRetry, WorkspaceClosed, WorkspacePersisted, WorkspaceReleasedLeases,
+    WorkspaceFixtureCleanup
+}
+
+/// <summary>Only host-owned counts, identities-as-equalities and state booleans; no control text.</summary>
+internal sealed class NativeWorkspaceCloseObservations
+{
+    public bool? FirstDisposeRejected { get; set; }
+    public bool? CloseAttemptSucceeded { get; set; }
+    public bool? RuntimeActionRejected { get; set; }
+    public bool? HasPendingStops { get; set; }
+    public bool? DocumentEditable { get; set; }
+    public bool? DocumentHasPendingWork { get; set; }
+    public bool? ExpectedDocumentError { get; set; }
+    public bool? RuntimeAdmitted { get; set; }
+    public bool? WindowClosed { get; set; }
+    public bool? WindowClosing { get; set; }
+    public bool? SameDocument { get; set; }
+    public bool? SameManager { get; set; }
+    public bool? SameGeneration { get; set; }
+    public int? FactoryCalls { get; set; }
+    public int? RecoveryEditorMatches { get; set; }
+    public bool? EditorLoaded { get; set; }
+    public bool? EditorEnabled { get; set; }
+    public bool? EditorHasRoot { get; set; }
+    public bool? EditorMatchesOriginal { get; set; }
+    public bool? DocumentMatchesOriginal { get; set; }
+    public bool? DocumentMatchesCorrection { get; set; }
+    public bool? CloseRetryAvailable { get; set; }
+    public int? HeldLeaseChecks { get; set; }
+    public bool? FinalLeasesReleased { get; set; }
 }
 
 internal sealed record NativeWorkerPublication(int Runs, NativeProbeReason StartReason)
@@ -25,6 +60,7 @@ internal sealed record NativeWorkerPublication(int Runs, NativeProbeReason Start
 /// <summary>Only owned primitive observations; never settings, native text or exception objects.</summary>
 internal sealed class NativeProbeObservations
 {
+    public NativeWorkspaceCloseObservations? WorkspaceClose { get; set; }
     public NativeWorkerPublication? WorkerPublication { get; set; }
     public NativeProbeReason? StartAssertionReason { get; set; }
     public int? GuardedMatches { get; set; }
@@ -57,6 +93,7 @@ internal sealed class NativeProbeEvidence(string? phase, IReadOnlyList<string> c
         "update-verify" => NativeProbePhase.UpdateVerify,
         "rollback-verify" => NativeProbePhase.RollbackVerify,
         "remove-verify" => NativeProbePhase.RemoveVerify,
+        "workspace-actual-dispose" => NativeProbePhase.WorkspaceActualDispose,
         _ => NativeProbePhase.Unknown
     };
     private NativeProbeCheckpoint _checkpoint = NativeProbeCheckpoint.Enter;
