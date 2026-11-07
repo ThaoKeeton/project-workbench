@@ -1,10 +1,11 @@
 using Workbench.Core.Projects;
 using Workbench.Sdk;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace Workbench.Core.Tests;
 
-public sealed class PluginProjectTests
+public sealed class PluginProjectTests(ITestOutputHelper output)
 {
     private const string Id = "com.example.project";
     private const string Other = "com.example.second";
@@ -233,33 +234,68 @@ public sealed class PluginProjectTests
     [Fact]
     public async Task All_plugin_retry_refuses_a_changed_participant_set_while_the_original_hook_is_pending()
     {
-        using var disk = Package();
-        disk.Package(Other, fields: new() { ["entryType"] = "Workbench.TestPlugin.ProjectFixturePlugin" });
+        var disk = Package();
         var manager = Manager(disk);
-        await manager.DiscoverAsync();
-        var settings = manager.GetSettings(Id);
-        await settings.SetAsync("projectMode", "async-held");
-        Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
-        var release = Path.Combine(disk.User, "data", Id, "release-prepare");
-        try
+        var data = Path.Combine(disk.User, "data", Id);
+        var otherData = Path.Combine(disk.User, "data", Other);
+        var release = Path.Combine(data, "release-prepare");
+        var releaseOther = Path.Combine(otherData, "release-prepare");
+        await RuntimeTest.WithCleanupAsync([manager], async () =>
         {
-            Assert.True((await manager.PrepareProjectLeaveAsync()).HasPendingWork);
+            disk.Package(Other, fields: new() { ["entryType"] = "Workbench.TestPlugin.ProjectFixturePlugin" });
+            await manager.DiscoverAsync();
+            var settings = manager.GetSettings(Id);
+            var otherSettings = manager.GetSettings(Other);
+            await settings.SetAsync("projectMode", "async-held");
+            await otherSettings.SetAsync("projectMode", "async-held");
+            Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            var original = await manager.PrepareProjectLeaveAsync();
+            output.WriteLine(Facts("Original cohort", original));
+            Assert.True(original.HasPendingWork, Facts("Original cohort", original));
+            await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(data, "prepare-started"))));
             Assert.True((await manager.EnableAsync(Other, confirmTrust: true)).Succeeded);
             var changed = await manager.PrepareProjectLeaveAsync();
-            Assert.False(changed.Succeeded);
-            Assert.True(changed.HasPendingWork);
+            output.WriteLine(Facts("Changed participants", changed));
+            Assert.False(changed.Succeeded, Facts("Changed participants", changed));
+            Assert.True(changed.HasPendingWork, Facts("Changed participants", changed));
             Assert.Equal("ProjectPreparationBusy", changed.ErrorCode);
-            Assert.Equal(0, await manager.GetSettings(Other).GetAsync("prepareCalls", 0));
+            Assert.Equal(0, await otherSettings.GetAsync("prepareCalls", 0));
             await File.WriteAllTextAsync(release, "release original cohort");
             await RuntimeTest.WaitAsync(() => Task.FromResult(!manager.HasPendingProjectWork));
-            Assert.True((await manager.PrepareProjectLeaveAsync()).Succeeded);
-            Assert.Equal(1, await manager.GetSettings(Other).GetAsync("prepareCalls", 0));
-        }
-        finally
+            Assert.Equal(1, await settings.GetAsync("prepareCalls", 0));
+
+            // Other is a fresh, independently held participant in this new cohort. Normal IO
+            // speed cannot establish that a newly admitted cohort finishes in one 100ms wait.
+            var fresh = await manager.PrepareProjectLeaveAsync();
+            await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(otherData, "prepare-started"))));
+            output.WriteLine(Facts("New cohort", fresh));
+            Assert.False(fresh.Succeeded, Facts("New cohort", fresh));
+            Assert.True(fresh.HasPendingWork, Facts("New cohort", fresh));
+            Assert.Equal("ProjectPreparationPending", fresh.ErrorCode);
+            Assert.True(manager.HasPendingProjectWork);
+            Assert.Equal(1, await otherSettings.GetAsync("prepareCalls", 0));
+            await File.WriteAllTextAsync(releaseOther, "release new cohort");
+            await RuntimeTest.WaitAsync(() => Task.FromResult(!manager.HasPendingProjectWork));
+
+            // Acknowledge this retained cohort once, without starting/polling new preparations.
+            var acknowledged = await manager.PrepareProjectLeaveAsync();
+            output.WriteLine(Facts("Acknowledged cohort", acknowledged));
+            Assert.True(acknowledged.Succeeded, Facts("Acknowledged cohort", acknowledged));
+            Assert.False(acknowledged.HasPendingWork, Facts("Acknowledged cohort", acknowledged));
+            Assert.Null(acknowledged.ErrorCode);
+            Assert.Equal(2, await settings.GetAsync("prepareCalls", 0));
+            Assert.Equal(1, await otherSettings.GetAsync("prepareCalls", 0));
+        }, disk, beforeCleanup: async () =>
         {
-            await File.WriteAllTextAsync(release, "cleanup");
-            await RuntimeTest.DisposeAsync(manager);
-        }
+            foreach (var path in new[] { release, releaseOther })
+            {
+                Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+                await File.WriteAllTextAsync(path, "cleanup");
+            }
+        });
+
+        string Facts(string stage, ProjectPreparationResult result) =>
+            $"{stage}: Succeeded={result.Succeeded}, HasPendingWork={result.HasPendingWork}, ErrorCode={result.ErrorCode ?? "(none)"}, ManagerPending={manager.HasPendingProjectWork}";
     }
 
     [Fact]
