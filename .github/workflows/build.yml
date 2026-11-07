@@ -53,6 +53,15 @@ jobs:
       - name: Publish native host and independent plugins
         shell: pwsh
         run: ./scripts/build.ps1
+      - name: Audited production delivery packaging regressions
+        shell: pwsh
+        run: ./tests/scripts/BusinessPluginDelivery.Tests.ps1 -AppDirectory ./artifacts/native/app
+      - name: Export and verify production plugins paired with current host
+        shell: pwsh
+        run: |
+          ./scripts/export-business-plugins.ps1 -RequireCurrentSource
+          Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
+          Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
       - name: Real WinUI isolated native smoke
         id: native_smoke
         shell: pwsh
@@ -62,7 +71,7 @@ jobs:
         run: ./scripts/native-runtime-probe.ps1 -TimeoutSeconds 180
       - name: Independent DingTalk and UPCAM in current shipping app
         shell: pwsh
-        run: ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300
+        run: ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300 -ProductionInputRoot ./artifacts/native/business-plugins
       - name: Export independent SDK source and NuGet snapshot
         shell: pwsh
         run: ./scripts/export-sdk.ps1
@@ -92,6 +101,16 @@ jobs:
           path: |
             artifacts/sdk-snapshot/
             artifacts/sdk-snapshot.zip
+          if-no-files-found: error
+      - name: Reverify the tested production download before upload
+        shell: pwsh
+        run: |
+          Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
+          Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-business-plugins
+          path: artifacts/native/business-plugins/
           if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.2
         if: always()

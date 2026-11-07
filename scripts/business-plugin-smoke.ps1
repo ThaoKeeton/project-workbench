@@ -1,5 +1,8 @@
 [CmdletBinding()]
-param([ValidateRange(60, 900)][int]$TimeoutSeconds = 300)
+param(
+    [ValidateRange(60, 900)][int]$TimeoutSeconds = 300,
+    [string]$ProductionInputRoot = (Join-Path (Split-Path $PSScriptRoot -Parent) 'tests/integration')
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw 'Business plugin smoke requires actual Windows WinUI, DPAPI and owned native worker processes.' }
@@ -10,7 +13,7 @@ $output = Join-Path $repo 'artifacts/native/business-probes'
 $fixtures = Join-Path $repo 'artifacts/native/fixtures/business'
 $acceptanceFixtures = Join-Path $repo 'artifacts/native/fixtures/business-acceptance'
 if (-not (Test-Path -LiteralPath $app -PathType Leaf)) { throw 'Build the current shipping native Workbench.App.exe first.' }
-& (Join-Path $PSScriptRoot 'import-business-plugin.ps1') -DestinationRoot $fixtures
+& (Join-Path $PSScriptRoot 'import-business-plugin.ps1') -InputRoot $ProductionInputRoot -DestinationRoot $fixtures
 $inputs = @(Get-Content -LiteralPath (Join-Path $fixtures 'inputs.json') -Raw | ConvertFrom-Json)
 & (Join-Path $PSScriptRoot 'import-business-plugin.ps1') -Mode Acceptance -DestinationRoot $acceptanceFixtures
 $acceptanceInputs = @(Get-Content -LiteralPath (Join-Path $acceptanceFixtures 'inputs.json') -Raw | ConvertFrom-Json)
