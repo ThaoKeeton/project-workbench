@@ -1,8 +1,8 @@
 # 独立业务插件接入契约
 
-两个 SDK 包固定为 **0.3.0**，API 1、可选运行服务 1、可选项目服务 1 和程序集身份 **1.0.0.0** 保持兼容；文件版本为 0.3.0.0。.NET SDK 固定 10.0.403，Windows App SDK 固定 1.8.260921001，插件目标为 net10.0-windows10.0.19041.0/x64。SDK 源码与包分发现在通过下述可重建快照提供；独立业务 CI 不需要引用主程序或获得其他私有仓库的 token。
+两个 SDK 包固定为 **0.4.0**，API 1、可选运行服务 1、可选项目服务 1 和程序集身份 **1.0.0.0** 保持兼容；文件版本为 0.4.0.0。.NET SDK 固定 10.0.403，Windows App SDK 固定 1.8.260921001，插件目标为 net10.0-windows10.0.19041.0/x64。SDK 源码与包分发现在通过下述可重建快照提供；独立业务 CI 不需要引用主程序或获得其他私有仓库的 token。
 
-以下为历史 host/SDK 0.2.0 证据，不代表当前 0.3.0 Windows 构建已通过。已核验源码 `a54a668d3f2c98fda7ab826ed3cf72b9c64a2b06` 的 [CI 42307917231](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)：Windows Core 267/267（含两项真实合成值 DPAPI）、原生 14 项、management 17 项、六阶段平台重启 7 项，以及两个独立生产业务包的六进程 27 项检查均通过；独立 UPCAM acceptance-ID 二进制在另一个根的后六进程通过 24 项实际自动 Core/Stop/key/Restore/失败处理检查。Linux Core 为 265 通过、2 项明确 Windows DPAPI 跳过。[SDK artifact 13547796386](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547796386) 的 manifest 为 referenceOnly=false、sdkSourcesDirty=false，九份源码、两包及 README 的哈希与默认 Windows 导出一致，WinUI SDK PRI 为 704 bytes。钉钉 0.3.2 使用宿主异步凭据批次提供方；原生合成模型值保存、用途批准并读取 commit/revision、撤销和删除均已执行，真正 provider dispatch 前的模型 key 值读取仍未执行。UPCAM 正向测试固定独立来源 `48e67e8`、CI 42299664328、ID `com.upcam.task-digest.acceptance`，使用上游本地 fake providers；synthetic sent 不证明真实送达。真实业务接口、真实 Webhook/HTTP/发送和 Windows 11 人工验收不在通过范围。Linux 参考编译或 ReferenceOnly 产物不能替代这些 Windows 证据。
+以下为历史 host/SDK 0.2.0 证据，不代表当前 0.4.0 Windows 构建已通过。已核验源码 `a54a668d3f2c98fda7ab826ed3cf72b9c64a2b06` 的 [CI 42307917231](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)：Windows Core 267/267（含两项真实合成值 DPAPI）、原生 14 项、management 17 项、六阶段平台重启 7 项，以及两个独立生产业务包的六进程 27 项检查均通过；独立 UPCAM acceptance-ID 二进制在另一个根的后六进程通过 24 项实际自动 Core/Stop/key/Restore/失败处理检查。Linux Core 为 265 通过、2 项明确 Windows DPAPI 跳过。[SDK artifact 13547796386](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547796386) 的 manifest 为 referenceOnly=false、sdkSourcesDirty=false，九份源码、两包及 README 的哈希与默认 Windows 导出一致，WinUI SDK PRI 为 704 bytes。钉钉 0.3.2 使用宿主异步凭据批次提供方；原生合成模型值保存、用途批准并读取 commit/revision、撤销和删除均已执行，真正 provider dispatch 前的模型 key 值读取仍未执行。UPCAM 正向测试固定独立来源 `48e67e8`、CI 42299664328、ID `com.upcam.task-digest.acceptance`，使用上游本地 fake providers；synthetic sent 不证明真实送达。真实业务接口、真实 Webhook/HTTP/发送和 Windows 11 人工验收不在通过范围。Linux 参考编译或 ReferenceOnly 产物不能替代这些 Windows 证据。
 
 ## 固定 SDK 分发快照与独立构建
 
@@ -13,7 +13,7 @@ pwsh -File ./scripts/export-sdk.ps1
 pwsh -File ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-snapshot
 ```
 
-当前 CI artifact `workbench-sdk-0.3.0` 包含 `sdk-snapshot.zip`、`source/`、两个 `.nupkg` 和 `manifest.json`。清单记录 projectServices=1、SDK/文件/程序集版本、完整 sourceCommit、SDK 源码是否有未提交修改、每个源码/包的 SHA256 及上述版本。固定并核对该清单后再进入独立 CI；若 sdkSourcesDirty 为 true，源码以逐文件哈希为准，不能仅凭 sourceCommit 复现。快照仅复制十个明确列出的源文件：两个 SDK 项目、四个契约源文件（含 ProjectContracts.cs）、两份消费者 README、Directory.Build.props 和 global.json；两个 `.nupkg` 均声明并包含各自的 README。不包含 App/Core/Desktop DLL、用户配置、凭据或业务数据。可按相同工具版本从源码重建程序集；ZIP/包哈希用于核对该次分发，不承诺不同打包时间的容器字节相同。
+当前 CI artifact `workbench-sdk-0.4.0` 包含 `sdk-snapshot.zip`、`source/`、两个 `.nupkg` 和 `manifest.json`。清单记录 projectServices=1、testingServices=1、SDK/文件/程序集版本、完整 sourceCommit、SDK 源码是否有未提交修改、每个源码/包的 SHA256 及上述版本。固定并核对该清单后再进入独立 CI；若 sdkSourcesDirty 为 true，源码以逐文件哈希为准，不能仅凭 sourceCommit 复现。快照仅复制十一个明确列出的源文件：两个 SDK 项目、五个契约/视图源文件（含 ProjectContracts.cs 和 TestingContracts.cs）、两份消费者 README、Directory.Build.props 和 global.json；两个 `.nupkg` 均声明并包含各自的 README。不包含 App/Core/Desktop DLL、用户配置、凭据或业务数据。可按相同工具版本从源码重建程序集；ZIP/包哈希用于核对该次分发，不承诺不同打包时间的容器字节相同。
 
 源码方式解压后引用 `source/src/Workbench.Sdk/Workbench.Sdk.csproj` 和 `source/src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj`。NuGet 方式将快照 `packages/` 加入本地源，在独立插件项目固定：
 
@@ -27,14 +27,14 @@ pwsh -File ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-s
   <EnableDynamicLoading>true</EnableDynamicLoading>
 </PropertyGroup>
 <ItemGroup>
-  <PackageReference Include="Workbench.Sdk" Version="[0.3.0]" />
-  <PackageReference Include="Workbench.WinUI.Sdk" Version="[0.3.0]" />
+  <PackageReference Include="Workbench.Sdk" Version="[0.4.0]" />
+  <PackageReference Include="Workbench.WinUI.Sdk" Version="[0.4.0]" />
   <PackageReference Include="Microsoft.WindowsAppSDK" Version="[1.8.260921001]" />
 </ItemGroup>
 ```
 
 ```powershell
-dotnet nuget add source C:/verified-sdk/packages --name workbench-sdk-0.3.0
+dotnet nuget add source C:/verified-sdk/packages --name workbench-sdk-0.4.0
 dotnet restore ./Independent.Plugin.csproj
 dotnet build ./Independent.Plugin.csproj -c Release --no-restore
 ```
@@ -76,3 +76,5 @@ Linux 可显式执行 `pwsh ./scripts/export-sdk.ps1 -ReferenceOnly`，生成独
 实际 Windows 测试覆盖安装后默认未信任、明确批准、页面/设置、模拟业务读/搜索/整理、后台页切换继续运行、停止、退出真实进程后的恢复，以及错误配置和重启更新/回滚。报表必须注明来源和模拟范围；Server 2025 自动检查不等于 Windows 11 人工验收。
 
 包回滚只回退代码、保留当前业务数据，更新前保留数据/配置/密文备份；不自动回放历史发送回执或做任意数据格式降级。业务插件需自己维护 schema 和去重兼容。
+
+测试契约 1 使用 `IPluginTestingContext : IPluginProjectContext`，最低宿主 0.4.0；原有接口和 WinUiView 工厂签名不变。当前中间提交只实现守护的源/用例存储，尚未接入宿主测试上下文、运行实现或独立原生测试插件。完整边界见 [测试服务](../testing-services.md)。

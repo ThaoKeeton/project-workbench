@@ -1,6 +1,6 @@
 # Project services v1 (host 0.3.0)
 
-The app and both SDK packages are preview 0.3.0 with file version 0.3.0.0.
+The app and both SDK packages are preview 0.4.0 with file version 0.4.0.0.
 Assembly identity remains 1.0.0.0, API remains 1 and runtime services remain 1.
 The original `IPluginContext`, `IPluginRuntimeContext` and `WinUiView` signatures
 are unchanged. Already-built SDK 0.2 business packages retain their fixed bytes,
@@ -128,10 +128,14 @@ rendering them and never inspect exception Message/ToString/GetBaseException.
 Preparation returns fixed Pending/Canceled/Busy/Failed categories or known
 storage codes. User instructions are displayed only in their native editor.
 
-The SDK snapshot contains exactly ten listed source files, two 0.3.0 NuGet
-packages and both consumer READMEs, with projectServices=1, source/file hashes
+The SDK snapshot contains exactly eleven listed source files, two 0.4.0 NuGet
+packages and both consumer READMEs, with projectServices=1 and testingServices=1, source/file hashes
 and the Windows PRI when native packaging applies. The artifact is
-`workbench-sdk-0.3.0`. Linux `-ReferenceOnly` output proves compilation and
+`workbench-sdk-0.4.0`. Linux `-ReferenceOnly` output proves compilation and
 integrity only. Current Windows native execution, old prebuilt SDK 0.2 business
 compatibility and Windows 11 human acceptance require their own current-source
 evidence; historical 0.2 reports do not establish them.
+
+The optional [testing contracts](testing-services.md) add a further derived
+interface and require host 0.4.0. This does not change project services 1 or
+raise the minimum host version for existing project-only plugins.

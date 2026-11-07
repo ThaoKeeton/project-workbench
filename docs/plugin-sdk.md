@@ -6,7 +6,7 @@
 
 `Workbench.Sdk` 目标为 `net10.0`，不引用 UI。API 版本为 `WorkbenchApi.Version == 1`。入口类型是实现 `IWorkbenchPlugin` 的具体类，具有公共无参数构造函数。
 
-两个 SDK 的包版本为 `0.3.0`，文件版本为 `0.3.0.0`，程序集版本保持 `1.0.0.0`。旧的 API 1 和 `IPluginContext` 不变。可选扩展 `WorkbenchRuntimeServices.Version == 1` 提供后台任务和声明式凭据存储；使用它的插件必须声明 `minimumHostVersion: "0.2.0"`。契约、恢复语义、停止所有权和凭据安全边界见 [运行时服务 v1](runtime-services.md)。
+两个 SDK 的包版本为 `0.4.0`，文件版本为 `0.4.0.0`，程序集版本保持 `1.0.0.0`。旧的 API 1 和 `IPluginContext` 不变。可选扩展 `WorkbenchRuntimeServices.Version == 1` 提供后台任务和声明式凭据存储；使用它的插件必须声明 `minimumHostVersion: "0.2.0"`。契约、恢复语义、停止所有权和凭据安全边界见 [运行时服务 v1](runtime-services.md)。
 
 独立 CI 可使用 `scripts/export-sdk.ps1` 生成的源码/NuGet 快照；固定完整提交和 manifest.json 的文件哈希。导出命令、版本约束、源码/包引用与排除 Desktop/凭据的构建步骤见 [独立接入与 SDK 分发](integrations/plugin-contract-v1.md#固定-sdk-分发快照与独立构建)。
 
@@ -112,3 +112,5 @@ com.example.notes/
 使用项目服务的宿主先成功完成 `PrepareProjectLeaveAsync(id)`，再移除当前控件与导航引用并调用 `DisableAsync`，即使停止失败也不继续引用这些页面。关闭应用使用 `ShutdownAsync`/`DisposeAsync`，保留下次启动的启用偏好；不能通过逐个 `DisableAsync` 实现退出。程序集不可收集，更新、移除或替换包需要退出/重启。无响应或恶意的同进程插件仍可阻塞或破坏整个进程。
 
 可参考 [摘要示例](../plugins/Workbench.Summary.Sample/SummaryPlugin.cs)、[测试用例示例](../plugins/Workbench.TestCases.Sample/TestCasesPlugin.cs) 和 [Core 文档](../src/Workbench.Core/README.md)。
+
+可选测试契约 1 通过 `IPluginTestingContext : IPluginProjectContext` 定义，最低宿主为 0.4.0。当前中间提交只实现源快照与用例存储，宿主测试上下文和独立原生测试插件尚未接入；不会向用户暴露占位服务。见 [测试服务边界](testing-services.md)。原有仅项目服务插件仍可声明 0.3.0，固定业务插件的最低宿主及字节保持不变。

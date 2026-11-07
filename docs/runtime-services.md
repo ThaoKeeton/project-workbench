@@ -1,7 +1,7 @@
 # Runtime services v1 (host 0.2.0)
 
 `WorkbenchApi.Version` remains 1 and `IPluginContext` is unchanged. Both SDK
-packages are now 0.3.0 with file version 0.3.0.0 and assembly identity 1.0.0.0. A
+packages are now 0.4.0 with file version 0.4.0.0 and assembly identity 1.0.0.0. A
 plugin that needs these services declares `minimumHostVersion: "0.2.0"` and
 casts its initialization context to the optional `IPluginRuntimeContext`.
 `WorkbenchRuntimeServices.Version` is 1. The SDK stays UI-neutral; see the exact

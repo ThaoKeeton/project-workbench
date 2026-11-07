@@ -17,7 +17,7 @@ README.zh-CN.md
 
 ## 核对下载
 
-配套 `manifest.json` 使用 schemaVersion 1、Production 模式，记录插件来源、版本、上游 CI、ZIP SHA256/字节数，以及除 manifest 自身外的全部五个载荷文件哈希。`host.sourceCommit` 来自配对 `Workbench.App.dll` 的 ProductVersion，EXE/DLL 哈希与它一起标识实际文件；`packagingSourceCommit` 和 `packagingSourcesDirty` 另记打包源码。旧宿主与新打包器的来源不能混为一谈。宿主版本解析接受三段数值 ProductVersion + 完整小写源码提交，要求 FileVersion 为对应三段版本加 `.0`、AssemblyVersion 为 `1.0.0.0`；因此历史 0.2 与当前预览 0.3 的文件/来源都必须自洽，严格当前来源和干净输入检查不变。生产业务包的 minimumHostVersion 仍固定为 0.2.0。版本资源是二进制声明的来源信息，哈希证明字节一致，**两者都不是独立发布者签名**。
+配套 `manifest.json` 使用 schemaVersion 1、Production 模式，记录插件来源、版本、上游 CI、ZIP SHA256/字节数，以及除 manifest 自身外的全部五个载荷文件哈希。`host.sourceCommit` 来自配对 `Workbench.App.dll` 的 ProductVersion，EXE/DLL 哈希与它一起标识实际文件；`packagingSourceCommit` 和 `packagingSourcesDirty` 另记打包源码。旧宿主与新打包器的来源不能混为一谈。宿主版本解析接受三段数值 ProductVersion + 完整小写源码提交，要求 FileVersion 为对应三段版本加 `.0`、AssemblyVersion 为 `1.0.0.0`；因此历史 0.2 与当前预览 0.4 的文件/来源都必须自洽，严格当前来源和干净输入检查不变。生产业务包的 minimumHostVersion 仍固定为 0.2.0。版本资源是二进制声明的来源信息，哈希证明字节一致，**两者都不是独立发布者签名**。
 
 使用 PowerShell 7，在解压的配套目录运行下面的检查（只读文件，不运行插件）；将 `$app` 改成同次下载的宿主目录：
 

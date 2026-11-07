@@ -1,7 +1,7 @@
-# Workbench.WinUI.Sdk 0.3.0
+# Workbench.WinUI.Sdk 0.4.0
 
 Native WinUI view contracts for Project Workbench plugins. Use with
-`Workbench.Sdk` **0.3.0**, .NET SDK **10.0.403** and Windows App SDK
+`Workbench.Sdk` **0.4.0**, .NET SDK **10.0.403** and Windows App SDK
 **1.8.260921001**, targeting Windows x64. API **1**, the original `IPluginContext`
 and assembly identity **1.0.0.0** remain stable. Optional runtime services version
 **1** require host **0.2.0** or newer.
@@ -28,4 +28,12 @@ hook during initialization to flush nonsecret document models. Hooks run off the
 UI thread and must not access controls or persist credential drafts. Failure
 keeps the current runtime available; timeout/cancellation retains actual work
 until it settles, including during Stop. See `ProjectContracts.cs` in the
-UI-neutral SDK. File version is **0.3.0.0**; assembly identity stays **1.0.0.0**.
+UI-neutral SDK. File version is **0.4.0.0**; assembly identity stays **1.0.0.0**.
+
+Optional testing contracts **1** are defined in `TestingContracts.cs` through
+`IPluginTestingContext : IPluginProjectContext`, requiring host **0.4.0**.
+This intermediate source/case-store increment defines the complete SDK boundary;
+the native testing plugin, run implementation and host testing context are not
+wired yet. Check for the derived interface; no placeholder service is exposed.
+Existing project-only plugins may keep minimumHostVersion **0.3.0**, runtime-only
+plugins **0.2.0**, and immutable business packages retain their original bytes.

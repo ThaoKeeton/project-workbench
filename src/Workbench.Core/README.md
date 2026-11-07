@@ -4,10 +4,10 @@ SDK and Core target .NET 10 and have no WinUI dependencies. Plugins run as trust
 in-process code. An AssemblyLoadContext controls dependency identity; it is not a
 security sandbox. Disabling removes contributions and cancels cooperative work,
 but does not unload assemblies. Update/remove packages only after process exit,
-then restart the application. Host version defaults to 0.3.0. Plugin settings are
+then restart the application. Host version defaults to 0.4.0. Plugin settings are
 plain JSON; optional runtime-services v1 supplies supervised tasks and a separate
 declared-key Windows DPAPI CurrentUser secret store. API 1 and SDK assembly
-identity 1.0.0.0 remain compatible; both SDK packages are version 0.3.0.
+identity 1.0.0.0 remain compatible; both SDK packages are version 0.4.0.
 See [runtime-services v1](../../docs/runtime-services.md) for the exact host APIs,
 safe diagnostics, resume consent and retained stop ownership.
 
@@ -100,3 +100,7 @@ After timeout, a same-participant retry receives the retained result once withou
 Close revokes new context operations immediately; terminal Stop joins all
 admitted calls and callbacks before disposing context. This does not turn
 ExecuteCommandAsync into a generic callback/owned-task tracker.
+
+The optional testing-services 1 SDK requires host 0.4.0. At this intermediate
+commit only guarded source/case storage exists; host testing contexts and runs
+are not wired. See [testing services](../../docs/testing-services.md).
