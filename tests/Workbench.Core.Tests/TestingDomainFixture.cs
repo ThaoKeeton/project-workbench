@@ -11,8 +11,11 @@ internal sealed class TestingDomainFixture : IAsyncDisposable
     internal PluginRegistrationContext Context { get; }
     internal PluginBackgroundTasks Tasks { get; }
     internal TestingController Controller { get; }
+    private readonly PrefixTasks? _taskBridge;
+    internal int RetirementStopCalls=>_taskBridge?.StopCalls ?? 0;
+    internal Task<PluginTaskOperationResult> FirstStopReturned=>_taskBridge!.FirstStopReturned.Task;
     internal string SettingsPath=>Path.Combine(Disk.User,"settings","testing","settings.json");
-    private TestingDomainFixture(IControlledTestAdapter? adapter,AsyncTestGate? delegatePrefix,AsyncTestGate? startPersist)
+    private TestingDomainFixture(IControlledTestAdapter? adapter,AsyncTestGate? delegatePrefix,AsyncTestGate? startPersist,AsyncTestGate? firstStopPrefix,AsyncTestGate? delegatePostfix)
     {
         var settings=new JsonPluginSettings(Path.Combine(Disk.User,"settings","testing"),_=>{});
         Tasks=new(new Dictionary<string,SavedTaskIntent>(),async(id,intent,ct)=>
@@ -22,12 +25,13 @@ internal sealed class TestingDomainFixture : IAsyncDisposable
         },_=>{},TimeSpan.FromMilliseconds(75));
         Context=new(PluginTestingContextTests.Owner,Path.Combine(Disk.User,"data","testing"),settings,Tasks,
             new PluginSecretStore(Disk.User,PluginTestingContextTests.Owner,new WindowsSecretProtector(),_=>{}),new ProjectRuntimeScope("default","Default",Disk.User));
-        IPluginTestingContext supplied=delegatePrefix is null ? Context : new PrefixContext(Context,new PrefixTasks(Tasks,delegatePrefix));
+        _taskBridge=delegatePrefix is null && firstStopPrefix is null && delegatePostfix is null ? null : new(Tasks,delegatePrefix,firstStopPrefix,delegatePostfix);
+        IPluginTestingContext supplied=_taskBridge is null ? Context : new PrefixContext(Context,_taskBridge);
         Controller=new(supplied,adapter);
     }
-    internal static async Task<TestingDomainFixture> CreateAsync(IControlledTestAdapter? adapter=null,AsyncTestGate? delegatePrefix=null,AsyncTestGate? startPersist=null)
+    internal static async Task<TestingDomainFixture> CreateAsync(IControlledTestAdapter? adapter=null,AsyncTestGate? delegatePrefix=null,AsyncTestGate? startPersist=null,AsyncTestGate? firstStopPrefix=null,AsyncTestGate? delegatePostfix=null)
     {
-        var fixture=new TestingDomainFixture(adapter,delegatePrefix,startPersist);
+        var fixture=new TestingDomainFixture(adapter,delegatePrefix,startPersist,firstStopPrefix,delegatePostfix);
         try
         {
             await fixture.Context.Settings.SetAsync("fixtureVersion",1);
@@ -49,12 +53,23 @@ internal sealed class TestingDomainFixture : IAsyncDisposable
         await Task.WhenAll(Context.CancelLifetimeAsync(),Tasks.StopAllAsync(),Controller.StopAsync(),Context.DrainProjectWorkAsync());
         Context.Dispose();Disk.Dispose();
     }
-    private sealed class PrefixTasks(IPluginBackgroundTasks actual,AsyncTestGate gate) : IPluginBackgroundTasks
+    private sealed class PrefixTasks(IPluginBackgroundTasks actual,AsyncTestGate? prefix,AsyncTestGate? firstStopPrefix,AsyncTestGate? postfix) : IPluginBackgroundTasks
     {
-        public void Register(PluginBackgroundTask definition)=>actual.Register(definition with { RunAsync=async execution=> { await gate.HoldAsync();await definition.RunAsync(execution); } });
+        internal int StopCalls;
+        internal TaskCompletionSource<PluginTaskOperationResult> FirstStopReturned { get; }=new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public void Register(PluginBackgroundTask definition)=>actual.Register(definition with { RunAsync=async execution=>
+        {
+            if(prefix is not null) await prefix.HoldAsync();
+            try { await definition.RunAsync(execution); }
+            finally { if(postfix is not null) await postfix.HoldAsync(); }
+        } });
         public IReadOnlyList<PluginBackgroundTaskSnapshot> GetSnapshots()=>actual.GetSnapshots();
         public Task<PluginTaskOperationResult> StartAsync(string id,CancellationToken ct=default)=>actual.StartAsync(id,ct);
-        public Task<PluginTaskOperationResult> StopAsync(string id,CancellationToken ct=default)=>actual.StopAsync(id,ct);
+        public async Task<PluginTaskOperationResult> StopAsync(string id,CancellationToken ct=default)
+        {
+            if(Interlocked.Increment(ref StopCalls)==1 && firstStopPrefix is not null) await firstStopPrefix.HoldAsync();
+            var result=await actual.StopAsync(id,ct);FirstStopReturned.TrySetResult(result);return result;
+        }
         public Task<PluginTaskOperationResult> SetResumeOnStartupAsync(string id,bool enabled,CancellationToken ct=default)=>actual.SetResumeOnStartupAsync(id,enabled,ct);
     }
     private sealed class PrefixContext(IPluginTestingContext actual,IPluginBackgroundTasks tasks) : IPluginTestingContext

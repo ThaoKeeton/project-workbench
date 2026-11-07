@@ -327,6 +327,35 @@ public sealed class TestingControllerTests(ITestOutputHelper output)
         finally { adapter.ReleaseAll();await fixture.DisposeAsync(); }
     }
 
+    [Fact]
+    public async Task Pending_real_supervisor_stop_keeps_retirement_owned_until_the_actual_delegate_postfix_settles()
+    {
+        var postfix=new AsyncTestGate();var fixture=await TestingDomainFixture.CreateAsync(delegatePostfix:postfix);var admitted=new List<Task>();
+        try
+        {
+            var set=await fixture.ImportAndGenerateAsync();var runA=await fixture.Controller.RunAsync([set.Cases[0].Id]);
+            await postfix.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var waitingA=fixture.Controller.WaitForRunSettlementAsync();admitted.Add(waitingA);
+            var pending=await fixture.FirstStopReturned.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(pending.Succeeded);Assert.Equal(PluginBackgroundTaskState.Stopping,Assert.Single(fixture.Tasks.GetSnapshots()).State);
+            var nextBusy=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Controller.Changed+=snapshot=> { if(snapshot.IsAuthoringBusy) nextBusy.TrySetResult(); };
+            var startingB=fixture.Controller.RunAsync([set.Cases[0].Id]);admitted.Add(startingB);
+            await Task.WhenAny(startingB,nextBusy.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(waitingA.IsCompleted);Assert.False(startingB.IsCompleted);Assert.True(fixture.Controller.Snapshot.OwnsRun);
+            Assert.Single(await fixture.Context.Testing.ListRunsAsync());
+            postfix.Release.TrySetResult();
+            Assert.Equal(runA.Plan.Id,Assert.IsType<TestRunSnapshot>(await waitingA).Plan.Id);
+            var runB=await startingB;
+            var settledB=Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync());
+            Assert.Equal(runB.Plan.Id,settledB.Plan.Id);Assert.Equal(TestRunState.Completed,settledB.State);
+        }
+        finally
+        {
+            postfix.Release.TrySetResult();_=await Record.ExceptionAsync(()=>Task.WhenAll(admitted));await fixture.DisposeAsync();
+        }
+    }
+
     private static void CopySyntheticStore(string source,string destination)
     {
         Directory.CreateDirectory(destination);

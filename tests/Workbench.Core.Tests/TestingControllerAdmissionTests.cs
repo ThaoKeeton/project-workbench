@@ -9,6 +9,67 @@ namespace Workbench.Core.Tests;
 
 public sealed class TestingControllerAdmissionTests
 {
+    [Fact]
+    public async Task Old_waiter_and_next_run_share_actual_retirement_before_the_shared_task_can_start_the_next_session()
+    {
+        var stopPrefix=new AsyncTestGate();var adapter=new GatedVirtualAdapter(5);adapter.DisposeGate.Release.TrySetResult();
+        var fixture=await TestingDomainFixture.CreateAsync(adapter,firstStopPrefix:stopPrefix);var admitted=new List<Task>();
+        try
+        {
+            var set=await fixture.ImportAndGenerateAsync();var runA=await fixture.Controller.RunAsync([set.Cases[0].Id]);
+            var waitingA=fixture.Controller.WaitForRunSettlementAsync();admitted.Add(waitingA);
+            await stopPrefix.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(TestRunState.Completed,(await fixture.Context.Testing.ReadRunAsync(runA.Plan.Id)).State);
+            var nextBusy=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            fixture.Controller.Changed+=snapshot=> { if(snapshot.IsAuthoringBusy) nextBusy.TrySetResult(); };
+            var startingB=fixture.Controller.RunAsync([set.Cases[0].Id]);admitted.Add(startingB);
+            await Task.WhenAny(startingB,nextBusy.Task).WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(waitingA.IsCompleted);Assert.False(startingB.IsCompleted);
+            stopPrefix.Release.TrySetResult();
+            var runB=await startingB.WaitAsync(TimeSpan.FromSeconds(5));
+            await adapter.ActionGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(runA.Plan.Id,Assert.IsType<TestRunSnapshot>(await waitingA).Plan.Id);
+            Assert.Equal(1,fixture.RetirementStopCalls);
+            var activeB=await fixture.Context.Testing.ReadRunAsync(runB.Plan.Id);
+            Assert.Equal(TestRunState.Running,activeB.State);Assert.Equal(TestRunEventKind.StepStarted,activeB.Events[^1].Kind);
+            Assert.Null(fixture.Controller.Snapshot.ErrorCode);
+            adapter.ActionGate.Release.TrySetResult();
+            var settledB=Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync());
+            Assert.Equal(runB.Plan.Id,settledB.Plan.Id);Assert.Equal(TestRunState.Completed,settledB.State);
+            Assert.Equal(4,settledB.Events.Count(e=>e.Kind==TestRunEventKind.StepFinished));
+            Assert.DoesNotContain(settledB.Events,e=>e.Kind is TestRunEventKind.CancelRequested or TestRunEventKind.Cancelled);
+            Assert.Equal(2,fixture.RetirementStopCalls);
+        }
+        finally
+        {
+            stopPrefix.Release.TrySetResult();adapter.ReleaseAll();
+            _=await Record.ExceptionAsync(()=>Task.WhenAll(admitted));await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task Released_attempt_wait_and_cancel_tails_are_idempotent_before_a_new_actual_session_completes()
+    {
+        var stopPrefix=new AsyncTestGate();stopPrefix.Release.TrySetResult();
+        var adapter=new GatedVirtualAdapter(5);adapter.DisposeGate.Release.TrySetResult();
+        var fixture=await TestingDomainFixture.CreateAsync(adapter,firstStopPrefix:stopPrefix);
+        try
+        {
+            var set=await fixture.ImportAndGenerateAsync();var runA=await fixture.Controller.RunAsync([set.Cases[0].Id]);
+            Assert.Equal(TestRunState.Completed,Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync()).State);
+            var again=await Task.WhenAll(fixture.Controller.WaitForRunSettlementAsync(),fixture.Controller.WaitForRunSettlementAsync(),fixture.Controller.CancelAsync());
+            Assert.All(again,r=> { Assert.Equal(runA.Plan.Id,Assert.IsType<TestRunSnapshot>(r).Plan.Id);Assert.Equal(TestRunState.Completed,r.State); });
+            Assert.Equal(1,fixture.RetirementStopCalls);Assert.False(fixture.Controller.Snapshot.OwnsRun);
+            var runB=await fixture.Controller.RunAsync([set.Cases[0].Id]);await adapter.ActionGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.Equal(1,fixture.RetirementStopCalls);
+            adapter.ActionGate.Release.TrySetResult();
+            var settled=Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync());
+            Assert.Equal(runB.Plan.Id,settled.Plan.Id);Assert.Equal(TestRunState.Completed,settled.State);
+            Assert.Equal(2,fixture.RetirementStopCalls);
+        }
+        finally { adapter.ReleaseAll();await fixture.DisposeAsync(); }
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

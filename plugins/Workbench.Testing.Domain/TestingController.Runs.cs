@@ -9,7 +9,7 @@ public sealed partial class TestingController
         internal readonly SemaphoreSlim Journal=new(1,1);
         internal readonly CancellationTokenSource Cancellation=new();
         internal Task<PluginTaskOperationResult>? StartWork;
-        internal Task? RunWork;
+        internal Task? RunWork,RetirementWork;
         internal readonly TaskCompletionSource Entered=new(TaskCreationOptions.RunContinuationsAsynchronously);
         internal bool StartSucceeded,CancelRequested,InterruptionRequested,WorkSettled,Released,ObservedFailure;
         internal string? ExecutionError,TerminalError;
@@ -126,17 +126,32 @@ public sealed partial class TestingController
         Task actual;lock(_sync) actual=attempt.RunWork!;
         await actual.ConfigureAwait(false);
     }
-    private async Task RetireAttemptAsync(Attempt attempt)
+    private Task RetireAttemptAsync(Attempt attempt)
     {
-        bool started;TestRunState state;
-        lock(_sync) { started=attempt.StartSucceeded;state=attempt.Current.State; }
-        if(!DomainErrors.IsTerminal(state)) return;
-        if(started && ServiceOpen)
+        TaskCompletionSource start;Task work;
+        lock(_sync)
+        {
+            if(attempt.RetirementWork is not null) return attempt.RetirementWork;
+            if(attempt.Released || !DomainErrors.IsTerminal(attempt.Current.State)) return Task.CompletedTask;
+            start=new(TaskCreationOptions.RunContinuationsAsynchronously);
+            // Every old waiter joins this actual operation before the shared task ID can be reused.
+            work=RetireAttemptCoreAsync(start.Task,attempt);attempt.RetirementWork=work;
+        }
+        start.TrySetResult();return work;
+    }
+    private async Task RetireAttemptCoreAsync(Task admission,Attempt attempt)
+    {
+        await admission.ConfigureAwait(false);
+        await JoinRunWorkAsync(attempt).ConfigureAwait(false);
+        bool started;lock(_sync) started=attempt.StartSucceeded;
+        while(started && ServiceOpen)
         {
             // Also join the real supervisor's callback postfix before a later Start can be accepted as "already running".
             await _context.BackgroundTasks.StopAsync(BackgroundTaskId).ConfigureAwait(false);
+            if(!ServiceOpen) break;
             var task=_context.BackgroundTasks.GetSnapshots().Single(s=>s.Id==BackgroundTaskId);
-            if(task.State is PluginBackgroundTaskState.Running or PluginBackgroundTaskState.Stopping) return;
+            // A finite host Stop can report pending; its actual work still belongs to this retirement.
+            if(task.State is not (PluginBackgroundTaskState.Running or PluginBackgroundTaskState.Stopping)) break;
         }
         lock(_sync) attempt.Released=true;
         Publish();
