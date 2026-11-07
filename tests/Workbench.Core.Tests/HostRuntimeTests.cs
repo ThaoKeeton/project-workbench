@@ -7,6 +7,52 @@ public sealed class HostRuntimeTests
 {
     private const string Id = "com.example.fixture";
 
+    [Fact]
+    public async Task Metadata_discovery_reconfigures_an_inactive_enabled_plugin_without_restoring_its_runtime()
+    {
+        using var disk = new TestDirectory();
+        disk.Package(Id, fields: new() { ["entryType"] = "Workbench.TestPlugin.RuntimeFixturePlugin" });
+        var options = new PluginManagerOptions { PluginsRoot = disk.Plugins, UserRoot = disk.User };
+        await using (var seed = new HostRuntime(options))
+        {
+            await seed.InitializeAsync();
+            Assert.True((await seed.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            Assert.Equal(1, await seed.Manager.GetSettings(Id).GetAsync("instanceCount", 0));
+            await seed.Manager.GetSettings(Id).SetAsync("runtimeMode", "initialize-fail");
+        }
+
+        await using (var offline = new HostRuntime(options))
+        {
+            Assert.Empty(offline.Manager.Plugins);
+            var undiscovered = Assert.Throws<KeyNotFoundException>(() => offline.Manager.GetSettings(Id));
+            Assert.Equal(unchecked((int)0x80131577), undiscovered.HResult);
+            await offline.Manager.DiscoverAsync();
+            var settings = offline.Manager.GetSettings(Id);
+            Assert.Equal("initialize-fail", await settings.GetAsync("runtimeMode", ""));
+            Assert.Equal(1, await settings.GetAsync("instanceCount", 0));
+            var discovered = Assert.Single(offline.Manager.Plugins);
+            Assert.True(discovered.DesiredEnabled);
+            Assert.False(discovered.IsLoaded);
+            Assert.False(discovered.HasRuntime);
+            Assert.Empty(offline.Manager.Contributions.Views);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(disk.User); });
+            await settings.SetAsync("runtimeMode", "cooperative");
+            Assert.Equal(1, await settings.GetAsync("instanceCount", 0));
+            Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+        }
+        using (var nextOwner = HostRuntime.AcquireLease(disk.User)) { }
+
+        await using (var reopened = new HostRuntime(options))
+        {
+            await reopened.InitializeAsync();
+            Assert.True(Assert.Single(reopened.Manager.Plugins).IsLoaded);
+            Assert.Equal("cooperative", await reopened.Manager.GetSettings(Id).GetAsync("runtimeMode", ""));
+            Assert.Equal(2, await reopened.Manager.GetSettings(Id).GetAsync("instanceCount", 0));
+            Assert.Equal(1, await reopened.Manager.GetSettings(Id).GetAsync("stopCalls", 0));
+        }
+        using var finalOwner = HostRuntime.AcquireLease(disk.User);
+    }
+
     [Theory]
     [InlineData(false)]
     [InlineData(true)]

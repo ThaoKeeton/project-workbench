@@ -322,6 +322,7 @@ internal static class NativeWorkspaceProbe
     {
         // Only a known synthetic inactive root; take its actual exclusive lease for this fixture edit.
         await using var offline = new HostRuntime(HostRuntimeOptions.Create(options, new(id, "Synthetic B", root)));
+        await offline.Manager.DiscoverAsync(); // Metadata only; do not restore the deliberately failing enabled fixture.
         await offline.Manager.GetSettings(Id).SetAsync("mode", "workspace-normal");
     }
 
