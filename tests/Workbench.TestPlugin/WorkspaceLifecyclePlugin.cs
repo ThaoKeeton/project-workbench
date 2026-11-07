@@ -10,6 +10,12 @@ public sealed class WorkspaceLifecyclePlugin : IWorkbenchPlugin
     {
         _gate = WorkspaceLifecycleGate.For(context.DataDirectory);
         _gate.Start();
+        context.RegisterCommand(new("correct-draft", "Correct synthetic private draft", _ =>
+        {
+            _gate.PrivateDraft = "corrected through the live plugin command";
+            _gate.FailPreparation = false;
+            return Task.FromResult(new PluginCommandResult(true, "Synthetic draft corrected."));
+        }));
         ((IPluginProjectContext)context).RegisterBeforeProjectLeave(async _ =>
         {
             _gate.Events.Enqueue("prepare");

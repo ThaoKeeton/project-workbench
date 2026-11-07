@@ -112,6 +112,12 @@ internal sealed partial class MainWindow
             {
                 if (!_workspace.CanUseCurrentRuntime) ShowWorkspaceRecovery();
                 Notice("项目操作尚未完成", WorkspaceGuidance(result.ErrorCode), InfoBarSeverity.Warning);
+                if (_workspace.CanUseCurrentRuntime && _workspace.Transition.TargetProjectId is not null)
+                {
+                    var retry = Ui.Named(new Button { Content = "重试打开项目" }, "重试打开项目");
+                    retry.Click += async (_, _) => await RunWorkspaceAsync(() => _workspace.RetryAsync());
+                    _notice.ActionButton = retry;
+                }
             }
         }
         catch (Exception error)
@@ -211,6 +217,7 @@ internal sealed partial class MainWindow
         var status = Ui.Named(Ui.Text(""), "项目上下文保存状态");
         var recover = Ui.Named(new Button { Content = "保留本地副本并重新读取", Visibility = Visibility.Collapsed }, "保留上下文冲突副本并重新读取");
         var replacing = false;
+        var captureFailed = false;
         void Refresh()
         {
             editor.IsEnabled = document.IsEditable && !_closing;
@@ -218,14 +225,21 @@ internal sealed partial class MainWindow
                 : document.IsDirty ? "正在自动保存…" : "已自动保存";
             recover.Visibility = document.ErrorCode is null ? Visibility.Collapsed : Visibility.Visible;
             recover.IsEnabled = (document.IsEditable || _workspace?.CanUseCurrentRuntime == true) && !_closing;
+            if (captureFailed && !_closing)
+            {
+                captureFailed = false;
+                Notice("上下文暂不能编辑", "正在等待当前操作完成；原内容仍保留在当前项目目录。", InfoBarSeverity.Warning);
+            }
         }
-        editor.TextChanged += (_, _) =>
+        editor.TextChanging += (_, _) =>
         {
-            if (replacing || !document.IsEditable || _closing) return;
+            // TextChanging is synchronous and sees the new Text. Capture only the plain model:
+            // a following close/switch can seal admission before asynchronous TextChanged runs.
+            if (replacing || !document.IsEditable || _closing || _workspace?.CanUseCurrentRuntime != true) return;
             try { document.Edit(editor.Text); }
-            catch (Exception) { Notice("上下文暂不能编辑", "正在等待当前操作完成；原内容仍保留在当前项目目录。", InfoBarSeverity.Warning); }
-            Refresh();
+            catch (Exception) { captureFailed = true; }
         };
+        editor.TextChanged += (_, _) => Refresh();
         recover.Click += async (_, _) =>
         {
             if (!(document.IsEditable || _workspace?.CanUseCurrentRuntime == true) || _closing) return;

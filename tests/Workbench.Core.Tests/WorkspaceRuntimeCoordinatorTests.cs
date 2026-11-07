@@ -319,6 +319,8 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         {
             var pending = await coordinator.SwitchAsync(target.Id);
             Assert.True(pending.Pending);
+            Assert.False(coordinator.CanUseCurrentRuntime);
+            Assert.Throws<ProjectWorkspaceStoreException>(() => { _ = coordinator.RunCurrentAsync((_, _, _) => Task.CompletedTask); });
             Assert.Equal(1, fixture.FactoryCalls);
             Assert.False((await coordinator.SwitchAsync("default")).Succeeded);
             Assert.Equal("default", coordinator.ActiveProject!.Id);
@@ -327,6 +329,36 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         finally { gate.PrepareRelease.TrySetResult(); gate.StopRelease.TrySetResult(); }
         Assert.True((await coordinator.RetryAsync()).Succeeded);
         Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
+    public async Task Created_target_is_retained_for_explicit_retry_after_settled_preparation_failure()
+    {
+        using var fixture = new Fixture();
+        using var gate = fixture.Gate(fixture.Disk.User);
+        gate.FailPreparation = true;
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        var manager = coordinator.Runtime.Manager;
+        var result = await coordinator.CreateAndSwitchAsync("Retained target");
+        Assert.False(result.Succeeded);
+        Assert.False(result.Pending);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+        var target = Assert.Single(coordinator.Catalog!.Projects, project => project.Id != "default");
+        Assert.Equal(target.Id, coordinator.Transition.TargetProjectId);
+        var marker = Path.Combine(fixture.Root(target.Id), "retained.txt");
+        await File.WriteAllTextAsync(marker, "target data survives correction");
+        await coordinator.RunCurrentAsync(async (runtime, _, _) =>
+        {
+            Assert.Same(manager, runtime.Manager);
+            Assert.True((await runtime.Manager.ExecuteCommandAsync(PluginId, "correct-draft")).Succeeded);
+        });
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.Equal(target.Id, coordinator.ActiveProject!.Id);
+        Assert.Equal("target data survives correction", await File.ReadAllTextAsync(marker));
+        Assert.Equal(target.Id, (await new ProjectWorkspaceCatalog(fixture.Disk.User).OpenAsync()).ActiveProjectId);
+        Assert.Equal(2, fixture.FactoryCalls);
     }
 
     [Fact]
@@ -358,16 +390,33 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         await using var coordinator = fixture.Coordinator();
         Assert.True((await coordinator.InitializeAsync()).Succeeded);
         Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        var manager = coordinator.Runtime.Manager;
+        var generation = coordinator.RuntimeGeneration;
         var failure = await coordinator.SwitchAsync(target.Id);
         Assert.Equal("ProjectPreparationFailed", failure.ErrorCode);
         Assert.False(failure.Pending);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+        Assert.Same(manager, coordinator.Runtime.Manager);
+        Assert.Equal(generation, coordinator.RuntimeGeneration);
+        Assert.Equal(target.Id, coordinator.Transition.TargetProjectId);
         Assert.Equal(1, fixture.FactoryCalls);
         Assert.Equal(1, gate.Live);
+        Assert.False(gate.StopStarted.Task.IsCompleted);
+        Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
         Assert.True(coordinator.Document!.IsEditable);
         coordinator.Document.Edit("correction after preparation failed");
-        gate.FailPreparation = false;
+        await coordinator.RunCurrentAsync(async (runtime, _, _) =>
+        {
+            Assert.Same(manager, runtime.Manager);
+            Assert.True((await runtime.Manager.ExecuteCommandAsync(PluginId, "correct-draft")).Succeeded);
+        });
+        Assert.Equal(1, fixture.FactoryCalls);
+        Assert.False(gate.StopStarted.Task.IsCompleted);
         Assert.True((await coordinator.RetryAsync()).Succeeded);
         Assert.Equal("correction after preparation failed", (await new ProjectContextDocumentStore(fixture.Disk.User, "default").ReadAsync()).Text);
+        Assert.Equal("corrected through the live plugin command", await File.ReadAllTextAsync(Path.Combine(fixture.Disk.User, "data", PluginId, "prepared-draft.txt")));
+        Assert.Equal(target.Id, coordinator.ActiveProject!.Id);
+        Assert.Equal(2, fixture.FactoryCalls);
         Assert.Equal(0, gate.Live);
     }
 
@@ -793,11 +842,15 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         var target = await fixture.CreateTargetAsync();
         await using var coordinator = fixture.Coordinator();
         Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        var manager = coordinator.Runtime!.Manager;
         await coordinator.Scope!.Documents.WriteAsync("outside", "missing");
         coordinator.Document!.Edit("dirty buffer");
         var failure = await coordinator.SwitchAsync(target.Id);
         Assert.False(failure.Succeeded);
         Assert.Equal("RevisionConflict", failure.ErrorCode);
+        Assert.False(failure.Pending);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+        Assert.Same(manager, coordinator.Runtime.Manager);
         Assert.Equal(1, fixture.FactoryCalls);
         Assert.Equal("dirty buffer", coordinator.Document.Text);
         Assert.True(coordinator.Document.IsDirty);

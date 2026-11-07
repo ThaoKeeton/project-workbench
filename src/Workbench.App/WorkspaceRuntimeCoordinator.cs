@@ -252,16 +252,13 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                     try { await leaving.Document.QuiesceAsync(ct).ConfigureAwait(false); }
                     catch (Exception error)
                     {
-                        var pending = leaving.Document.HasPendingWork;
-                        if (!pending) leaving.Document.SetPaused(_closing);
-                        return Block(HostFailure.ProjectCode(error), pending);
+                        return FailBeforeStop(attempt, HostFailure.ProjectCode(error), leaving.Document.HasPendingWork);
                     }
                     var preparation = await leaving.Runtime!.Manager.PrepareProjectLeaveAsync(cancellationToken: ct).ConfigureAwait(false);
                     if (!preparation.Succeeded || leaving.Runtime.Manager.HasPendingProjectWork)
                     {
                         var pending = preparation.HasPendingWork || leaving.Runtime.Manager.HasPendingProjectWork;
-                        if (!pending) leaving.Document.SetPaused(_closing);
-                        return Block(PreparationCode(preparation.ErrorCode), pending);
+                        return FailBeforeStop(attempt, PreparationCode(preparation.ErrorCode), pending);
                     }
                     attempt.Stage = SwitchStage.Stop;
                     break;
@@ -331,6 +328,23 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                 case SwitchStage.Rollback:
                     return await RollbackAsync(attempt, ct).ConfigureAwait(false);
             }
+        }
+    }
+
+    private ProjectSwitchResult FailBeforeStop(SwitchAttempt attempt, string code, bool pending)
+    {
+        lock (_gate)
+        {
+            pending |= HasPendingOwnedWork;
+            if (!pending && !_closing && !_normalCloseRequested && _current is { Stopped: false } current
+                && attempt.Stage == SwitchStage.Prepare && attempt.Candidate is null && _retiring is null)
+            {
+                // No Stop or candidate work has begun. Retain the target as retry metadata, not an
+                // owned transition that hides the same live plugin's private correction surface.
+                _attempt = null;
+                current.Document.SetPaused(false);
+            }
+            return Block(code, pending, attempt.Target.Id);
         }
     }
 

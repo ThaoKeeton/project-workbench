@@ -54,7 +54,14 @@ retries wait on its actual task without a duplicate callback. If it settles afte
 a timeout, the retry receives that retained result once; an acknowledged result
 permits a new leave cycle. A different overlapping filter or participant set returns
 ProjectPreparationBusy and cannot claim another plugin was prepared. Failure
-keeps the current enabled runtime available for correction and retry. A timeout
+keeps the current enabled runtime available for correction and retry only after
+all owned preparation/service/editor work has settled and before any Stop or
+candidate cleanup. A settled failed switch reopens the same manager, plugin
+pages and actions so a cooperative hook's private draft can be edited there.
+The attempted target is retained separately for explicit retry, including any
+newly created catalog entry/data; current instance, roots and generation stay
+unchanged. Pending work, post-Stop cleanup and failed actual disposal stay
+sealed. This does not serialize arbitrary old widget-private buffers. A timeout
 or caller cancellation does not imply rollback or exactly-once IO; actual work
 stays owned. `HasPendingProjectWork` includes preparation and admitted service
 calls, including calls a plugin did not await. It becomes false only once that
@@ -97,7 +104,10 @@ chosen write retains its selected value, dirty state and fixed error category;
 switch/normal close must flush it before detachment or retirement. An untouched
 corrupt-file system-theme fallback is not a choice and does not write on leave.
 Explicit recovery retains the exact damaged bytes before replacement. Context
-and ordinary preferences autosave; credential drafts do not.
+and ordinary preferences autosave; credential drafts do not. The native host
+context editor captures accepted text synchronously into its owned plain model
+before same-turn close/switch seals admission; visual/status refresh runs later.
+Programmatic reload does not become an edit and fresh post-barrier edits refuse.
 
 Every pending theme-repair replacement checks its observed original again, even
 when a previous attempt already created a backup. Changed bytes refuse ordinary

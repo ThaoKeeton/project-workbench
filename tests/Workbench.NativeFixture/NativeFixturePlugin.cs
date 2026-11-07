@@ -41,6 +41,8 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
                     throw new InvalidOperationException("synthetic-private-workspace-failure");
                 if (_mode == "workspace-hold-first-then-fail" && calls > 1 && !File.Exists(Path.Combine(context.DataDirectory, "corrected-prepare")))
                     throw new InvalidOperationException("synthetic-private-workspace-failure");
+                if (_mode == "workspace-private-validation" && !_workspaceDraft.EndsWith("[ready]", StringComparison.Ordinal))
+                    throw new InvalidOperationException("synthetic-private-workspace-validation");
                 await File.WriteAllTextAsync(Path.Combine(context.DataDirectory, "prepared-draft.txt"), _workspaceDraft);
             });
         if (_mode == "hold-callback") context.Lifetime.Register(() =>
@@ -86,7 +88,7 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
         {
             var draft = new TextBox { Header = "Synthetic private workspace draft", Text = _workspaceDraft };
             AutomationProperties.SetName(draft, "合成项目私有草稿");
-            draft.TextChanged += (_, _) => _workspaceDraft = draft.Text;
+            draft.TextChanging += (_, _) => _workspaceDraft = draft.Text;
             panel.Children.Add(draft);
         }
         var confirm = new Button { Content = "Confirm synthetic one-use start" };

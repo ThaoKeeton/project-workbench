@@ -16,6 +16,8 @@ internal static class NativeWorkspaceProbe
     private const string Marker = "ProjectWorkbench synthetic workspace probe v1";
     private const string ContextA = "Synthetic project A context";
     private const string ContextB = "Synthetic project B context";
+    private const string ImmediateSwitchContext = "Synthetic latest A context accepted immediately before switch";
+    private const string ImmediateCloseContext = "Synthetic latest B context accepted immediately before close";
     private const string AudienceA = "Synthetic audience A";
     private const string AudienceB = "Synthetic audience B";
     private const string SummaryDraft = "Synthetic unsaved first-party workspace draft";
@@ -86,11 +88,11 @@ internal static class NativeWorkspaceProbe
             VerifyLegacy(options.UserRoot);
             Record("process-restore");
             VerifySelector(window, visible: true);
-            await VerifyProjectAsync(window, ContextB, AudienceB, secret: false);
+            await VerifyProjectAsync(window, ImmediateCloseContext, AudienceB, secret: false);
             Record("restored-native-ui");
             await SelectAsync(window, "default");
             Require(window.SmokeRequestedTheme == ElementTheme.Dark, "Project A theme did not survive process restore.");
-            await VerifyProjectAsync(window, ContextA, AudienceA, secret: true);
+            await VerifyProjectAsync(window, ImmediateSwitchContext, AudienceA, secret: true);
             await SelectAsync(window, state.SecondaryId);
             Record("restored-project-isolation");
             ReportOnClose(window, options, checks);
@@ -149,6 +151,52 @@ internal static class NativeWorkspaceProbe
         summary = await window.SmokeNavigateAsync("view", RunOptions.SampleIds[0], "summary");
         Require(Find<TextBox>(summary, "工作摘要示例草稿").Text == SummaryDraft, "Reopened first-party draft differed from the actual file.");
         Record("project-isolation");
+
+        // Do not yield to TextChanged, autosave, rendering or a clean-status wait between the
+        // real TextBox accepting the value and the native selector closing admission.
+        var contextPage = await window.SmokeNavigateAsync("context");
+        var contextEditor = Find<TextBox>(contextPage, "项目上下文编辑器");
+        contextEditor.Text = ImmediateSwitchContext;
+        Select(window, idB);
+        contextEditor.Text = "Synthetic edit refused after switch barrier";
+        await WaitAsync(() => Task.FromResult(!window.SmokeActionBusy && window.Workspace.CanUseCurrentRuntime
+            && window.Workspace.ActiveProject?.Id == idB));
+        await SelectAsync(window, "default");
+        await VerifyProjectAsync(window, ImmediateSwitchContext, AudienceA, secret: true);
+        Require((await window.Workspace.Scope!.Documents.ReadAsync()).Text == ImmediateSwitchContext,
+            "Immediate native switch lost the latest accepted context or admitted a post-barrier edit.");
+        Record("immediate-context-switch");
+
+        // Only the plugin's private editor can correct this hook. No external gate or host context
+        // edit can satisfy validation; the same live instance must remain reachable after failure.
+        await ConfigureFixtureAsync(window, "workspace-private-validation");
+        var privatePage = await window.SmokeNavigateAsync("view", Id, "fixture-page");
+        const string invalidPrivateDraft = "Synthetic retained private draft needs correction";
+        const string correctedPrivateDraft = "Synthetic corrected private draft [ready]";
+        Find<TextBox>(privatePage, "合成项目私有草稿").Text = invalidPrivateDraft;
+        var correctionManager = window.SmokeManager;
+        var correctionGeneration = window.Workspace.RuntimeGeneration;
+        var stopCalls = await correctionManager.GetSettings(Id).GetAsync("stop-calls", 0);
+        var factoryCalls = options.StartupStages.Count;
+        Select(window, idB);
+        await WaitAsync(() => Task.FromResult(!window.SmokeActionBusy
+            && window.Workspace.Transition.State == ProjectTransitionState.Blocked));
+        Require(window.Workspace.CanUseCurrentRuntime && ReferenceEquals(correctionManager, window.SmokeManager)
+            && correctionGeneration == window.Workspace.RuntimeGeneration && factoryCalls == options.StartupStages.Count
+            && await correctionManager.GetSettings(Id).GetAsync("stop-calls", 0) == stopCalls,
+            "Settled failed switch did not retain the same usable native plugin before Stop/target start.");
+        AssertHeld(rootA);
+        privatePage = await window.SmokeNavigateAsync("view", Id, "fixture-page");
+        var privateEditor = Find<TextBox>(privatePage, "合成项目私有草稿");
+        Require(privateEditor.IsEnabled && privateEditor.IsLoaded && privateEditor.XamlRoot is not null
+            && privateEditor.Text == invalidPrivateDraft, "Failed switch hid or replaced the retained private editor.");
+        privateEditor.Text = correctedPrivateDraft;
+        await RetryAsync(window, idB);
+        Require(await File.ReadAllTextAsync(Path.Combine(Data(rootA), "prepared-draft.txt")) == correctedPrivateDraft,
+            "Explicit retry did not save the correction from the same native plugin instance.");
+        await SelectAsync(window, "default");
+        await ConfigureFixtureAsync(window, "workspace-normal");
+        Record("settled-switch-private-correction");
 
         await NativeWorkspaceCloseProbe.VerifyBusySwitchAsync(options);
         Record("busy-switch-native-close");
@@ -237,13 +285,23 @@ internal static class NativeWorkspaceProbe
         var reopened = new MainWindow(options with { ReportPath = null, SkipAutomaticProbe = true });
         var closed = Closed(window);
         reopened.Activate();
-        await window.FinishSmokeAsync();
+        contextPage = await window.SmokeNavigateAsync("context");
+        contextEditor = Find<TextBox>(contextPage, "项目上下文编辑器");
+        contextEditor.Text = ImmediateCloseContext;
+        // FinishSmoke enters the shipping close seal synchronously, in this same dispatcher turn.
+        // This detached-control write after the barrier must not replace the admitted value.
+        var immediateClose = window.FinishSmokeAsync();
+        contextEditor.Text = "Synthetic edit refused after close barrier";
+        await immediateClose;
         await closed.WaitAsync(TimeSpan.FromSeconds(15));
         AssertReleased(rootA); AssertReleased(rootB);
         await reopened.InitializeAsync();
         Require(reopened.SmokeStartupFailure is null && reopened.Workspace.ActiveProject?.Id == idB
             && reopened.SmokeRequestedTheme == ElementTheme.Light, "Native reopen did not restore the selected project.");
-        await VerifyProjectAsync(reopened, ContextB, AudienceB, secret: false);
+        await VerifyProjectAsync(reopened, ImmediateCloseContext, AudienceB, secret: false);
+        Require((await reopened.Workspace.Scope!.Documents.ReadAsync()).Text == ImmediateCloseContext,
+            "Immediate native close lost the latest accepted context or admitted a post-barrier edit.");
+        Record("immediate-context-close");
         Record("native-reopen");
         ReportOnClose(reopened, options, checks);
         await reopened.FinishSmokeAsync();
