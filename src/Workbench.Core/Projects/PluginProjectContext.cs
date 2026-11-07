@@ -76,6 +76,7 @@ internal static class ProjectFailure
         OperationCanceledException => "ProjectPreparationCanceled",
         ProjectWorkspaceStoreException storage when Known(storage.ErrorCode) => storage.ErrorCode,
         PluginProjectContextException project when Known(project.ErrorCode) => project.ErrorCode,
+        PluginTestingException testing => Testing.TestValidation.SafeErrorCode(testing.ErrorCode),
         _ => fallback
     };
 

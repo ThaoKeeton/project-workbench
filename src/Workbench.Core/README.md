@@ -101,6 +101,10 @@ Close revokes new context operations immediately; terminal Stop joins all
 admitted calls and callbacks before disposing context. This does not turn
 ExecuteCommandAsync into a generic callback/owned-task tracker.
 
-The optional testing-services 1 SDK requires host 0.4.0. At this intermediate
-commit only guarded source/case storage exists; host testing contexts and runs
-are not wired. See [testing services](../../docs/testing-services.md).
+Optional testing services 1 require host 0.4.0. Real registration contexts expose
+`IPluginTestingContext.Testing`, bound to the plugin and `ProjectRuntimeScope.Testing`.
+All calls join one lazy owner-initialization barrier and remain owned through
+input capture, store work and terminal drain. Normal preparation runs while the
+service is open; terminal Close rejects fresh calls. Source/case/run/evidence
+storage is callable; the independent native testing plugin remains a later stage.
+See [testing services](../../docs/testing-services.md).

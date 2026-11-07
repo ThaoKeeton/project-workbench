@@ -1,4 +1,4 @@
-# Testing contracts 1 — host 0.4.0
+# Testing services 1 — host 0.4.0
 
 The app and both SDK packages are preview **0.4.0**, file version **0.4.0.0**.
 Assembly identity **1.0.0.0**, API 1, runtime services 1, project services 1 and
@@ -6,10 +6,9 @@ the existing context/WinUiView signatures stay compatible.
 `WorkbenchTestingServices.Version` is 1. `IPluginTestingContext` derives from
 `IPluginProjectContext` and adds only `IProjectTestWorkspace Testing`.
 
-This increment implements guarded source/case storage and durable run journals,
-passive evidence and owner initialization in Core, with the complete SDK contract.
-The host testing context and independent native testing plugin are **not wired yet**.
-The host exposes no placeholder testing service. Existing preset case-list
+The host implements the optional testing context with guarded source/case
+storage, durable run journals, passive evidence and retained owner initialization.
+The independent native testing plugin remains a later integration stage. Existing preset case-list
 plugins remain examples. Consumers should check the optional derived interface
 and declare `minimumHostVersion: "0.4.0"` when using testing services. Existing
 project-only plugins may retain 0.3.0; frozen business packages retain their
@@ -20,8 +19,8 @@ The exact public declarations are in
 method ends in `Async`, returns a specific snapshot/summary/evidence type, and
 has a final optional `CancellationToken`. Source/case writes take drafts or
 host-ID-bearing case content, never caller-selected paths, project identities,
-producer identities or run/session IDs. The future captured-identity facade
-removes the first `producerPluginId` parameter used by Core write methods.
+producer identities or run/session IDs. The captured-identity facade
+supplies the first `producerPluginId` parameter used by Core write methods.
 Cancellation does not establish rollback; after an admitted operation settles,
 reread its actual durable state.
 
@@ -59,7 +58,8 @@ identity before testing reads or initialization. Missing legacy markers are
 permitted; the testing store always supplies its own strict project binding.
 It implements the source/case methods below and every run/evidence store method
 in the SDK shape, with a validated `producerPluginId` first on Core mutations.
-It does not expose a placeholder `IProjectTestWorkspace` facade.
+`ProjectRuntimeScope.Testing` owns one store, and each real registration context
+exposes its own captured `IProjectTestWorkspace` facade.
 
 PublishSource creates a new immutable source with host ID/project/producer/UTC,
 copied common items and exact original bytes. `OriginalSha256` hashes those exact
@@ -151,10 +151,10 @@ The executable-run limit is 200 total steps; a stored case set can contain
 more. Maximum-size native UI performance has not been measured.
 
 Core captures actual deep copies of bytes and collection elements synchronously
-before scheduling IO, and returns detached snapshots. The future facade must
-first retain operation admission, then call the reusable `TestValidation.Copy*`
-helpers outside Core/coordinator locks before returning or scheduling. Calling
-the store with caller arrays only after a facade's `Task.Run` is too late.
+before scheduling IO, and returns detached snapshots. The facade first retains
+actual operation admission, then calls the reusable `TestValidation.Copy*`
+helpers outside Core/coordinator locks before returning. The store independently
+captures those host-owned copies before its own IO.
 No plugin delegate or caller collection is enumerated under the store lease.
 
 Failures use sealed `PluginTestingException` with a fixed generic message, safe
@@ -163,8 +163,8 @@ InvalidTestSource, InvalidCaseSet, InvalidRun, InvalidEvidence, RevisionConflict
 StoreLimitExceeded, StoreIoFailure, UnsafePath, TestStoreCorrupt, RecoveryRequired,
 ManualStepUnsupported, TargetUnavailable, AssertionFailed, AdapterFailed,
 TestRecordNotFound, StoreBusy, InvalidId, InvalidProducer and TestingFailed.
-Facades must map unknown public exception codes to TestingFailed and must never
-display raw exception/provider text. Native source/case text is separate from
+The facade maps unknown public exception codes to TestingFailed and never
+displays raw exception/provider text. Native source/case text is separate from
 diagnostics.
 
 The SDK snapshot contains eleven allow-listed source files, two 0.4.0 NuGets,
@@ -342,7 +342,7 @@ there is no public reset/recover API, all-crash recovery or power-loss guarantee
 
 ## Owner initialization and remaining integration gates
 
-Internal Core-only `InitializeOwnerAsync(producerPluginId,ct)` is for the future
+Internal Core-only `InitializeOwnerAsync(producerPluginId,ct)` implements the
 facade's retained once-per-new-context barrier. Missing-store initialization
 creates nothing. It first validates the **whole** existing store under one
 lease; every required head and full chain must agree before the first recovery
@@ -361,15 +361,33 @@ normal callers still must settle Failed; host initialization records interruptio
 without rewriting the failed observed result. The hashed flag cannot be set by
 a caller, is invalid on any other event kind and is invalid after a terminal event.
 
-The later facade must retain operation admission **before** any caller prefix,
-then synchronously use CopySourceDraft/CopyCaseSetDraft/CopyCaseSetContent and new
-CopySelectedCaseIds/CopyRunEventDraft/CopyEvidenceDraft outside coordinator/Core
-locks, before returning or scheduling. All service calls must await the SAME
-retained initialization task. TerminalClose must revoke new admission and drain
-all admitted tasks before releasing context/root. Those lifecycle guarantees
-are not wired by this Core increment.
+The real `PluginRegistrationContext` implements optional `IPluginTestingContext`.
+Its fixed facade captures the scope and plugin ID before Initialize, so plugins
+may await testing reads before contributions commit. Acquiring the context or
+service property starts no store IO. The first actual call publishes both its
+retained operation and a gated initialization task before any input getter or
+filesystem work. Every call joins that same memoized barrier; failure remains
+visible for that context, and a corrected new context may reattempt.
 
-Remaining gates include the captured facade/project lifetime tests, real domain
+Initialization uses `CancellationToken.None` as a context-owned policy. A caller's
+cancellation does not cancel or detach it. Each operation joins **both** actual
+input capture and initialization, even if either fails first; it then checks the
+caller token before invoking its store action. Thus cancellation may wait for
+the bounded store lease attempt. Cancellation after store admission still does
+not promise rollback. Closed fresh calls return TestingContextClosed before
+touching caller collections or starting initialization.
+
+Testing calls and initialization participate in HasPendingProjectWork, normal
+preparation drain and terminal context drain. Normal before-leave hooks execute
+while services remain open, then join admitted calls. Terminal Close immediately
+revokes fresh service calls, including from plugin Stop, and retains admitted
+work until it actually settles before the manager/context/root may retire.
+Low-level Disable/Shutdown do not rerun preparation hooks. Unexpected close may
+leave a durable nonterminal run for next-generation owner initialization.
+
+Portable tests exercise the real captured facade, package-loaded fixture,
+manager/HostRuntime/root leases, held caller prefixes, filesystem initialization
+gates, defensive copies and safe lifecycle errors. Remaining gates include real domain
 parsers/generator/CSV/virtual adapter/runner and autosave, native detail rendering
 from committed state, independent plugin packaging and installation in actual
 WinUI, and the full Windows workflow/PRI artifact checks. Existing native,

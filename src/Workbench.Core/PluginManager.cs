@@ -565,6 +565,7 @@ public sealed partial class PluginManager : IAsyncDisposable
         return error switch
         {
             OperationCanceledException => "Canceled",
+            PluginTestingException testing => Testing.TestValidation.SafeErrorCode(testing.ErrorCode),
             FileNotFoundException or FileLoadException => "DependencyLoadFailed",
             IOException or UnauthorizedAccessException => "StorageFailed",
             _ => "PluginException"

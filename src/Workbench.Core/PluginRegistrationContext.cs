@@ -1,9 +1,10 @@
 using Workbench.Sdk;
 using Workbench.Core.Projects;
+using Workbench.Core.Testing;
 
 namespace Workbench.Core;
 
-internal sealed class PluginRegistrationContext : IPluginProjectContext, IDisposable
+internal sealed class PluginRegistrationContext : IPluginTestingContext, IDisposable
 {
     private readonly object _sync = new();
     private readonly CancellationTokenSource _lifetime = new();
@@ -16,6 +17,7 @@ internal sealed class PluginRegistrationContext : IPluginProjectContext, IDispos
     private Func<CancellationToken, Task>? _beforeProjectLeave;
     private Task<ProjectPreparationResult>? _preparation;
     private readonly PluginProjectContext _project;
+    private readonly PluginTestingContext _testing;
 
     public PluginRegistrationContext(string pluginId, string dataDirectory, IPluginSettings settings,
         PluginBackgroundTasks backgroundTasks, PluginSecretStore secrets, ProjectRuntimeScope projectScope)
@@ -27,6 +29,7 @@ internal sealed class PluginRegistrationContext : IPluginProjectContext, IDispos
         BackgroundTasks = backgroundTasks;
         Secrets = secrets;
         _project = new(projectScope);
+        _testing = new(projectScope, pluginId);
     }
 
     internal bool IsCommitted { get; private set; }
@@ -37,6 +40,7 @@ internal sealed class PluginRegistrationContext : IPluginProjectContext, IDispos
     public PluginBackgroundTasks BackgroundTasks { get; }
     public PluginSecretStore Secrets { get; }
     public IProjectContext Project => _project;
+    public IProjectTestWorkspace Testing => _testing;
 
     public void RegisterBeforeProjectLeave(Func<CancellationToken, Task> prepare)
     {
@@ -51,7 +55,7 @@ internal sealed class PluginRegistrationContext : IPluginProjectContext, IDispos
 
     internal bool HasPendingProjectWork
     {
-        get { lock (_sync) return _preparation is { IsCompleted: false } || _project.HasPendingWork; }
+        get { lock (_sync) return _preparation is { IsCompleted: false } || _project.HasPendingWork || _testing.HasPendingWork; }
     }
 
     internal Task<ProjectPreparationResult> PrepareProjectLeaveAsync(CancellationToken cancellationToken)
@@ -78,7 +82,7 @@ internal sealed class PluginRegistrationContext : IPluginProjectContext, IDispos
                     if (prepare is not null) await prepare(linked.Token).ConfigureAwait(false);
                 }
                 catch (Exception error) { failure = ProjectFailure.Code(error, "ProjectPreparationFailed"); }
-                await _project.DrainAsync().ConfigureAwait(false);
+                await Task.WhenAll(_project.DrainAsync(), _testing.DrainAsync()).ConfigureAwait(false);
                 return new ProjectPreparationResult(failure is null, false, failure);
             });
         }
@@ -89,7 +93,7 @@ internal sealed class PluginRegistrationContext : IPluginProjectContext, IDispos
         Task? preparation;
         lock (_sync) preparation = _preparation;
         if (preparation is not null) await preparation.ConfigureAwait(false);
-        await _project.DrainAsync().ConfigureAwait(false);
+        await Task.WhenAll(_project.DrainAsync(), _testing.DrainAsync()).ConfigureAwait(false);
     }
     IPluginBackgroundTasks IPluginRuntimeContext.BackgroundTasks => BackgroundTasks;
     IPluginSecretStore IPluginRuntimeContext.Secrets => Secrets;
@@ -184,6 +188,7 @@ internal sealed class PluginRegistrationContext : IPluginProjectContext, IDispos
             _active = false;
             _beforeProjectLeave = null;
             _project.Close();
+            _testing.Close();
             var current = StopReason;
             if (current == PluginStopReason.None || current == PluginStopReason.HostShutdown && reason != PluginStopReason.HostShutdown)
                 Volatile.Write(ref _stopReason, (int)reason);

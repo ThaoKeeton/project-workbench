@@ -7,6 +7,14 @@ internal static class HostFailure
 {
     internal static string ProjectCode(Exception error)
     {
+        if (error is Workbench.Sdk.PluginTestingException testing)
+        {
+            var testingCode = testing.ErrorCode;
+            return testingCode is "TestingContextClosed" or "InvalidTestSource" or "InvalidCaseSet" or "InvalidRun" or "InvalidEvidence"
+                or "RevisionConflict" or "StoreLimitExceeded" or "StoreIoFailure" or "UnsafePath" or "TestStoreCorrupt"
+                or "RecoveryRequired" or "ManualStepUnsupported" or "TargetUnavailable" or "AssertionFailed" or "AdapterFailed"
+                or "TestRecordNotFound" or "StoreBusy" or "InvalidId" or "InvalidProducer" or "TestingFailed" ? testingCode : "ProjectOperationFailed";
+        }
         var code = error switch
         {
             Workbench.Core.Projects.ProjectWorkspaceStoreException storage => storage.ErrorCode,
