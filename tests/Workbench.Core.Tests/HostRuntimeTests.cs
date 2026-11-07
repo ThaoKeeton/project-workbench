@@ -7,8 +7,10 @@ public sealed class HostRuntimeTests
 {
     private const string Id = "com.example.fixture";
 
-    [Fact]
-    public async Task Metadata_discovery_reconfigures_an_inactive_enabled_plugin_without_restoring_its_runtime()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Metadata_discovery_reconfigures_an_inactive_plugin_without_restoring_its_runtime(bool desiredEnabled)
     {
         using var disk = new TestDirectory();
         disk.Package(Id, fields: new() { ["entryType"] = "Workbench.TestPlugin.RuntimeFixturePlugin" });
@@ -20,6 +22,16 @@ public sealed class HostRuntimeTests
             Assert.Equal(1, await seed.Manager.GetSettings(Id).GetAsync("instanceCount", 0));
             await seed.Manager.GetSettings(Id).SetAsync("runtimeMode", "initialize-fail");
         }
+        if (!desiredEnabled)
+        {
+            await using var failed = new HostRuntime(options);
+            await failed.InitializeAsync();
+            var revoked = Assert.Single(failed.Manager.Plugins);
+            Assert.False(revoked.DesiredEnabled);
+            Assert.False(revoked.HasRuntime);
+            Assert.Empty(failed.Manager.GetSecretDefinitions(Id));
+        }
+        var instancesBeforeOffline = desiredEnabled ? 1 : 2;
 
         await using (var offline = new HostRuntime(options))
         {
@@ -29,26 +41,36 @@ public sealed class HostRuntimeTests
             await offline.Manager.DiscoverAsync();
             var settings = offline.Manager.GetSettings(Id);
             Assert.Equal("initialize-fail", await settings.GetAsync("runtimeMode", ""));
-            Assert.Equal(1, await settings.GetAsync("instanceCount", 0));
+            Assert.Equal(instancesBeforeOffline, await settings.GetAsync("instanceCount", 0));
             var discovered = Assert.Single(offline.Manager.Plugins);
-            Assert.True(discovered.DesiredEnabled);
+            Assert.Equal(desiredEnabled, discovered.DesiredEnabled);
             Assert.False(discovered.IsLoaded);
             Assert.False(discovered.HasRuntime);
             Assert.Empty(offline.Manager.Contributions.Views);
             Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(disk.User); });
             await settings.SetAsync("runtimeMode", "cooperative");
-            Assert.Equal(1, await settings.GetAsync("instanceCount", 0));
-            Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+            Assert.Equal(instancesBeforeOffline, await settings.GetAsync("instanceCount", 0));
+            Assert.Equal(instancesBeforeOffline, await settings.GetAsync("stopCalls", 0));
         }
         using (var nextOwner = HostRuntime.AcquireLease(disk.User)) { }
 
         await using (var reopened = new HostRuntime(options))
         {
             await reopened.InitializeAsync();
-            Assert.True(Assert.Single(reopened.Manager.Plugins).IsLoaded);
+            var restored = Assert.Single(reopened.Manager.Plugins);
+            Assert.Equal(desiredEnabled, restored.DesiredEnabled);
+            Assert.Equal(desiredEnabled, restored.IsLoaded);
+            Assert.Equal(desiredEnabled, restored.HasRuntime);
             Assert.Equal("cooperative", await reopened.Manager.GetSettings(Id).GetAsync("runtimeMode", ""));
-            Assert.Equal(2, await reopened.Manager.GetSettings(Id).GetAsync("instanceCount", 0));
-            Assert.Equal(1, await reopened.Manager.GetSettings(Id).GetAsync("stopCalls", 0));
+            if (!desiredEnabled)
+            {
+                Assert.Equal(instancesBeforeOffline, await reopened.Manager.GetSettings(Id).GetAsync("instanceCount", 0));
+                Assert.Empty(reopened.Manager.GetSecretDefinitions(Id));
+                Assert.True((await reopened.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            }
+            Assert.NotEmpty(reopened.Manager.GetSecretDefinitions(Id));
+            Assert.Equal(instancesBeforeOffline + 1, await reopened.Manager.GetSettings(Id).GetAsync("instanceCount", 0));
+            Assert.Equal(instancesBeforeOffline, await reopened.Manager.GetSettings(Id).GetAsync("stopCalls", 0));
         }
         using var finalOwner = HostRuntime.AcquireLease(disk.User);
     }

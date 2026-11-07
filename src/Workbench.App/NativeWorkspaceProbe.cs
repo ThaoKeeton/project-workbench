@@ -279,6 +279,19 @@ internal static class NativeWorkspaceProbe
             "Archive changed retained project data.");
         Record("archive-retention");
         await OpenProjectAsync(window, idB, archive: false);
+        // Failed initialization revoked B's enabled intent. Repairing inactive settings must
+        // preserve that revocation; explicitly enable this known fixture only after B is active.
+        await window.WorkspaceActionAsync(async runtime =>
+        {
+            Require(window.Workspace.ActiveProject?.Id == idB && runtime.UserRoot == rootB,
+                "Synthetic fixture re-enable did not target the active restored project.");
+            var fixture = runtime.Manager.Plugins.Single(plugin => plugin.Manifest?.Id == Id);
+            Require(!fixture.DesiredEnabled && !fixture.IsLoaded && !fixture.HasRuntime
+                && runtime.Manager.GetSecretDefinitions(Id).Count == 0,
+                "Inactive repair or project restore bypassed failed-initialization revocation.");
+            Require((await runtime.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded,
+                "Active restored project's synthetic fixture re-enable failed.");
+        });
         await VerifyProjectAsync(window, ContextB, AudienceB, secret: false);
         await File.WriteAllTextAsync(Path.Combine(options.UserRoot, "workspace-probe-state.json"),
             JsonSerializer.Serialize(new SeedState(1, idB, Environment.ProcessId)));
