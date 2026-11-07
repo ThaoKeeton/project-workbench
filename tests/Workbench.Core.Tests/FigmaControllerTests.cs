@@ -414,7 +414,7 @@ public sealed class FigmaControllerTests
         var request=new FigmaReadRequest(stage=="request" ? "https://"+Private : "Ab12",ids,"v1");
         var tokens=0;
         Task<string?> Credential(CancellationToken ct) { tokens++;if(stage=="credential") throw new InvalidOperationException(Secret+Private);return Token(ct); }
-        using(var obstruction=stage=="io" ? TestingAuthoringTests.WriteObstruction.Create(SourcePath(fixture.Disk.User,old.Id)) : null)
+        using(var obstruction=stage=="io" ? ObstructPublicationIo(SourcePath(fixture.Disk.User,old.Id)) : null)
             await CodeAsync(code,()=>fixture.Controller.ImportFigmaAsync(request,criteria,stage=="callback-null" ? null! : Credential));
         Assert.Equal(oldBytes,await File.ReadAllBytesAsync(SourcePath(fixture.Disk.User,old.Id)));
         Assert.Equal(caseBytes,await File.ReadAllBytesAsync(CasePath(fixture.Disk.User,set.Id)));
@@ -425,6 +425,51 @@ public sealed class FigmaControllerTests
         if(stage is "request" or "criteria" or "collection" or "callback-null") { Assert.Equal(0,tokens);Assert.Empty(handler.Requests); }
         else { Assert.Equal(1,tokens);Assert.Equal(stage=="credential" ? 0 : 1,handler.Requests.Count); }
     }
+
+    [Theory]
+    [InlineData(FileShare.Read,true)]
+    [InlineData(FileShare.None,false)]
+    public async Task Core_validation_allows_shared_reads_but_refuses_exclusive_reads_before_new_Figma_publication(FileShare sharing,bool succeeds)
+    {
+        var raw=Json(["2:3","1:2"]);
+        using var handler=new SyntheticHandler((_,_)=>Task.FromResult(Response(raw)));
+        await using var fixture=await TestingDomainFixture.CreateAsync(figmaReader:new(handler));
+        var set=await fixture.ImportAndGenerateAsync();var old=Assert.Single(await fixture.Context.Testing.ListSourcesAsync());
+        var path=SourcePath(fixture.Disk.User,old.Id);var oldBytes=await File.ReadAllBytesAsync(path);
+        var caseBytes=await File.ReadAllBytesAsync(CasePath(fixture.Disk.User,set.Id));
+        var dirty=new string('x',201);fixture.Controller.CaptureSetName(dirty);
+        await CodeAsync("StoreLimitExceeded",()=>fixture.Controller.FlushAsync());
+        TestSourceSnapshot? saved=null;
+        using(var held=new FileStream(path,FileMode.Open,FileAccess.Read,sharing))
+        {
+            if(succeeds) saved=await fixture.Controller.ImportFigmaAsync(Request,Criteria(),Token);
+            else await CodeAsync("StoreIoFailure",()=>fixture.Controller.ImportFigmaAsync(Request,Criteria(),Token));
+        }
+        // Release the managed sharing guard before reading the preserved old file or validating the store again.
+        Assert.Equal(oldBytes,await File.ReadAllBytesAsync(path));
+        Assert.Equal(caseBytes,await File.ReadAllBytesAsync(CasePath(fixture.Disk.User,set.Id)));
+        var draft=Assert.IsType<CaseDraftView>(fixture.Controller.Snapshot.Draft);
+        Assert.Equal(set.Id,draft.Id);Assert.Equal(set.Revision,draft.BaseRevision);Assert.Equal(dirty,draft.Content.Name);Assert.True(draft.IsDirty);
+        var sources=await fixture.Context.Testing.ListSourcesAsync();Assert.Single(handler.Requests);
+        if(succeeds)
+        {
+            var published=Assert.IsType<TestSourceSnapshot>(saved);
+            Assert.NotEqual(old.Id,published.Id);Assert.Equal(raw,published.OriginalBytes);Assert.Equal(Hash(raw),published.OriginalSha256);
+            Assert.Equal(2,sources.Count);Assert.Contains(sources,source=>source.Id==old.Id);Assert.Contains(sources,source=>source.Id==published.Id);
+            Assert.Equal(raw,(await fixture.Context.Testing.ReadSourceAsync(published.Id)).OriginalBytes);
+            Assert.Equal(2,fixture.Controller.Snapshot.Sources.Count);Assert.Null(fixture.Controller.Snapshot.ErrorCode);
+        }
+        else
+        {
+            Assert.Null(saved);Assert.Equal(old.Id,Assert.Single(sources).Id);
+            Assert.Equal(old.Id,Assert.Single(fixture.Controller.Snapshot.Sources).Id);Assert.Equal("StoreIoFailure",fixture.Controller.Snapshot.ErrorCode);
+        }
+    }
+
+    // Windows refuses Core's old-source validation read; Unix retains the existing directory-write obstruction.
+    private static IDisposable ObstructPublicationIo(string oldSourcePath)=>OperatingSystem.IsWindows()
+        ? new FileStream(oldSourcePath,FileMode.Open,FileAccess.Read,FileShare.None)
+        : TestingAuthoringTests.WriteObstruction.Create(oldSourcePath);
 
     private static string SourcePath(string root,string id)=>Path.Combine(StoreRoot(root),"sources",id+".json");
     private static string Hash(byte[] bytes)=>Convert.ToHexStringLower(SHA256.HashData(bytes));
