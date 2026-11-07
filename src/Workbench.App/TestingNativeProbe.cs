@@ -90,10 +90,15 @@ internal static partial class TestingNativeProbe
         catch (Exception error)
         {
             // A sidecar survives the host's generic failure report; CreateNew protects prior evidence.
-            var sidecar = options.ReportPath + ".evidence.json";
-            await WriteNewAsync(sidecar, JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, succeeded = false,
-                processId = Environment.ProcessId, phase = options.TestingProbe, checks, evidence,
-                safeError = HostFailure.Describe("TestingNativeProbeFailed", error), errorHResult = error.HResult }, Json));
+            try
+            {
+                var sidecar = options.ReportPath + ".evidence.json";
+                await WriteNewAsync(sidecar, JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, succeeded = false,
+                    processId = Environment.ProcessId, phase = options.TestingProbe, checks, evidence,
+                    safeError = HostFailure.Describe("TestingNativeProbeFailed", error), errorHResult = error.HResult,
+                    failure = DescribeFailure(error) }, Json));
+            }
+            catch { /* Diagnostic IO/serialization must preserve the original native failure and any prior sidecar. */ }
             throw;
         }
     }

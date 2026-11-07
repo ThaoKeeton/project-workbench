@@ -11,6 +11,144 @@ function Get-TestingRequiredChecks {
     return @('separate-process-context-interrupted-synthetic-seed','restart-final-native-input-persisted',
         'reopened-exact-observed-text-bmp-native-decoder','linked-new-session-retry-frozen-step-one','restart-project-roster-preserved')
 }
+function Test-TestingProbeJsonNames {
+    param([System.Text.Json.JsonElement]$Element)
+    if ($Element.ValueKind -eq [System.Text.Json.JsonValueKind]::Object) {
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+        foreach ($property in $Element.EnumerateObject()) {
+            if (-not $names.Add($property.Name) -or -not (Test-TestingProbeJsonNames $property.Value)) { return $false }
+        }
+    }
+    elseif ($Element.ValueKind -eq [System.Text.Json.JsonValueKind]::Array) {
+        foreach ($value in $Element.EnumerateArray()) { if (-not (Test-TestingProbeJsonNames $value)) { return $false } }
+    }
+    return $true
+}
+function Read-TestingProbeReportData {
+    param([string]$Path)
+    # Reports are isolated opt-in probe data, but are still untrusted. Never follow links or read unbounded bytes.
+    $stream = $null; $document = $null; $status = 'unreadable'
+    try {
+        $full = [IO.Path]::GetFullPath($Path); $leaf = $null
+        for ($part = $full; $part; $part = [IO.Path]::GetDirectoryName($part)) {
+            $item = $null
+            try { $item = Get-Item -LiteralPath $part -Force -ErrorAction Stop }
+            catch [Management.Automation.ItemNotFoundException] { }
+            if ($null -ne $item) {
+                if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return @{ Status = 'unsafe-path'; Data = $null } }
+                if ($part -ceq $full) { $leaf = $item }
+            }
+        }
+        if ($null -eq $leaf) { return @{ Status = 'missing'; Data = $null } }
+        if ($leaf -isnot [IO.FileInfo]) { return @{ Status = 'invalid'; Data = $null } }
+        if ($leaf.Length -gt 65536) { return @{ Status = 'oversized'; Data = $null } }
+        $stream = [IO.File]::Open($full, [IO.FileMode]::Open, [IO.FileAccess]::Read, [IO.FileShare]::Read)
+        if ($stream.Length -gt 65536) { return @{ Status = 'oversized'; Data = $null } }
+        $buffer = [byte[]]::new(65537); $count = 0
+        while ($count -lt $buffer.Length) {
+            $read = $stream.Read($buffer, $count, $buffer.Length - $count)
+            if ($read -eq 0) { break }
+            $count += $read
+        }
+        if ($count -gt 65536) { return @{ Status = 'oversized'; Data = $null } }
+        $status = 'invalid'
+        $text = [Text.UTF8Encoding]::new($false, $true).GetString($buffer, 0, $count).TrimStart([char]0xfeff)
+        $options = [System.Text.Json.JsonDocumentOptions]::new(); $options.MaxDepth = 16
+        $document = [System.Text.Json.JsonDocument]::Parse($text, $options)
+        if ($document.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Object -or -not (Test-TestingProbeJsonNames $document.RootElement)) { return @{ Status = 'invalid'; Data = $null } }
+        $data = ConvertFrom-Json -InputObject $text -AsHashtable -NoEnumerate -Depth 16
+        return @{ Status = 'available'; Data = $data }
+    }
+    catch { return @{ Status = $status; Data = $null } }
+    finally {
+        if ($null -ne $document) { $document.Dispose() }
+        if ($null -ne $stream) { $stream.Dispose() }
+    }
+}
+function Test-TestingProbeInteger {
+    param([AllowNull()][object]$Value, [int]$Minimum, [int]$Maximum)
+    return (($Value -is [int] -or $Value -is [long]) -and $Value -ge $Minimum -and $Value -le $Maximum)
+}
+function Get-TestingProbeErrorCategory {
+    param([AllowNull()][object]$Value, [string]$Prefix)
+    if ($Value -isnot [string]) { return $null }
+    foreach ($category in @('Canceled','InvalidData','Storage','PluginFailure')) {
+        if ($Value -ceq "$Prefix ($category).") {
+            if ($category -ceq 'PluginFailure') { return 'Unexpected' }
+            return $category
+        }
+    }
+    return $null
+}
+function ConvertTo-TestingProbeNativeDiagnostic {
+    param([Collections.IDictionary]$Data, [string]$Phase, [int]$ProcessId, [bool]$Sidecar)
+    $failure = @{ category = 'Unavailable'; sourceFile = $null; sourceLine = $null }
+    # The ordinary host failure report has no native identity/checks. Only its closed stage/error categories are useful.
+    if (-not $Sidecar -and -not $Data.Contains('schemaVersion')) {
+        $category = Get-TestingProbeErrorCategory $Data['error'] 'HostOperationFailed'
+        if ($Data['succeeded'] -isnot [bool] -or $Data['succeeded'] -or $null -eq $category -or
+            $Data['stage'] -isnot [string] -or $Data['stage'] -cnotin @('initialize-or-native-smoke','unhandled-ui-exception','launch-callback-failed','shutdown','testing-closed-lease')) { throw 'TestingDiagnosticInvalid' }
+        $failure.category = $category
+        return @{ ProcessId = $null; Checks = @(); Failure = $failure; Stage = $Data['stage'] }
+    }
+    $phaseKey = if ($Sidecar) { 'phase' } else { 'probe' }
+    if (-not (Test-TestingProbeInteger $Data['schemaVersion'] 1 1) -or $Data['succeeded'] -isnot [bool] -or
+        ($Sidecar -and $Data['succeeded']) -or $Data[$phaseKey] -isnot [string] -or $Data[$phaseKey] -cne $Phase -or
+        -not (Test-TestingProbeInteger $Data['processId'] 1 ([int]::MaxValue)) -or $Data['processId'] -ne $ProcessId -or
+        $Data['checks'] -isnot [array]) { throw 'TestingDiagnosticInvalid' }
+    $required = @(Get-TestingRequiredChecks $Phase); $checks = @($Data['checks'])
+    if ($checks.Count -gt $required.Count) { throw 'TestingDiagnosticInvalid' }
+    for ($index = 0; $index -lt $checks.Count; $index++) {
+        if ($checks[$index] -isnot [string] -or $checks[$index] -cne $required[$index]) { throw 'TestingDiagnosticInvalid' }
+    }
+    if ($Sidecar) {
+        $category = Get-TestingProbeErrorCategory $Data['safeError'] 'TestingNativeProbeFailed'
+        if ($null -eq $category) { throw 'TestingDiagnosticInvalid' }
+        $failure.category = $category
+        if ($Data.Contains('failure')) {
+            $detail = $Data['failure']
+            if ($detail -isnot [Collections.IDictionary] -or $detail['category'] -isnot [string] -or
+                $detail['category'] -cnotin @('Assertion','Canceled','InvalidData','Storage','Unexpected')) { throw 'TestingDiagnosticInvalid' }
+            $failure.category = $detail['category']
+            if ($detail['category'] -ceq 'Assertion') {
+                if ($null -ne $detail['sourceFile'] -or $null -ne $detail['sourceLine']) {
+                    if ($detail['sourceFile'] -isnot [string] -or $detail['sourceFile'] -cnotin @('TestingNativeProbe.cs','TestingNativeProbe.Authoring.cs','TestingNativeProbe.Execution.cs') -or
+                        -not (Test-TestingProbeInteger $detail['sourceLine'] 1 100000)) { throw 'TestingDiagnosticInvalid' }
+                    $failure.sourceFile = $detail['sourceFile']; $failure.sourceLine = $detail['sourceLine']
+                }
+            }
+            elseif ($null -ne $detail['sourceFile'] -or $null -ne $detail['sourceLine']) { throw 'TestingDiagnosticInvalid' }
+        }
+    }
+    return @{ ProcessId = $Data['processId']; Checks = $checks; Failure = $failure; Stage = $null }
+}
+function Write-TestingPluginProbeFailureDiagnostic {
+    param([string]$ReportPath, [int]$ProcessId, [AllowNull()][object]$ExitCode, [bool]$HasExited,
+        [string]$ExpectedPhase, [bool]$LeaseAvailable, [bool]$ObservationFailed, [string]$RunnerError)
+    if ($ExpectedPhase -cnotin @('seed','verify') -or $RunnerError -cnotin @('TestingReportUnreadable','TestingReportMissing','TestingReportInvalid',
+        'TestingProcessStillOwned','TestingProcessFailed','TestingRootStillOwned','TestingIdentityOrRetirementMissing','TestingPackageHashMismatch',
+        'TestingChecksIncomplete','TestingEvidenceInvalid','TestingObservationFailed')) { return }
+    $diagnostic = [ordered]@{ kind = 'TestingPluginProbeFailure'; schemaVersion = 1; phase = $ExpectedPhase;
+        processId = $ProcessId; hasExited = $HasExited; exitCode = $null; rootLeaseAvailable = $LeaseAvailable;
+        observationFailed = $ObservationFailed; runnerError = $RunnerError; nativeReport = 'missing'; nativeSidecar = 'missing';
+        nativeProcessId = $null; checks = @(); nativeStage = $null; failure = @{ category = 'Unavailable'; sourceFile = $null; sourceLine = $null } }
+    if (Test-TestingProbeInteger $ExitCode ([int]::MinValue) ([int]::MaxValue)) { $diagnostic.exitCode = $ExitCode }
+    foreach ($source in @(@{ Path = $ReportPath; Key = 'nativeReport'; Sidecar = $false }, @{ Path = ($ReportPath + '.evidence.json'); Key = 'nativeSidecar'; Sidecar = $true })) {
+        $read = Read-TestingProbeReportData $source.Path
+        $diagnostic[$source.Key] = $read.Status
+        if ($read.Status -ceq 'available') {
+            try {
+                $safe = ConvertTo-TestingProbeNativeDiagnostic $read.Data $ExpectedPhase $ProcessId $source.Sidecar
+                if ($null -ne $safe.ProcessId) { $diagnostic.nativeProcessId = $safe.ProcessId; $diagnostic.checks = $safe.Checks }
+                if ($safe.Failure.category -cne 'Unavailable') { $diagnostic.failure = $safe.Failure }
+                if ($null -ne $safe.Stage) { $diagnostic.nativeStage = $safe.Stage }
+            }
+            catch { $diagnostic[$source.Key] = 'invalid' }
+        }
+    }
+    $line = $diagnostic | ConvertTo-Json -Depth 6 -Compress
+    if ([Text.Encoding]::UTF8.GetByteCount($line) -le 4096) { Write-Host $line }
+}
 function Complete-TestingPluginProbeReport {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ReportPath, [Parameter(Mandatory)][int]$ProcessId,
@@ -21,9 +159,10 @@ function Complete-TestingPluginProbeReport {
     $runnerPath = [IO.Path]::ChangeExtension($ReportPath, 'runner.json')
     if (Test-Path -LiteralPath $runnerPath) { throw 'TestingPhaseAlreadyCompleted' }
     $reason = $null; $native = @{}
-    if (Test-Path -LiteralPath $ReportPath -PathType Leaf) {
-        try { $native = Get-Content -LiteralPath $ReportPath -Raw | ConvertFrom-Json -AsHashtable } catch { $reason = 'TestingReportUnreadable' }
-    } else { $reason = 'TestingReportMissing' }
+    $read = Read-TestingProbeReportData $ReportPath
+    if ($read.Status -ceq 'available') { $native = $read.Data }
+    elseif ($read.Status -ceq 'missing') { $reason = 'TestingReportMissing' }
+    else { $reason = 'TestingReportUnreadable' }
     if ($native -isnot [Collections.IDictionary]) { $native = @{}; $reason = 'TestingReportInvalid' }
     if (-not $HasExited) { $reason = 'TestingProcessStillOwned' }
     elseif ($null -eq $ExitCode -or $ExitCode -ne 0) { $reason = 'TestingProcessFailed' }
@@ -64,7 +203,14 @@ function Complete-TestingPluginProbeReport {
     $bytes = [Text.Encoding]::UTF8.GetBytes(($result | ConvertTo-Json -Depth 12))
     $stream = [IO.File]::Open($runnerPath, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::Read)
     try { $stream.Write($bytes) } finally { $stream.Dispose() }
-    if ($null -ne $reason) { throw $reason }
+    if ($null -ne $reason) {
+        # Console evidence is independent of artifact quota. Diagnostic failure cannot replace the runner's original failure.
+        try {
+            Write-TestingPluginProbeFailureDiagnostic -ReportPath $ReportPath -ProcessId $ProcessId -ExitCode $ExitCode -HasExited $HasExited `
+                -ExpectedPhase $ExpectedPhase -LeaseAvailable $LeaseAvailable -ObservationFailed $ObservationFailed -RunnerError $reason
+        } catch { }
+        throw $reason
+    }
     return $result
 }
 function Invoke-TestingPluginProbePhases {

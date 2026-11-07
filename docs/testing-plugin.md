@@ -42,4 +42,4 @@ Seed 验证打包 JSON/CSV 实际 IO、最后原生输入、映射失效、真�
 
 每阶段必须满足实际 WinUI Closed、宿主 OS exit 0 和目录锁重新取得，PID 独立于检查数量。报告记录 Server OS/架构、ZIP 哈希、实际 PID、合成 seed 标志和原始 event/receipt/CSV/BMP 文件哈希。原生报告和一次性 runner sidecar 分开保留；失败停止后续阶段且不会覆盖已有证据。输出为 `artifacts/native/testing-probes/<UTC-GUID>`，CI 名 `testing-plugin-probes`。Seed 的文件副本在最后立即离开输入之前采集；最终保存由 verify 重开的实际记录证明。
 
-当前源阶段不能宣称新的实际 Windows CI 或下载字节审计已通过。由本轮准确 clean HEAD 的 Windows 报告确认新增门禁，同时保留旧 native14、management17/theme1、restart7、workspace16+3 和 business27+24/12进程门禁。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma、AI/模型、业务 provider、HTTP/Webhook/消息和真实电脑控制均未接入或执行；没有未来供应商/设备占位页面。
+当前源阶段不能宣称新的实际 Windows CI 或下载字节审计已通过。由本轮准确 clean HEAD 的 Windows 报告确认新增门禁，同时保留旧 native14、management17/theme1、restart7、workspace16+3 和 business27+24/12进程门禁。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma 已实现私有、有界的只读 REST 领域后端（见[后端契约](figma-readonly-capture.md)），尚无原生页面入口，也未执行真实服务调用；AI/模型、业务 provider、Webhook/消息和真实电脑控制仍未接入或执行，没有未来供应商/设备占位页面。

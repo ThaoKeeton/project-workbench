@@ -4,6 +4,195 @@ Import-Module (Join-Path $PSScriptRoot '../../scripts/TestingPluginProbe.psm1') 
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('testing-report-regression-' + [Guid]::NewGuid().ToString('N'))
 New-Item $temp -ItemType Directory | Out-Null
 try {
+    # Synthetic diagnostic fixtures only. No native process, provider or user data is exercised.
+    # Removing the failure emission, trusting a report string, or continuing verify must fail these tests.
+    $privateText = "synthetic-private-token-body-path`n::error::synthetic-workflow`n##vso[task.logissue type=error]synthetic`e[31m"
+    function New-SyntheticSidecar {
+        return @{ schemaVersion = 1; succeeded = $false; processId = 501; phase = 'seed';
+            checks = @('independent-zip-native-page','packaged-requirements-figma-io','traceable-manual-mapped-generation');
+            safeError = 'TestingNativeProbeFailed (PluginFailure).'; errorHResult = -2146233079;
+            failure = @{ category = 'Assertion'; sourceFile = 'TestingNativeProbe.Authoring.cs'; sourceLine = 43 };
+            unknown = $privateText; stdout = $privateText; stderr = $privateText; token = $privateText; body = $privateText;
+            evidence = @(@{ path = $privateText; body = $privateText }) }
+    }
+    function Invoke-SyntheticDiagnosticFailure {
+        param([string]$Name, [scriptblock]$WriteFixture, [string]$WantedSidecar = 'available',
+            [string]$WantedReport = 'available', [bool]$ObservationThrows = $false, [bool]$LinkedParent = $false)
+        $output = Join-Path $temp ('diagnostic-' + $Name)
+        New-Item $output -ItemType Directory | Out-Null
+        if ($LinkedParent) {
+            $alias = $output + '-alias'
+            New-Item -ItemType SymbolicLink -Path $alias -Target $output | Out-Null
+            $output = $alias
+        }
+        $launches = [Collections.Generic.List[string]]::new()
+        $console = [Collections.Generic.List[string]]::new()
+        $before = @{}; $caught = $null
+        try {
+            Invoke-TestingPluginProbePhases -OutputDirectory $output -ExpectedRoot $temp -Observe {
+                param($phase, $report, $observation)
+                $launches.Add($phase)
+                $observation.ProcessId = 501; $observation.HasExited = $true; $observation.ExitCode = 1; $observation.LeaseAvailable = $true
+                @{ succeeded = $false; stage = 'initialize-or-native-smoke'; error = 'HostOperationFailed (PluginFailure).';
+                    userRoot = $privateText; nativeMessage = $privateText; unknown = $privateText } | ConvertTo-Json | Set-Content -LiteralPath $report
+                & $WriteFixture $report
+                foreach ($file in @($report, ($report + '.evidence.json'))) {
+                    if (Test-Path -LiteralPath $file -PathType Leaf) { $before[$file] = (Get-FileHash -LiteralPath $file).Hash }
+                }
+                if ($ObservationThrows) { throw 'Synthetic original observation failure' }
+            } 6>&1 | ForEach-Object {
+                if ($_ -isnot [Management.Automation.InformationRecord]) { throw 'Unexpected success output on failure.' }
+                $console.Add([string]$_.MessageData)
+            }
+        }
+        catch { $caught = $_ }
+        $wantedError = if ($ObservationThrows) { 'Synthetic original observation failure' } else { 'TestingProcessFailed' }
+        if ($null -eq $caught -or $caught.Exception.Message -cne $wantedError) { throw "Original failure was replaced: $Name" }
+        if ($launches.Count -ne 1 -or (Test-Path (Join-Path $output 'verify.json')) -or (Test-Path (Join-Path $output 'verify.runner.json'))) { throw "Diagnostic failure launched verify: $Name" }
+        if ($console.Count -ne 1) { throw "Expected one bounded diagnostic console line: $Name; actual=$($console.Count)" }
+        $line = $console[0]
+        if ([Text.Encoding]::UTF8.GetByteCount($line) -gt 4096 -or $line.Contains("`n") -or $line.Contains("`r") -or $line.Contains("`e") -or
+            $line.Contains('synthetic-private') -or $line.Contains('::error::') -or $line.Contains('##vso') -or $line.Contains($temp)) { throw "Unsafe diagnostic console contents: $Name" }
+        $diagnostic = $line | ConvertFrom-Json -AsHashtable
+        if ($diagnostic.kind -cne 'TestingPluginProbeFailure' -or $diagnostic.phase -cne 'seed' -or $diagnostic.processId -ne 501 -or
+            $diagnostic.hasExited -ne $true -or $diagnostic.exitCode -ne 1 -or $diagnostic.rootLeaseAvailable -ne $true -or
+            $diagnostic.observationFailed -ne $ObservationThrows -or $diagnostic.runnerError -cne 'TestingProcessFailed' -or
+            $diagnostic.nativeSidecar -cne $WantedSidecar -or $diagnostic.nativeReport -cne $WantedReport) { throw "Diagnostic lost actual observations or safe report status: $Name" }
+        foreach ($file in $before.Keys) {
+            if ((Get-FileHash -LiteralPath $file).Hash -cne $before[$file]) { throw "Diagnostic mutated native bytes: $Name" }
+        }
+        $runnerPath = Join-Path $output 'seed.runner.json'
+        $runner = Get-Content -LiteralPath $runnerPath -Raw | ConvertFrom-Json
+        if ($runner.succeeded -or $runner.runnerError -cne 'TestingProcessFailed') { throw "Diagnostic replaced runner failure evidence: $Name" }
+        $firstHash = (Get-FileHash -LiteralPath $runnerPath).Hash
+        try { Complete-TestingPluginProbeReport -ReportPath (Join-Path $output 'seed.json') -ProcessId 501 -HasExited $true -ExitCode 0 -ExpectedPhase seed -ExpectedRoot $temp -LeaseAvailable $true | Out-Null } catch { }
+        if ((Get-FileHash -LiteralPath $runnerPath).Hash -cne $firstHash) { throw "Diagnostic overwrote first runner evidence: $Name" }
+        return $diagnostic
+    }
+    $safe = Invoke-SyntheticDiagnosticFailure 'safe-prefix' {
+        param($report)
+        New-SyntheticSidecar | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+    }
+    if ($safe.nativeProcessId -ne 501 -or ($safe.checks -join ',') -cne 'independent-zip-native-page,packaged-requirements-figma-io,traceable-manual-mapped-generation' -or
+        $safe.failure.category -cne 'Assertion' -or $safe.failure.sourceFile -cne 'TestingNativeProbe.Authoring.cs' -or $safe.failure.sourceLine -ne 43) { throw 'Safe cumulative native checks/assertion location were lost.' }
+    Write-Host ('Synthetic console diagnostic (not native evidence): ' + ($safe | ConvertTo-Json -Compress -Depth 6))
+    $bounded = Invoke-SyntheticDiagnosticFailure 'exact-byte-bound' {
+        param($report)
+        $fixture = New-SyntheticSidecar; $fixture.unknown = ''
+        $size = [Text.Encoding]::UTF8.GetByteCount(($fixture | ConvertTo-Json -Compress -Depth 10))
+        $fixture.unknown = 'x' * (65536 - $size)
+        $bytes = [Text.Encoding]::UTF8.GetBytes(($fixture | ConvertTo-Json -Compress -Depth 10))
+        if ($bytes.Length -ne 65536) { throw 'Synthetic byte-bound fixture is incorrect.' }
+        [IO.File]::WriteAllBytes(($report + '.evidence.json'), $bytes)
+    }
+    if ($bounded.failure.category -cne 'Assertion' -or $bounded.checks.Count -ne 3) { throw 'Exactly bounded native detail was discarded or its unknown padding leaked.' }
+    $noLocation = Invoke-SyntheticDiagnosticFailure 'assertion-no-location' {
+        param($report)
+        $fixture = New-SyntheticSidecar; $fixture.failure.sourceFile = $null; $fixture.failure.sourceLine = $null
+        $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+    }
+    if ($noLocation.failure.category -cne 'Assertion' -or $null -ne $noLocation.failure.sourceFile -or $null -ne $noLocation.failure.sourceLine) { throw 'Unavailable first-party location was fabricated.' }
+    $legacy = Invoke-SyntheticDiagnosticFailure 'legacy-safe-category' {
+        param($report)
+        $fixture = New-SyntheticSidecar; $fixture.Remove('failure'); $fixture.safeError = 'TestingNativeProbeFailed (Storage).'
+        $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+    }
+    if ($legacy.failure.category -cne 'Storage' -or $null -ne $legacy.failure.sourceFile) { throw 'Legacy native error category did not remain safe and useful.' }
+    $missing = Invoke-SyntheticDiagnosticFailure 'missing' { } -WantedSidecar missing
+    if ($missing.checks.Count -ne 0 -or $null -ne $missing.nativeProcessId -or $missing.failure.category -cne 'Unexpected') { throw 'Missing sidecar fabricated native detail.' }
+    $linkedParent = Invoke-SyntheticDiagnosticFailure 'parent-link' {
+        param($report)
+        New-SyntheticSidecar | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+    } -WantedSidecar unsafe-path -WantedReport unsafe-path -LinkedParent $true
+    if ($linkedParent.checks.Count -ne 0 -or $linkedParent.failure.category -cne 'Unavailable') { throw 'Symlinked parent was followed for native diagnostics.' }
+    foreach ($bad in @('malformed','invalid-utf8','oversized','file-link','deep-json','duplicate-field','wrong-pid','wrong-phase','string-schema','string-pid','fractional-pid',
+        'string-success','true-success','unknown-check','string-checks','duplicate-checks','reordered-checks','nonprefix-checks','unknown-category','unsafe-source','string-line','negative-line','unknown-safe-error')) {
+        $status = switch ($bad) { 'oversized' {'oversized'} 'file-link' {'unsafe-path'} default {'invalid'} }
+        $rejected = Invoke-SyntheticDiagnosticFailure $bad {
+            param($report)
+            $sidecar = $report + '.evidence.json'; $fixture = New-SyntheticSidecar
+            switch ($bad) {
+                'malformed' { [IO.File]::WriteAllText($sidecar, '{"safeError":"' + $privateText); return }
+                'oversized' { [IO.File]::WriteAllText($sidecar, '{"body":"' + ('x' * 65536) + '"}'); return }
+                'file-link' {
+                    $target = Join-Path $temp 'link-target.json'; $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $target
+                    New-Item -ItemType SymbolicLink -Path $sidecar -Target $target | Out-Null; return
+                }
+                'invalid-utf8' {
+                    $fixture.unknown = 'synthetic-byte-marker'; $json = $fixture | ConvertTo-Json -Compress -Depth 10
+                    $bytes = [Text.Encoding]::UTF8.GetBytes($json); $bytes[$json.IndexOf('synthetic-byte-marker')] = 255
+                    [IO.File]::WriteAllBytes($sidecar, $bytes); return
+                }
+                'deep-json' {
+                    $json = $fixture | ConvertTo-Json -Compress -Depth 10
+                    [IO.File]::WriteAllText($sidecar, $json.Substring(0, $json.Length - 1) + ',"deep":' + ('[' * 20) + '1' + (']' * 20) + '}'); return
+                }
+                'duplicate-field' {
+                    $json = $fixture | ConvertTo-Json -Compress -Depth 10
+                    [IO.File]::WriteAllText($sidecar, $json.Substring(0, $json.Length - 1) + ',"schemaVersion":1}'); return
+                }
+                'wrong-pid' { $fixture.processId = 502 }
+                'wrong-phase' { $fixture.phase = 'verify' }
+                'string-schema' { $fixture.schemaVersion = '1' }
+                'string-pid' { $fixture.processId = '501' }
+                'fractional-pid' { $fixture.processId = 501.5 }
+                'string-success' { $fixture.succeeded = 'false' }
+                'true-success' { $fixture.succeeded = $true }
+                'unknown-check' { $fixture.checks = @($privateText) }
+                'string-checks' { $fixture.checks = 'independent-zip-native-page' }
+                'duplicate-checks' { $fixture.checks = @('independent-zip-native-page','independent-zip-native-page') }
+                'reordered-checks' { $fixture.checks = @('packaged-requirements-figma-io','independent-zip-native-page') }
+                'nonprefix-checks' { $fixture.checks = @('traceable-manual-mapped-generation') }
+                'unknown-category' { $fixture.failure.category = $privateText }
+                'unsafe-source' { $fixture.failure.sourceFile = $privateText }
+                'string-line' { $fixture.failure.sourceLine = '43' }
+                'negative-line' { $fixture.failure.sourceLine = -1 }
+                'unknown-safe-error' { $fixture.Remove('failure'); $fixture.safeError = $privateText }
+            }
+            $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $sidecar
+        } -WantedSidecar $status
+        if ($rejected.checks.Count -ne 0 -or $null -ne $rejected.nativeProcessId -or $null -ne $rejected.failure.sourceFile) { throw "Rejected report leaked native data: $bad" }
+    }
+    foreach ($badReport in @('missing','malformed','oversized','file-link','hostile-error')) {
+        $status = switch ($badReport) { 'missing' {'missing'} 'oversized' {'oversized'} 'file-link' {'unsafe-path'} default {'invalid'} }
+        $rejected = Invoke-SyntheticDiagnosticFailure ('main-' + $badReport) {
+            param($report)
+            switch ($badReport) {
+                'missing' { Remove-Item -LiteralPath $report }
+                'malformed' { [IO.File]::WriteAllText($report, '{"error":') }
+                'oversized' { [IO.File]::WriteAllText($report, '{"body":"' + ('x' * 65536) + '"}') }
+                'file-link' {
+                    $target = Join-Path $temp 'main-link-target.json'; Move-Item -LiteralPath $report -Destination $target
+                    New-Item -ItemType SymbolicLink -Path $report -Target $target | Out-Null
+                }
+                'hostile-error' { @{succeeded=$false;stage='initialize-or-native-smoke';error=$privateText} | ConvertTo-Json | Set-Content -LiteralPath $report }
+            }
+        } -WantedSidecar missing -WantedReport $status
+        if ($rejected.failure.category -cne 'Unavailable') { throw "Rejected main report fabricated a failure category: $badReport" }
+    }
+    $original = Invoke-SyntheticDiagnosticFailure 'observation-throw' {
+        param($report)
+        New-SyntheticSidecar | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+    } -ObservationThrows $true
+    # A broken diagnostic sink must not replace the fixed runner throw or the original observation throw.
+    try {
+        & (Get-Module TestingPluginProbe) { function script:Write-TestingPluginProbeFailureDiagnostic { throw 'Synthetic diagnostic sink failure' } }
+        foreach ($observeThrows in @($false,$true)) {
+            $output = Join-Path $temp ('diagnostic-sink-' + $observeThrows); New-Item $output -ItemType Directory | Out-Null
+            $caught = $null
+            try {
+                Invoke-TestingPluginProbePhases -OutputDirectory $output -ExpectedRoot $temp -Observe {
+                    param($phase,$report,$observation)
+                    $observation.ProcessId = 501; $observation.HasExited = $true; $observation.ExitCode = 1; $observation.LeaseAvailable = $true
+                    if ($observeThrows) { throw 'Synthetic original observation failure' }
+                } | Out-Null
+            } catch { $caught = $_ }
+            $wantedError = if ($observeThrows) { 'Synthetic original observation failure' } else { 'TestingProcessFailed' }
+            if ($null -eq $caught -or $caught.Exception.Message -cne $wantedError -or (Test-Path (Join-Path $output 'verify.runner.json')) -or
+                (Get-Content (Join-Path $output 'seed.runner.json') -Raw | ConvertFrom-Json).runnerError -cne 'TestingProcessFailed') { throw 'Diagnostic sink failure replaced original failure or runner evidence.' }
+        }
+    } finally { Import-Module (Join-Path $PSScriptRoot '../../scripts/TestingPluginProbe.psm1') -Force }
+    Write-Host 'Testing diagnostic regressions passed: safe cumulative assertions, legacy category, rejected hostile/missing/malformed/oversized/symlink reports, first evidence and original exceptions. Synthetic fixtures only.'
     # Synthetic runner metadata tests the actual orchestration; these are NOT native EXE evidence.
     foreach ($case in @('missing','wrong-pid','still-live','lease-held','incomplete','collection')) {
         $output = Join-Path $temp $case; New-Item $output -ItemType Directory | Out-Null
