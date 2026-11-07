@@ -92,5 +92,5 @@ internal sealed partial class MainWindow
 {
     internal HostRuntime SmokeRuntime => _runtime ?? throw new InvalidOperationException("Host runtime is unavailable.");
     internal bool SmokeActionBusy => _busy;
-    internal Task SmokeRunOwnedActionAsync(Func<Task> action) => RunAsync(action);
+    internal Task SmokeRunOwnedActionAsync(Func<Task> action) => RunAsync(_ => action());
 }

@@ -30,7 +30,7 @@ internal static class NativeRetainedRuntimeProbe
                 await File.WriteAllTextAsync(manifestPath, manifest.ToJsonString());
                 Require((await store.InstallAsync(peerSource)).Succeeded, "Unrelated native worker installation failed.");
             }
-            var extra = new MainWindow(new(false, root, null));
+            var extra = new MainWindow(new(false, root, null) { DirectRuntime = true });
             extra.Activate();
             var release = Path.Combine(root, "data", Id, "release-work");
             try

@@ -16,6 +16,7 @@ public sealed class WorkspaceLifecyclePlugin : IWorkbenchPlugin
             _gate.Prepared.TrySetResult();
             await _gate.PrepareRelease.Task;
             if (_gate.FailPreparation) throw new HostileException();
+            await File.WriteAllTextAsync(Path.Combine(context.DataDirectory, "prepared-draft.txt"), _gate.PrivateDraft);
         });
         await _gate.InitializeRelease.Task;
         if (_gate.FailInitialization) throw new HostileException();

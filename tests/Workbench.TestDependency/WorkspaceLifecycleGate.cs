@@ -16,6 +16,7 @@ public sealed class WorkspaceLifecycleGate : IDisposable
     public TaskCompletionSource InitializeRelease { get; } = NewSignal();
     public bool FailInitialization { get; set; }
     public bool FailPreparation { get; set; }
+    public string PrivateDraft { get; set; } = "";
     public ConcurrentQueue<string> Events { get; } = new();
     public int Live => Volatile.Read(ref _live);
     public WorkspaceLifecycleGate(string dataPath, bool holdPrepare = false, bool holdStop = false, bool holdInitialize = false)

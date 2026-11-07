@@ -10,6 +10,7 @@
     <Compile Include="../../src/Workbench.App/WorkspaceRuntimeCoordinator.cs" Link="Host/WorkspaceRuntimeCoordinator.cs" />
     <Compile Include="../../src/Workbench.App/ProjectTransition.cs" Link="Host/ProjectTransition.cs" />
     <Compile Include="../../src/Workbench.App/RunOptions.cs" Link="Host/RunOptions.cs" />
+    <Compile Include="../../src/Workbench.App/HostThemeSession.cs" Link="Host/HostThemeSession.cs" />
     <Compile Include="../../src/Workbench.App/HostFailure.cs" Link="Host/HostFailure.cs" />
     <Compile Include="../../src/Workbench.App/PackagePresentation.cs" Link="Host/PackagePresentation.cs" />
     <Compile Include="../../src/Workbench.App/NativeProbeEvidence.cs" Link="Host/NativeProbeEvidence.cs" />

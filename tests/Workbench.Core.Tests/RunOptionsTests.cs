@@ -7,6 +7,44 @@ public sealed class RunOptionsTests
 {
     [Theory]
     [InlineData("seed")]
+    [InlineData("verify")]
+    public void Workspace_probe_never_opens_normal_or_other_probe_roots(string phase)
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "ProjectWorkbench-workspace-probe");
+        var root = Path.Combine(parent, Guid.NewGuid().ToString("N"));
+        var options = RunOptions.Parse(["--workspace-probe", phase, "--probe-root", root]);
+        Assert.True(options.IsIsolated);
+        Assert.Equal(root, options.UserRoot);
+        Assert.Equal(phase, options.WorkspaceProbe);
+        Assert.NotNull(options.ReportPath);
+        var generated = RunOptions.Parse(["--workspace-probe", phase]);
+        Assert.Equal(parent, Path.GetDirectoryName(generated.UserRoot));
+        foreach (var invalid in new[] { Path.GetTempPath(), Path.Combine(parent, "normal"),
+            Path.Combine(parent, Guid.NewGuid().ToString("N"), "nested"),
+            Path.Combine(Path.GetTempPath(), "ProjectWorkbench-runtime-probe", Guid.NewGuid().ToString("N")),
+            Path.Combine(Path.GetTempPath(), "ProjectWorkbench-business-probe", Guid.NewGuid().ToString("N")) })
+            Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--workspace-probe", phase, "--probe-root", invalid]));
+    }
+
+    [Theory]
+    [InlineData("--smoke-test")]
+    [InlineData("--runtime-probe", "management")]
+    [InlineData("--business-probe", "seed")]
+    public void Workspace_probe_conflicts_refuse_before_any_root_is_selected(params string[] other)
+    {
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--workspace-probe", "seed", .. other]));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse([.. other, "--workspace-probe", "verify"]));
+    }
+
+    [Theory]
+    [InlineData("unknown")]
+    [InlineData("SEED")]
+    [InlineData("")]
+    public void Invalid_workspace_phase_cannot_fall_through_to_normal_startup(string phase)
+        => Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--workspace-probe", phase]));
+
+    [Theory]
+    [InlineData("seed")]
     [InlineData("restart")]
     [InlineData("update")]
     [InlineData("fault")]
@@ -37,6 +75,7 @@ public sealed class RunOptionsTests
     [InlineData("--probe-root")]
     [InlineData("--runtime-probe")]
     [InlineData("--smoke-report")]
+    [InlineData("--workspace-probe")]
     public void Incomplete_value_options_cannot_fall_through_to_the_normal_user_store(string option)
     {
         Assert.Throws<ArgumentException>(() => RunOptions.Parse([option]));

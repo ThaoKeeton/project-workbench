@@ -49,7 +49,7 @@ internal static class NativeFailureProbe
         var path = Path.Combine(root, "host-settings.json");
         const string corrupted = "{\"Theme\":\"synthetic-private-native-provider-response\"}";
         using (HostRuntime.AcquireLease(root)) await File.WriteAllTextAsync(path, corrupted);
-        var extra = new MainWindow(new(false, root, null));
+        var extra = new MainWindow(new(false, root, null) { DirectRuntime = true });
         var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         extra.Closed += (_, _) => closed.TrySetResult();
         extra.Activate();
@@ -97,7 +97,7 @@ internal static class NativeFailureProbe
         }
         using (HostRuntime.AcquireLease(root)) { }
 
-        var reopened = new MainWindow(new(false, root, null));
+        var reopened = new MainWindow(new(false, root, null) { DirectRuntime = true });
         var reopenedClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         reopened.Closed += (_, _) => reopenedClosed.TrySetResult();
         reopened.Activate();

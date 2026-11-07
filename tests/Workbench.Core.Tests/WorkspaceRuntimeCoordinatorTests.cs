@@ -11,6 +11,182 @@ public sealed class WorkspaceRuntimeCoordinatorTests
     private const string PluginId = "com.example.workspace";
 
     [Fact]
+    public async Task Normal_close_supersedes_queued_switch_but_still_saves_live_hook_only_draft()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var gate = fixture.Gate(fixture.Disk.User);
+        gate.PrivateDraft = "queued-switch private draft";
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var action = coordinator.RunCurrentAsync(async (_, _, _) => { entered.SetResult(); await release.Task; });
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var change = coordinator.SwitchAsync(target.Id);
+        var close = coordinator.PrepareCloseAsync();
+        try
+        {
+            Assert.False(coordinator.CanUseCurrentRuntime);
+            Assert.False(close.IsCompleted);
+            Assert.False(gate.Prepared.Task.IsCompleted);
+            release.TrySetResult();
+            await action;
+            Assert.False((await change).Succeeded);
+            Assert.True((await close).Succeeded);
+            Assert.Equal(1, fixture.FactoryCalls);
+            Assert.Equal("queued-switch private draft", await File.ReadAllTextAsync(Path.Combine(fixture.Disk.User, "data", PluginId, "prepared-draft.txt")));
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+        }
+        finally { release.TrySetResult(); await action; await coordinator.DisposeAsync(); }
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Normal_close_after_blocked_switch_keeps_failed_or_pending_live_preparation_owned(bool held)
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var gate = fixture.Gate(fixture.Disk.User, holdPrepare: held);
+        gate.FailPreparation = !held;
+        gate.PrivateDraft = "blocked-switch private draft";
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        try
+        {
+            Assert.False((await coordinator.SwitchAsync(target.Id)).Succeeded);
+            var close = await coordinator.PrepareCloseAsync();
+            Assert.False(close.Succeeded);
+            Assert.Equal(held, close.Pending);
+            Assert.Equal(!held, coordinator.CanUseCurrentRuntime);
+            Assert.Equal(!held, coordinator.Document!.IsEditable);
+            Assert.Equal(1, gate.Live);
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+            Assert.Equal(1, fixture.FactoryCalls);
+            gate.FailPreparation = false;
+            gate.PrepareRelease.TrySetResult();
+            Assert.True((await coordinator.PrepareCloseAsync()).Succeeded);
+            if (held) Assert.Single(gate.Events, item => item == "prepare");
+            Assert.Equal("blocked-switch private draft", await File.ReadAllTextAsync(Path.Combine(fixture.Disk.User, "data", PluginId, "prepared-draft.txt")));
+        }
+        finally { gate.PrepareRelease.TrySetResult(); await coordinator.DisposeAsync(); }
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
+    public async Task Normal_close_prepares_private_draft_before_stop_and_keeps_success_sealed()
+    {
+        using var fixture = new Fixture();
+        using var gate = fixture.Gate(fixture.Disk.User, holdPrepare: true);
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        coordinator.Document!.Edit("owned close draft");
+        gate.PrivateDraft = "private plugin draft at close";
+        try
+        {
+            var close = coordinator.PrepareCloseAsync();
+            Assert.False(coordinator.CanUseCurrentRuntime);
+            var pending = await close;
+            Assert.True(pending.Pending);
+            Assert.True(gate.Prepared.Task.IsCompleted);
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+            Assert.False(coordinator.Document.IsEditable);
+            Assert.False((await coordinator.CreateAndSwitchAsync("Must not open")).Succeeded);
+            Assert.Equal(1, fixture.FactoryCalls);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+            gate.PrepareRelease.TrySetResult();
+            Assert.True((await coordinator.PrepareCloseAsync()).Succeeded);
+            Assert.False(coordinator.CanUseCurrentRuntime);
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+            Assert.Equal("private plugin draft at close", await File.ReadAllTextAsync(Path.Combine(fixture.Disk.User, "data", PluginId, "prepared-draft.txt")));
+            Assert.Equal("owned close draft", (await coordinator.Scope!.Documents.ReadAsync()).Text);
+        }
+        finally { gate.PrepareRelease.TrySetResult(); await coordinator.DisposeAsync(); }
+        Assert.Equal(0, gate.Live);
+        using var next = HostRuntime.AcquireLease(fixture.Disk.User);
+    }
+
+    [Fact]
+    public async Task Settled_normal_close_hook_failure_reopens_same_live_plugin_and_editor_for_correction()
+    {
+        using var fixture = new Fixture();
+        using var gate = fixture.Gate(fixture.Disk.User);
+        gate.FailPreparation = true;
+        gate.PrivateDraft = "private correction needed";
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        var manager = coordinator.Runtime.Manager;
+        var result = await coordinator.PrepareCloseAsync();
+        Assert.False(result.Succeeded);
+        Assert.False(result.Pending);
+        Assert.Equal("ProjectPreparationFailed", result.ErrorCode);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+        Assert.True(coordinator.Document!.IsEditable);
+        Assert.Same(manager, coordinator.Runtime.Manager);
+        Assert.Equal(1, gate.Live);
+        Assert.False(gate.StopStarted.Task.IsCompleted);
+        coordinator.Document.Edit("corrected before close");
+        await coordinator.RunCurrentAsync((runtime, _, _) => runtime.Manager.GetSettings(PluginId).SetAsync("correction", true));
+        gate.FailPreparation = false;
+        gate.PrivateDraft = "corrected private draft";
+        Assert.True((await coordinator.PrepareCloseAsync()).Succeeded);
+        Assert.Equal("corrected private draft", await File.ReadAllTextAsync(Path.Combine(fixture.Disk.User, "data", PluginId, "prepared-draft.txt")));
+        Assert.Equal("corrected before close", (await coordinator.Scope!.Documents.ReadAsync()).Text);
+    }
+
+    [Fact]
+    public async Task Canceled_normal_close_retains_ignored_hook_and_retry_joins_it_before_any_stop()
+    {
+        using var fixture = new Fixture();
+        using var gate = fixture.Gate(fixture.Disk.User, holdPrepare: true);
+        var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        using var cancel = new CancellationTokenSource();
+        try
+        {
+            var close = coordinator.PrepareCloseAsync(cancel.Token);
+            await gate.Prepared.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            cancel.Cancel();
+            Assert.True((await close).Pending);
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+            Assert.False(coordinator.CanUseCurrentRuntime);
+            Assert.False((await coordinator.PrepareCloseAsync()).Succeeded);
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+            gate.PrepareRelease.TrySetResult();
+            Assert.True((await coordinator.PrepareCloseAsync()).Succeeded);
+        }
+        finally { gate.PrepareRelease.TrySetResult(); await coordinator.DisposeAsync(); }
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
+    public async Task Normal_close_editor_error_reopens_correction_without_retiring_manager()
+    {
+        using var fixture = new Fixture();
+        using var gate = fixture.Gate(fixture.Disk.User);
+        await using var coordinator = fixture.Coordinator();
+        Assert.True((await coordinator.InitializeAsync()).Succeeded);
+        Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+        coordinator.Document!.Edit(new string('x', 1024 * 1024 + 1));
+        var failed = await coordinator.PrepareCloseAsync();
+        Assert.False(failed.Succeeded);
+        Assert.False(failed.Pending);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+        Assert.True(coordinator.Document.IsEditable);
+        Assert.False(gate.StopStarted.Task.IsCompleted);
+        coordinator.Document.Edit("short corrected close draft");
+        Assert.True((await coordinator.PrepareCloseAsync()).Succeeded);
+        Assert.Equal("short corrected close draft", (await coordinator.Scope!.Documents.ReadAsync()).Text);
+    }
+
+    [Fact]
     public async Task Close_joins_admitted_action_and_prevents_queued_target_activation()
     {
         using var fixture = new Fixture();

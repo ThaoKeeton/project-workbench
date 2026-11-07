@@ -21,6 +21,9 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
     private CloseAttempt? _closeAttempt;
     private bool _disposed;
     private long _runtimeGeneration;
+    private bool _preparingClose;
+    private volatile bool _normalCloseRequested;
+    private Task<ProjectSwitchResult>? _closePreparation;
 
     public WorkspaceRuntimeCoordinator(RunOptions options, Func<string, ProjectRuntimeScope, WorkspaceRootLease, HostRuntime> factory)
     {
@@ -40,7 +43,63 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
     {
         get { lock (_gate) return CanAdmitCurrent; }
     }
-    private bool CanAdmitCurrent => !_closing && _current is { Stopped: false, Runtime: not null }
+
+    /// <summary>Normal native close first joins edits/actions and committed leave hooks. A settled
+    /// correctable failure retains the same live manager; success/pending work seals admission.</summary>
+    public Task<ProjectSwitchResult> PrepareCloseAsync(CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return Task.FromResult(new ProjectSwitchResult(true, false, null));
+            if (_closing)
+                return Task.FromResult(new ProjectSwitchResult(false, true, "ProjectCloseCleanupRequired"));
+            if (_closePreparation is { IsCompleted: false }) return _closePreparation;
+            if (_closePreparation is { IsCompletedSuccessfully: true } done && done.Result.Succeeded) return done;
+            _preparingClose = true; // Published synchronously before a queued callback can run.
+            _normalCloseRequested = true; // Also cancels target admission in an already queued switch.
+            return _closePreparation = QueueLocked(async () =>
+            {
+                if (_attempt is { } attempt)
+                {
+                    if (attempt.Stage == SwitchStage.Prepare && _current is { Stopped: false } && attempt.Candidate is null)
+                    {
+                        // The old live context still owns any failed/pending hook. Supersede only
+                        // the target request, then run/join its preparation for this normal close.
+                        _attempt = null;
+                        _retryTarget = null;
+                    }
+                    else return new ProjectSwitchResult(false, true, "ProjectCloseCleanupRequired");
+                }
+                if (_current is { Stopped: true }) return new ProjectSwitchResult(false, true, "ProjectCloseCleanupRequired");
+                if (_current is null) return new ProjectSwitchResult(true, false, null);
+                ProjectSwitchResult result;
+                try
+                {
+                    await _current.Document.QuiesceAsync(ct).ConfigureAwait(false);
+                    var preparation = await _current.Runtime!.Manager.PrepareProjectLeaveAsync(cancellationToken: ct).ConfigureAwait(false);
+                    var pending = preparation.HasPendingWork || _current.Runtime.Manager.HasPendingProjectWork;
+                    result = preparation.Succeeded && !pending ? new(true, false, null)
+                        : new(false, pending, PreparationCode(preparation.ErrorCode));
+                }
+                catch (Exception error)
+                {
+                    result = new(false, _current.Document.HasPendingWork || _current.Runtime!.Manager.HasPendingProjectWork,
+                        HostFailure.ProjectCode(error));
+                }
+                if (!result.Succeeded)
+                {
+                    if (!result.Pending)
+                    {
+                        _current.Document.SetPaused(_closing);
+                        lock (_gate) { _preparingClose = false; _normalCloseRequested = false; }
+                    }
+                    Block(result.ErrorCode ?? "ProjectPreparationFailed", result.Pending);
+                }
+                return result;
+            });
+        }
+    }
+    private bool CanAdmitCurrent => !_closing && !_preparingClose && _current is { Stopped: false, Runtime: not null }
         && _attempt is null && _retiring is null && _transitionRequests == 0;
 
     public Task<ProjectSwitchResult> InitializeAsync(CancellationToken ct = default) => TransitionAsync(async () =>
@@ -160,7 +219,15 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
         var attempt = _attempt!;
         while (true)
         {
-            if (_closing && attempt.Stage != SwitchStage.Rollback)
+            if (_normalCloseRequested && !_closing && attempt.Stage == SwitchStage.Prepare)
+            {
+                // Never Stop a live current manager merely because close canceled a queued target.
+                // PrepareCloseAsync owns its document/hooks next, with the same private buffers.
+                _attempt = null;
+                _retryTarget = null;
+                return Block("ProjectClosing", HasPendingOwnedWork);
+            }
+            if ((_closing || _normalCloseRequested) && attempt.Stage != SwitchStage.Rollback)
             {
                 attempt.FailureCode = "ProjectClosing";
                 attempt.Stage = SwitchStage.Rollback;
@@ -274,7 +341,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
             catch (PluginShutdownException) { return Block("ProjectStopPending", true); }
             attempt.Candidate = null;
         }
-        if (!_closing && _current is { Stopped: true } current)
+        if (!_closing && !_normalCloseRequested && _current is { Stopped: true } current)
         {
             if (attempt.RestoreNeedsRetirement)
             {
@@ -332,11 +399,13 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
         lock (_gate)
         {
             ObjectDisposedException.ThrowIf(_closing, this);
+            if (_preparingClose) return Task.FromResult(Block("ProjectClosePending", true));
             _transitionRequests++;
             return QueueLocked(async () =>
             {
                 try
                 {
+                    if (_normalCloseRequested) return Block("ProjectClosing", HasPendingOwnedWork);
                     if (!await DrainRetiringAsync().ConfigureAwait(false)) return Block("ProjectRetirementPending", true);
                     return await operation().ConfigureAwait(false);
                 }

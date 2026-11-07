@@ -11,7 +11,7 @@ internal static class HostRuntimeOptions
     {
         var userRoot = projectScope?.UserRoot ?? options.UserRoot;
         var bundled = Path.Combine(AppContext.BaseDirectory, "Plugins");
-        if (options.SmokeTest)
+        if (options.SmokeTest || options.WorkspaceProbe is not null)
         {
             // Curate a new root: never enumerate installed plugins or read normal user settings.
             var isolated = Path.Combine(userRoot, "bundled");
@@ -45,7 +45,17 @@ internal static class HostRuntimeOptions
         foreach (var file in Directory.EnumerateFiles(source))
         {
             HostRuntime.RejectLinks(file);
-            File.Copy(file, Path.Combine(destination, Path.GetFileName(file)));
+            var target = Path.Combine(destination, Path.GetFileName(file));
+            HostRuntime.RejectLinks(target);
+            // A project can be reopened in this same process. Its retired assembly may remain
+            // mapped by Windows; identical curated bytes must be reused without rewriting it.
+            if (File.Exists(target))
+            {
+                if (!System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(file))
+                    .SequenceEqual(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(target))))
+                    throw new IOException("The isolated curated sample changed.");
+            }
+            else File.Copy(file, target);
         }
         if (Directory.EnumerateDirectories(source).Any())
             throw new IOException("Bundled smoke samples must be flat code-only packages.");

@@ -2,6 +2,8 @@
 
 证据分层记录。Linux Core 行为测试、跨目标 C# 参考编译、Windows 发布、真实 WinUI 自动冒烟和 Windows 人工验收各有不同范围，不互相替代。
 
+0.3 项目工作区新增 `scripts/project-workspace-probe.ps1`：源码构建后在两个实际 shipping EXE 进程中依次运行 `--workspace-probe seed|verify`，根只允许 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/`。原生报告由实际 Closed 事件写入；启动器独立核对 PID/phase/root、OS exit 0、实际根租约重新取得及完整检查列表，再允许第二进程。检查使用真实项目对话框/选择器、文本框、主题与凭据控件和文件，包含旧准备挂起、候选停止挂起、回滚新 manager 绑定、草稿、归档和重开。固定 NativeFixture 位于 `artifacts/native/fixtures/runtime`，不进入用户主程序或业务伴随包；普通下载没有此源码测试依赖。新增源码的 Linux 聚焦行为/参考编译不构成 Windows 原生通过，需本轮控制器运行完整 CI 并下载核验 `project-workspace-probes`。原有 native14、management17+theme1、platform7、business12进程51项继续保留。Windows 11 人工、真实独立 GUI/更高版本迁移/provider 验收仍延期，当前不要求用户测试。
+
 | 检查 | 已有证据 | 范围与限制 |
 | --- | --- | --- |
 | Task 3 Linux Core | 一次完整运行 221 通过、2 项明确 Windows DPAPI 跳过，共 223 项；随后新增 OS 进程用例的最终聚焦运行 12/12 通过 | 聚焦运行包含 6 个实际子进程，验证通用 opt-in Restore、RequiresPluginStart 不恢复、停用后不复活；另含 HostRuntime 持锁/Stop 重试、Apply 顺序、坏元数据独立根及只读凭据状态。未把更新后的完整套件宣称为已重新运行；TRX 在 Task 3 报告 |
@@ -66,7 +68,7 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 3. 为测试明确批准并启用这两个样例，验证共享 WinUI/WinRT 契约身份，并逐个创建、附加两个页面与两个设置控件到真实 XamlRoot。
 4. 在同一个已附加的主程序卡片上检查 Light/Dark/Light 的实际主题与填充/描边颜色重新解析，再应用系统主题。运行两个本地命令，检查隔离目录下的非空摘要与 CSV 文件。
 5. 设置真实摘要 TextBox.Text 为不同于预置内容的多行文本，等待原生文本事件并核对完整输入；经过首页、命令、主程序设置和两插件设置后用新工厂返回，检查捕获的原生文本逐字不变。重复生成须明确拒绝且保留模型/文件；通过 `ButtonAutomationPeer.Invoke` 请求真实保存按钮并等待异步 UI 状态后检查磁盘文本，再次生成仍不得覆盖。物理键盘、焦点及屏幕阅读器行为仍由下方人工清单验收。
-6. 再修改摘要但不保存；清除控件，停用并重新启用两个样例，再次附加原生控件；检查注册撤销与恢复，摘要仅恢复已保存版本且文件不变。
+6. 使用不同的 SummaryPreparedDraft 验证离开前准备写入；再编辑为另一份 SummaryStoppedDraft，清除控件、停用并重新启用两个样例，检查终止 Stop 写入最新草稿及实际文件/行重载。导航、主动保存和重复生成不覆盖的原有断言继续保留；偏好自动保存必须在准备之前读取磁盘确认。
 7. 停止插件、清除注册，检查保存的 enabled 偏好仍为 true，写入 JSON 并关闭窗口。
 
 报告包含 `succeeded`、`stage`、`userRoot`、启动阶段/线程/时间、检查列表、文件路径/大小和完成时间；失败仅包含安全错误代码/类别与 HRESULT，不读取异常 Message/ToString。当前从 SDK 生成入口进入 Application 构造开始，记录编译后的 Application 资源初始化、窗口和控件阶段；更早的失败由启动器报告和进程诊断定位。进程入口前的模块初始化崩溃可能无法由 EXE 写报告，脚本会补充失败 JSON；即使原生进程已写成功报告，后续退出失败或超时也会把最终 succeeded 改为 false，并保留已有检查与原生阶段。报告不含真实用户设置或业务数据。临时根目录保留用于故障检查，可在进程退出后按报告路径自行删除。超时是失败；脚本为限制测试运行时间而终止测试进程，不表示普通停用可强制取消插件。

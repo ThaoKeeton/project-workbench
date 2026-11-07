@@ -10,6 +10,7 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
 {
     private IPluginRuntimeContext _context = null!;
     private string _mode = "normal";
+    private string _workspaceDraft = "";
 
     public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken)
     {
@@ -28,12 +29,23 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
             var result = await _context.BackgroundTasks.StartAsync("confirmed-worker", token);
             return new(result.Succeeded, result.Message);
         }));
+        if (_mode.StartsWith("workspace-", StringComparison.Ordinal) && context is IPluginProjectContext project)
+            project.RegisterBeforeProjectLeave(async _ =>
+            {
+                await context.Settings.SetAsync("prepare-calls", await context.Settings.GetAsync("prepare-calls", 0) + 1);
+                await File.WriteAllTextAsync(Path.Combine(context.DataDirectory, "prepare-started"), "synthetic");
+                if (_mode == "workspace-hold-prepare")
+                    while (!File.Exists(Path.Combine(context.DataDirectory, "release-prepare"))) await Task.Delay(10);
+                if (_mode == "workspace-fail-prepare" && !File.Exists(Path.Combine(context.DataDirectory, "corrected-prepare")))
+                    throw new InvalidOperationException("synthetic-private-workspace-failure");
+                await File.WriteAllTextAsync(Path.Combine(context.DataDirectory, "prepared-draft.txt"), _workspaceDraft);
+            });
         if (_mode == "hold-callback") context.Lifetime.Register(() =>
         {
             File.WriteAllText(Path.Combine(context.DataDirectory, "callback-started"), "synthetic");
             while (!File.Exists(Path.Combine(context.DataDirectory, "release-callback"))) Thread.Sleep(10);
         });
-        if (_mode == "init-fail") throw new InvalidOperationException("synthetic-private-exception");
+        if (_mode is "init-fail" or "workspace-init-fail-hold-stop") throw new InvalidOperationException("synthetic-private-exception");
     }
 
     private async Task RunWorkerAsync(string id, IPluginBackgroundExecution execution)
@@ -58,7 +70,7 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         await _context.Settings.SetAsync("stop-calls", await _context.Settings.GetAsync("stop-calls", 0) + 1);
-        if (_mode == "hold-stop")
+        if (_mode is "hold-stop" or "workspace-init-fail-hold-stop")
             while (!File.Exists(Path.Combine(_context.DataDirectory, "release-stop"))) await Task.Delay(10);
     }
 
@@ -67,6 +79,13 @@ public sealed class NativeFixturePlugin : IWorkbenchPlugin
         if (_mode is "page-fail" or "hostile-page") throw FactoryFailure();
         var panel = new StackPanel { Spacing = 12, Padding = new Thickness(28) };
         panel.Children.Add(new TextBlock { Text = "Synthetic local-only runtime fixture" });
+        if (_mode.StartsWith("workspace-", StringComparison.Ordinal))
+        {
+            var draft = new TextBox { Header = "Synthetic private workspace draft", Text = _workspaceDraft };
+            AutomationProperties.SetName(draft, "合成项目私有草稿");
+            draft.TextChanged += (_, _) => _workspaceDraft = draft.Text;
+            panel.Children.Add(draft);
+        }
         var confirm = new Button { Content = "Confirm synthetic one-use start" };
         AutomationProperties.SetName(confirm, "确认本次合成任务");
         confirm.Click += async (_, _) => await _context.BackgroundTasks.StartAsync("confirmed-worker");

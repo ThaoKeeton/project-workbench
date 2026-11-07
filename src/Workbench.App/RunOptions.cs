@@ -6,7 +6,11 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
 {
     public string? RuntimeProbe { get; init; }
     public string? BusinessProbe { get; init; }
-    public bool IsIsolated => SmokeTest || RuntimeProbe is not null || BusinessProbe is not null;
+    public string? WorkspaceProbe { get; init; }
+    // Existing in-process runtime probe windows keep their direct-host semantics.
+    internal bool DirectRuntime { get; init; }
+    internal bool SkipAutomaticProbe { get; init; }
+    public bool IsIsolated => SmokeTest || RuntimeProbe is not null || BusinessProbe is not null || WorkspaceProbe is not null;
     public static readonly string[] BusinessProbePhases = ["seed", "restart", "update", "fault", "rollback", "remove",
         "acceptance-seed", "acceptance-restore", "acceptance-stopped", "acceptance-config", "acceptance-missing", "acceptance-disabled"];
     public static readonly string[] RuntimeProbePhases = ["management", "restart-seed", "restart-verify", "restart-disabled", "update-verify", "rollback-verify", "remove-verify"];
@@ -27,25 +31,30 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         string? report = null;
         string? probe = null;
         string? business = null;
+        string? workspace = null;
         string? probeRoot = null;
         for (var i = 0; i < args.Length; i++)
         {
-            if (args[i] is "--business-probe" or "--runtime-probe" or "--probe-root" or "--smoke-report" &&
+            if (args[i] is "--business-probe" or "--runtime-probe" or "--workspace-probe" or "--probe-root" or "--smoke-report" &&
                 (i + 1 == args.Length || string.IsNullOrWhiteSpace(args[i + 1]) || args[i + 1].StartsWith("--", StringComparison.Ordinal)))
                 throw new ArgumentException("An isolated probe option requires its explicit value.");
             if (args[i] == "--smoke-report" && i + 1 < args.Length) report = Path.GetFullPath(args[++i]);
             else if (args[i] == "--runtime-probe" && i + 1 < args.Length) probe = args[++i];
             else if (args[i] == "--business-probe" && i + 1 < args.Length) business = args[++i];
+            else if (args[i] == "--workspace-probe" && i + 1 < args.Length) workspace = args[++i];
             else if (args[i] == "--probe-root" && i + 1 < args.Length) probeRoot = Path.GetFullPath(args[++i]);
         }
         if (probe is not null && (!RuntimeProbePhases.Contains(probe, StringComparer.Ordinal) || smoke))
             throw new ArgumentException("Unknown or conflicting isolated runtime probe mode.");
         if (business is not null && (!BusinessProbePhases.Contains(business, StringComparer.Ordinal) || smoke || probe is not null))
             throw new ArgumentException("Unknown or conflicting isolated business probe mode.");
-        if (probe is null && business is null && probeRoot is not null) throw new ArgumentException("A probe root requires an isolated probe.");
-        if (probe is not null || business is not null)
+        if (workspace is not null && (workspace is not ("seed" or "verify") || smoke || probe is not null || business is not null))
+            throw new ArgumentException("Unknown or conflicting isolated workspace probe mode.");
+        if (probe is null && business is null && workspace is null && probeRoot is not null) throw new ArgumentException("A probe root requires an isolated probe.");
+        if (probe is not null || business is not null || workspace is not null)
         {
-            var parent = Path.Combine(Path.GetTempPath(), business is not null ? "ProjectWorkbench-business-probe" : "ProjectWorkbench-runtime-probe");
+            var parent = Path.Combine(Path.GetTempPath(), workspace is not null ? "ProjectWorkbench-workspace-probe"
+                : business is not null ? "ProjectWorkbench-business-probe" : "ProjectWorkbench-runtime-probe");
             probeRoot ??= Path.Combine(parent, Guid.NewGuid().ToString("N"));
             if (!string.Equals(Path.GetDirectoryName(probeRoot), Path.TrimEndingDirectorySeparator(parent), StringComparison.OrdinalIgnoreCase)
                 || !Guid.TryParseExact(Path.GetFileName(probeRoot), "N", out _))
@@ -54,7 +63,8 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         var root = probeRoot ?? (smoke
             ? Path.Combine(Path.GetTempPath(), "ProjectWorkbench-smoke", Guid.NewGuid().ToString("N"))
             : Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ProjectWorkbench"));
-        return new(smoke, root, smoke || probe is not null || business is not null ? report ?? Path.Combine(root, "smoke-result.json") : null) { RuntimeProbe = probe, BusinessProbe = business };
+        return new(smoke, root, smoke || probe is not null || business is not null || workspace is not null ? report ?? Path.Combine(root, "smoke-result.json") : null)
+            { RuntimeProbe = probe, BusinessProbe = business, WorkspaceProbe = workspace };
     }
 
     public void WriteReport(object result)

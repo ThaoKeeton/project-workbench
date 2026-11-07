@@ -19,7 +19,9 @@ pwsh -File .\scripts\build.ps1
 
 host 0.2.0 增加“后台任务”“凭据”和“包维护”。后台页显示登记任务的运行/停止/故障状态，自动恢复默认关闭；标记 RequiresPluginStart 的任务必须到插件页面完成本次业务确认，通用启动/恢复不可用。凭据页只显示密文是否已保存，不验证或预填值；输入框保存后清空。关闭期间仍有插件工作未结束时，工作台保留进程和用户目录锁，管理页面可查询并重试关闭；宿主自己的写入仍在进行时也不会释放锁。
 
-摘要的未保存编辑在切换页面时保留；点击“保存本地草稿”才写入文件。停用插件或退出会丢弃未保存编辑，重新启用时读取已保存草稿。生成命令只创建第一份草稿，发现现有文件或编辑过的草稿就明确拒绝覆盖；已有草稿请继续在页面编辑并保存。
+摘要编辑在切换页面时保留；“保存本地草稿”可主动写入，切换项目、停用或退出前也会保存非秘密草稿。示例偏好编辑后自动保存。生成命令只创建第一份草稿，发现现有文件或编辑过的草稿就明确拒绝覆盖。
+
+host 0.3.0 首次直接打开原来的本地项目，不移动旧目录。只有一个可用项目时，只显示当前项目标题与内容；“文件 → 新建项目/打开项目”是主动发现入口。创建第二个项目后出现切换框，选择即在当前窗口切换。“打开项目”可归档其他项目或恢复入口；归档不会删除或搬动文件。左侧“项目上下文”编辑后自动保存，冲突时先保留本地副本再重新读取。主题、插件设置、凭据和数据跟随当前项目；新项目不复制旧凭据、信任或业务授权。
 
 插件是与主程序同进程运行的可信代码，能够使用当前用户权限。能力声明和程序集加载上下文不是权限沙箱。停用会撤销注册、清除页面引用并请求停止，但不会卸载程序集。更新或删除包前必须退出工作台并重启。
 
@@ -38,6 +40,9 @@ ProjectWorkbench/
   settings/<plugin-id>/settings.json
   data/<plugin-id>/                 # 草稿和导出
   secrets/<plugin-id>/*.bin          # Windows DPAPI CurrentUser 密文
+  .workbench-project/context.json   # 当前项目的非秘密上下文
+  .workspaces/catalog.json          # 项目列表；旧 default 仍使用上面的原目录
+  .workspaces/projects/<GUID>/      # 新项目的独立根，含各自 settings/data/secrets 等
 ```
 
 随应用分发的 `app/Plugins/` 是另一个发现目录；运行期间不向该目录写入用户数据。安装 UI 导入选中的文件夹或 ZIP，不执行、不自动批准、不启用；安装后重新发现。拒绝重复 ID、覆盖安装、路径穿越、符号链接和缺失入口。相同 ID 出现在用户目录与分发目录时，两者都显示诊断。JSON 文件不是凭据保险箱。
@@ -57,6 +62,7 @@ Windows 原生冒烟（先构建）：
 ```powershell
 pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 pwsh -File .\scripts\native-runtime-probe.ps1 -TimeoutSeconds 180
+pwsh -File .\scripts\project-workspace-probe.ps1 -TimeoutSeconds 180
 ```
 
 冒烟使用新的 `%TEMP%/ProjectWorkbench-smoke/<随机 ID>/` 用户根目录，只复制、发现两个已知分发示例，不读取真实用户设置或已安装插件。它在真实 WinUI UI 线程创建并附加页面和设置控件，执行本地命令；编辑真实摘要 TextBox，跨页面导航后检查草稿、调用保存按钮并验证重复生成保留编辑；停用/重新启用时检查恢复已保存版本，最后停止/关闭，输出 `artifacts/native/native-smoke.json`。失败、超时或无法初始化 WinUI 都返回非零退出码。临时数据保留用于排查，位置写入报告。它不代替主题外观、DPI、键盘和屏幕阅读器的人工验收。
@@ -66,6 +72,8 @@ GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbenc
 新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除。[历史 host/SDK 0.2 Server 2025 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)（源码 `a54a668`）已通过 Windows Core 267 项、原生 14 项、管理 17 项、六阶段平台重启 7 项，以及独立业务插件 12 进程共 51 项检查。后六进程使用不同 ID、不同隔离根的上游模拟验收二进制；实际定时 Core 和本地模拟发送成功不代表真实送达。钉钉仅测试合成模型值保存及 commit/revision 读取，模型 key 值消费与 provider dispatch 未执行。没有真实 Webhook/HTTP/业务发送。Windows 11 的 18 项主题/DPI/选择器/可访问性等人工清单全部待验。完整 [Windows 应用目录](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547711575) 和校验值见 [验证记录](docs/windows-verification.md)。
 
 当前主程序及两个 SDK 预览版本为 0.3.0，程序集/API/运行服务身份保持 1；可选项目服务 1 的契约和已知工作保留规则见 [项目服务](docs/project-services.md)。真实旧 SDK 0.2 业务包与固定来源不变；新的 Windows 原生/独立业务兼容结果需由当前提交的 CI 单独验证。
+
+新增 workspace probe 只使用 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/` 的合成数据，以两个实际 EXE 进程运行 seed/verify；检查原生项目控件、上下文/主题/设置/空凭据分离、草稿、失败重试、归档、窗口重开与进程恢复。成功需同时具备实际 WinUI Closed、OS exit 0 和退出后重新取得目录锁。产物为 `project-workspace-probes`。此脚本需要源码构建生成的独立测试夹具，普通下载的主程序目录不包含夹具；它不是下载用户的操作步骤。当前新增源码仍需本轮 Windows CI 的实际报告，参考编译不等于原生执行。Windows 11 人工、真实旧独立 GUI、更高版本迁移和真实 provider 验收继续延期，不要求用户现在参与测试。
 
 独立 SDK 导出：`pwsh ./scripts/export-sdk.ps1`。CI artifact `workbench-sdk-0.3.0` 含固定版本源码、两个 NuGet 包及提交/文件哈希清单；接入步骤见 [插件契约与独立构建](docs/integrations/plugin-contract-v1.md)。
 

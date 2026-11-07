@@ -290,7 +290,7 @@ internal static class NativeSmoke
 
     private static async Task VerifyOccupiedStartupAsync(RunOptions options)
     {
-        var failed = new MainWindow(options with { SmokeTest = false, ReportPath = null });
+        var failed = new MainWindow(options with { SmokeTest = false, ReportPath = null, DirectRuntime = true });
         var closed = new TaskCompletionSource();
         failed.Closed += (_, _) => closed.TrySetResult();
         try

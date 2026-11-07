@@ -17,7 +17,9 @@ jobs:
           global-json-file: global.json
       - name: Smoke report filesystem regressions
         shell: pwsh
-        run: ./tests/scripts/NativeSmokeReport.Tests.ps1
+        run: |
+          ./tests/scripts/NativeSmokeReport.Tests.ps1
+          ./tests/scripts/WorkspaceProbeReport.Tests.ps1
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -44,7 +46,9 @@ jobs:
           global-json-file: global.json
       - name: Smoke report filesystem regressions
         shell: pwsh
-        run: ./tests/scripts/NativeSmokeReport.Tests.ps1
+        run: |
+          ./tests/scripts/NativeSmokeReport.Tests.ps1
+          ./tests/scripts/WorkspaceProbeReport.Tests.ps1
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -71,6 +75,9 @@ jobs:
       - name: Native runtime management and actual process restarts
         shell: pwsh
         run: ./scripts/native-runtime-probe.ps1 -TimeoutSeconds 180
+      - name: Native project workspaces and actual process restore
+        shell: pwsh
+        run: ./scripts/project-workspace-probe.ps1 -TimeoutSeconds 180
       - name: Independent DingTalk and UPCAM in current shipping app
         shell: pwsh
         run: ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300 -ProductionInputRoot ./artifacts/native/business-plugins
@@ -90,6 +97,12 @@ jobs:
         with:
           name: native-runtime-probes
           path: artifacts/native/runtime-probes/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: project-workspace-probes
+          path: artifacts/native/workspace-probes/
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7.0.2
         if: always()

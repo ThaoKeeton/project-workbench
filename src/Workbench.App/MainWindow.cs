@@ -15,6 +15,10 @@ internal sealed partial class MainWindow : Window
     private readonly ContentControl _body;
     private readonly InfoBar _notice;
     private HostRuntime? _runtime;
+    private WorkspaceRuntimeCoordinator? _workspace;
+    private long _runtimeGeneration = -1;
+    private string EffectiveRoot => _runtime?.UserRoot ?? _options.UserRoot;
+    private bool UsesWorkspace => !_options.SmokeTest && _options.RuntimeProbe is null && _options.BusinessProbe is null && !_options.DirectRuntime;
     private PluginManager Manager => _runtime?.Manager ?? throw new InvalidOperationException("工作台尚未就绪。");
     private PluginPackageStore Packages => _runtime?.Packages ?? throw new InvalidOperationException("工作台尚未就绪。");
     private bool _refreshing;
@@ -50,9 +54,11 @@ internal sealed partial class MainWindow : Window
         _notice = Ui.Named(new InfoBar { IsOpen = false }, "操作结果与错误");
         Title = options.IsIsolated ? "Project Workbench · isolated native probe" : "Project Workbench · 原生插件工作台";
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition());
         _root.Children.Add(_notice);
-        Grid.SetRow(_body, 1);
+        if (UsesWorkspace) { var header = CreateWorkspaceHeader(); Grid.SetRow(header, 1); _root.Children.Add(header); }
+        Grid.SetRow(_body, 2);
         _root.Children.Add(_body);
         _body.Content = _navigation;
         _navigation.IsEnabled = false;
@@ -77,6 +83,24 @@ internal sealed partial class MainWindow : Window
         try
         {
             _options.TraceStartup("opening-host-runtime");
+            if (UsesWorkspace)
+            {
+                if (_options.WorkspaceProbe is not null && !_options.SkipAutomaticProbe) await NativeWorkspaceProbe.PrepareAsync(_options);
+                _workspace = new(_options, (_, scope, owner) => new HostRuntime(HostRuntimeOptions.Create(_options, scope), owner));
+                var result = await _workspace.InitializeAsync();
+                RefreshWorkspace();
+                _initializing = false;
+                if (!result.Succeeded)
+                {
+                    ShowWorkspaceRecovery();
+                    if (_options.WorkspaceProbe is not null) throw new InvalidOperationException("Workspace probe startup failed.");
+                    return;
+                }
+                _options.TraceStartup("host-initialization-completed");
+                if (_shutdownPending) await CloseAsync();
+                else if (_options.WorkspaceProbe is not null && !_options.SkipAutomaticProbe) await NativeWorkspaceProbe.RunAsync(this, _options);
+                return;
+            }
             _runtime = new HostRuntime(HostRuntimeOptions.Create(_options));
             if (_options.RuntimeProbe is not null) await NativeRuntimeProbe.PrepareAsync(_runtime, _options);
             if (_options.BusinessProbe is not null) await BusinessPluginSmoke.PrepareAsync(_runtime, _options);
@@ -130,6 +154,7 @@ internal sealed partial class MainWindow : Window
         {
             _navigation.MenuItems.Clear();
             AddNavigation("首页", Symbol.Home, new("home"));
+            if (_workspace is not null) AddNavigation("项目上下文", Symbol.Document, new("context"));
             AddNavigation("插件", Symbol.AllApps, new("plugins"));
             AddNavigation("命令", Symbol.Play, new("commands"));
             AddNavigation("后台任务", Symbol.Sync, new("background"));
@@ -161,6 +186,7 @@ internal sealed partial class MainWindow : Window
     private void Navigate(NavigationTarget target)
     {
         if (!_initialized) return;
+        if (_workspace is not null && !_workspace.CanUseCurrentRuntime) return;
         try
         {
             switch (target.Page)
@@ -171,6 +197,7 @@ internal sealed partial class MainWindow : Window
                 case "credentials": ShowPage(CredentialPage()); break;
                 case "packages": ShowPage(PackageMaintenancePage()); break;
                 case "settings": ShowPage(SettingsPage()); break;
+                case "context": ShowPage(ProjectContextPage()); break;
                 case "view":
                     var registration = Manager.Contributions.Views.SingleOrDefault(v => v.PluginId == target.PluginId && v.View.Id == target.ViewId);
                     if (registration?.View is not WinUiView view)
@@ -215,29 +242,48 @@ internal sealed partial class MainWindow : Window
         _notice.IsOpen = true;
     }
 
-    private async Task RunAsync(Func<Task> action)
+    private async Task RunAsync(Func<HostRuntime, Task> action)
     {
-        if (!_initialized || _busy || _closing || _shutdownPending) return;
+        if (!_initialized || _busy || _closing || _shutdownPending || _workspace is { CanUseCurrentRuntime: false }) return;
         _busy = true;
         _navigation.IsEnabled = false;
         _content.IsEnabled = false;
+        if (_workspace is not null) RefreshWorkspace(reopenPage: false);
         try
         {
-            if (await HostFailure.RunAsync(action) is { } failure) Notice("操作失败", failure, InfoBarSeverity.Error);
+            var current = _runtime!;
+            Task OwnedAction() => _workspace is null ? action(current)
+                : _workspace.RunCurrentAsync((runtime, scope, token) => OnUiAsync(() => action(runtime)));
+            if (await HostFailure.RunAsync(OwnedAction) is { } failure) Notice("操作失败", failure, InfoBarSeverity.Error);
         }
         finally
         {
             _busy = false;
+            if (_workspace is not null) RefreshWorkspace(reopenPage: false);
             if (_initialized && !_closing)
             {
-                _navigation.IsEnabled = true;
-                _content.IsEnabled = true;
+                _navigation.IsEnabled = _workspace?.CanUseCurrentRuntime ?? true;
+                _content.IsEnabled = _workspace?.CanUseCurrentRuntime ?? true;
                 if (_shutdownPending) { RefreshNavigation(); Navigate(new("background")); }
             }
         }
     }
 
-    private async Task EnableAsync(PluginSnapshot package)
+    private Func<Task> BindCurrentAction(Func<HostRuntime, Task> action)
+    {
+        var runtime = _runtime;
+        var generation = _runtimeGeneration;
+        return () => ReferenceEquals(runtime, _runtime) && generation == _runtimeGeneration
+            ? RunAsync(action) : Task.CompletedTask;
+    }
+
+    private void BindClick(Button button, Func<HostRuntime, Task> action)
+    {
+        var bound = BindCurrentAction(action);
+        button.Click += async (_, _) => await bound();
+    }
+
+    private async Task EnableAsync(HostRuntime runtime, PluginSnapshot package)
     {
         var manifest = package.Manifest!;
         var approve = false;
@@ -255,18 +301,27 @@ internal sealed partial class MainWindow : Window
             approve = await dialog.ShowAsync() == ContentDialogResult.Primary;
             if (!approve) return;
         }
-        var result = await Manager.EnableAsync(manifest.Id, confirmTrust: approve);
+        var result = await runtime.Manager.EnableAsync(manifest.Id, confirmTrust: approve);
         RefreshNavigation();
         Navigate(new("plugins"));
         Notice(result.Succeeded ? "插件已启用" : "启用失败", result.Message,
             result.Succeeded ? InfoBarSeverity.Success : InfoBarSeverity.Error);
     }
 
-    private async Task DisableAsync(string pluginId)
+    private async Task DisableAsync(HostRuntime runtime, string pluginId)
     {
+        if (_workspace is not null)
+        {
+            var preparation = await runtime.Manager.PrepareProjectLeaveAsync(pluginId);
+            if (!preparation.Succeeded || runtime.Manager.HasPendingProjectWork)
+            {
+                Notice("插件尚未完成保存", WorkspaceGuidance(preparation.ErrorCode), InfoBarSeverity.Warning);
+                return;
+            }
+        }
         // No page cache: release content and navigation entries before plugin StopAsync runs.
         DetachPluginViews();
-        var result = await Manager.DisableAsync(pluginId);
+        var result = await runtime.Manager.DisableAsync(pluginId);
         RefreshNavigation();
         Navigate(new("plugins"));
         Notice(result.Succeeded ? "插件已停用" : "插件停止发生错误", result.Message,
@@ -297,7 +352,8 @@ internal sealed partial class MainWindow : Window
         DetachPluginViews();
         _body.Content = ScrollPage(Ui.Page("正在关闭", "正在等待插件停止。协作式取消无法强制中断不响应的插件。"));
         _navigation.IsEnabled = false;
-        if (_runtime is not null)
+        if (_workspace is not null) await _workspace.DisposeAsync();
+        else if (_runtime is not null)
         {
             // Dispose uses HostShutdown and preserves enabled/resume intent. A failure retains ownership.
             await _runtime.DisposeAsync();
@@ -317,9 +373,42 @@ internal sealed partial class MainWindow : Window
             return false;
         }
         _closing = true;
+        _body.IsEnabled = false;
+        if (_workspace is not null) RefreshWorkspace(reopenPage: false);
         _closeCompleted = new(TaskCreationOptions.RunContinuationsAsynchronously);
         try
         {
+            if (_workspace is not null)
+            {
+                if (_themePreferences?.IsDirty == true && _workspace.CanUseCurrentRuntime)
+                {
+                    try { await _workspace.RunCurrentAsync((runtime, _, _) => OnUiAsync(() => FlushThemeAsync(runtime))); }
+                    catch (Exception)
+                    {
+                        _shutdownPending = false;
+                        _closing = false;
+                        _body.IsEnabled = true;
+                        RefreshWorkspace(reopenPage: false);
+                        ShowCloseRetry("主题选择尚未保存", "已保留当前选择。请检查项目目录，或改选主题自动重试，再重试关闭。");
+                        _closeCompleted.TrySetResult(false);
+                        return false;
+                    }
+                }
+                var preparation = _workspace.PrepareCloseAsync();
+                RefreshWorkspace(reopenPage: false);
+                var prepared = await preparation;
+                if (!prepared.Succeeded && prepared.ErrorCode != "ProjectCloseCleanupRequired")
+                {
+                    _shutdownPending = prepared.Pending;
+                    _closing = false;
+                    _body.IsEnabled = true;
+                    RefreshWorkspace(reopenPage: false);
+                    if (prepared.Pending) ShowWorkspaceRecovery();
+                    ShowCloseRetry(prepared.Pending ? "正在等待离开前准备" : "请修正后重试关闭", WorkspaceGuidance(prepared.ErrorCode));
+                    _closeCompleted.TrySetResult(false);
+                    return false;
+                }
+            }
             await StopAsync();
             _allowClose = true;
             Close();
@@ -329,9 +418,17 @@ internal sealed partial class MainWindow : Window
         catch (Exception error)
         {
             _options.WriteFailure("shutdown", error);
+            _body.IsEnabled = true;
             // The manager remains queryable. Keep this same host and lease until a safe retry succeeds.
             _body.Content = _navigation;
-            if (_initialized)
+            if (_workspace is not null)
+            {
+                RefreshWorkspace(reopenPage: false);
+                // A completed failed close may permit document correction under retained leases.
+                // Runtime admission stays closed. A pending Stop requires another Dispose pass.
+                ShowWorkspaceRecovery();
+            }
+            else if (_initialized)
             {
                 RefreshNavigation();
                 _navigation.IsEnabled = true;
@@ -351,6 +448,18 @@ internal sealed partial class MainWindow : Window
         retry.Click += async (_, _) => await CloseAsync();
         _notice.ActionButton = retry;
         Notice(title, message, InfoBarSeverity.Warning);
+    }
+
+    private Task OnUiAsync(Func<Task> action)
+    {
+        if (DispatcherQueue.HasThreadAccess) return action();
+        var completion = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(async () =>
+        {
+            try { await action(); completion.TrySetResult(); }
+            catch (Exception error) { completion.TrySetException(error); }
+        })) completion.TrySetException(new InvalidOperationException("The window dispatcher is unavailable."));
+        return completion.Task;
     }
 
     internal void AssertUiThread()

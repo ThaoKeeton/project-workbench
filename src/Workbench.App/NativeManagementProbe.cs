@@ -174,7 +174,7 @@ internal static class NativeManagementProbe
             Directory.CreateDirectory(metadata);
             await File.WriteAllTextAsync(Path.Combine(metadata, "pending"), "synthetic occupied metadata");
         }
-        var extra = new MainWindow(new(false, root, null));
+        var extra = new MainWindow(new(false, root, null) { DirectRuntime = true });
         extra.Activate();
         try
         {
@@ -192,7 +192,7 @@ internal static class NativeManagementProbe
         var root = Path.Combine(options.UserRoot, name);
         using (HostRuntime.AcquireLease(root))
             Require((await new PluginPackageStore(new() { PluginsRoot = Path.Combine(root, "Plugins"), UserRoot = root }).InstallAsync(FixtureSource)).Succeeded, "Extra native fixture installation failed.");
-        var extra = new MainWindow(new(false, root, null));
+        var extra = new MainWindow(new(false, root, null) { DirectRuntime = true });
         extra.Activate();
         await extra.InitializeAsync();
         Require(extra.SmokeStartupFailure is null, "Extra isolated native host failed to initialize.");

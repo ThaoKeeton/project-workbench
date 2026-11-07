@@ -10,6 +10,7 @@ internal sealed partial class MainWindow
 {
     private StackPanel BackgroundPage()
     {
+        var manager = Manager;
         var page = Ui.Page("后台任务", "已登记的任务独立于页面运行。自动恢复默认关闭；开启后仍需符合插件自己的业务授权策略。");
         if (_shutdownPending) page.Children.Add(Ui.Text("关闭仍在等待已知工作结束；保留本进程与用户目录租约。可查看状态并使用上方“重试关闭”。"));
         List<Action> refresh = [];
@@ -27,7 +28,7 @@ internal sealed partial class MainWindow
                     Content = group.Any(plugin => plugin.HasPendingStop) ? "重试停用插件" : "停用插件",
                     IsEnabled = !_shutdownPending
                 }, $"停用后台插件 {pluginId}");
-                disable.Click += async (_, _) => await RunAsync(() => DisableAsync(pluginId));
+                BindClick(disable, runtime => DisableAsync(runtime, pluginId));
                 retained.Children.Add(disable);
                 page.Children.Add(Ui.Card(retained));
                 count++;
@@ -44,13 +45,14 @@ internal sealed partial class MainWindow
                 var start = Ui.Named(new Button { Content = "启动" }, $"启动后台任务 {pluginId}/{task.Id}");
                 var stop = Ui.Named(new Button { Content = "停止" }, $"停止后台任务 {pluginId}/{task.Id}");
                 var resume = Ui.Named(new ToggleSwitch { Header = "下次启动恢复", IsOn = task.ResumeOnStartup }, $"恢复后台任务 {pluginId}/{task.Id}");
-                start.Click += async (_, _) => await RunAsync(async () => TaskNotice(await Manager.StartBackgroundTaskAsync(pluginId, task.Id)));
-                stop.Click += async (_, _) => await RunAsync(async () => TaskNotice(await Manager.StopBackgroundTaskAsync(pluginId, task.Id)));
+                BindClick(start, async runtime => TaskNotice(await runtime.Manager.StartBackgroundTaskAsync(pluginId, task.Id)));
+                BindClick(stop, async runtime => TaskNotice(await runtime.Manager.StopBackgroundTaskAsync(pluginId, task.Id)));
+                var changeResume = BindCurrentAction(async runtime => TaskNotice(await runtime.Manager.SetBackgroundTaskResumeOnStartupAsync(pluginId, task.Id, resume.IsOn)));
                 var updating = false;
                 resume.Toggled += async (_, _) =>
                 {
                     if (updating) return;
-                    await RunAsync(async () => TaskNotice(await Manager.SetBackgroundTaskResumeOnStartupAsync(pluginId, task.Id, resume.IsOn)));
+                    await changeResume();
                     Refresh();
                 };
                 actions.Children.Add(start);
@@ -62,13 +64,13 @@ internal sealed partial class MainWindow
                     body.Children.Add(Ui.Text("此任务需在插件页面完成本次范围预览与确认；通用启动和自动恢复不可用。信任插件不代表业务授权。"));
                     var view = Manager.Contributions.Views.FirstOrDefault(view => view.PluginId == pluginId && view.View is WinUiView { Kind: WinUiViewKind.Page });
                     var open = Ui.Named(new Button { Content = "打开插件页面", IsEnabled = view is not null && !_shutdownPending }, $"打开后台任务所属插件页面 {pluginId}/{task.Id}");
-                    open.Click += (_, _) => { if (view is not null) Navigate(new("view", pluginId, view.View.Id)); };
+                    BindClick(open, _ => { if (view is not null) Navigate(new("view", pluginId, view.View.Id)); return Task.CompletedTask; });
                     body.Children.Add(open);
                 }
                 void Refresh()
                 {
-                    var current = Manager.GetBackgroundTaskSnapshots(pluginId).SingleOrDefault(snapshot => snapshot.Id == task.Id);
-                    var matches = Manager.Plugins.Where(snapshot => snapshot.Manifest?.Id == pluginId).ToArray();
+                    var current = manager.GetBackgroundTaskSnapshots(pluginId).SingleOrDefault(snapshot => snapshot.Id == task.Id);
+                    var matches = manager.Plugins.Where(snapshot => snapshot.Manifest?.Id == pluginId).ToArray();
                     var active = matches is [{ State: PluginState.Enabled, IsTrusted: true }];
                     status.Text = current is null ? "已停止，插件运行实例已释放。" :
                         $"状态：{current.State} · 恢复偏好：{current.ResumeOnStartup} · 运行意图：{current.DesiredRunning}\n开始：{current.StartedAt:u} · 结束：{current.FinishedAt:u}"

@@ -69,6 +69,27 @@ the instance, manager, process and user-root lease; shutdown/disposal remain
 retryable. ExecuteCommandAsync has not become a generic owned callback tracker.
 Same-process trusted plugins are not a security sandbox or force-stop mechanism.
 
+Normal native close calls the coordinator's internal `PrepareCloseAsync(token)`
+before terminal `DisposeAsync()`: it synchronously seals new runtime/action
+admission, joins admitted actions and the editor, then calls committed hooks.
+Success remains sealed through disposal. A pending hook remains owned and a
+retry joins its actual task. A settled preparation/editor failure before Stop
+reopens the same live manager and editor for correction; no manager restart or
+private-buffer replacement occurs. A close that supersedes a queued switch
+still prepares the live current manager. A switch already at Stop/candidate
+cleanup, or a failed actual Dispose, follows the existing owned cleanup path
+without activating a queued target or reviving a retired manager. After a failed
+actual Dispose, only the coordinator's confirmed cleanup state can reopen the
+document for correction; retry close joins it via Dispose again. The direct
+isolated legacy probes retain their distinct Stop-only persistence coverage.
+
+Host theme writes are root-bound and owned alongside shell actions. A failed
+chosen write retains its selected value, dirty state and fixed error category;
+switch/normal close must flush it before detachment or retirement. An untouched
+corrupt-file system-theme fallback is not a choice and does not write on leave.
+Explicit recovery retains the exact damaged bytes before replacement. Context
+and ordinary preferences autosave; credential drafts do not.
+
 `PluginProjectContextException` is sealed, has a fixed message, exposes ErrorCode
 and retains no raw inner exception. Its public constructor still allows a plugin
 to supply arbitrary strings: hosts allow-list known storage/service codes before
