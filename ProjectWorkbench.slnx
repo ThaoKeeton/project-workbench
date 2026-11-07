@@ -7,6 +7,7 @@
   </Folder>
   <Folder Name="/plugins/">
     <Project Path="plugins/Workbench.Testing.Domain/Workbench.Testing.Domain.csproj" />
+    <Project Path="plugins/Workbench.Testing/Workbench.Testing.csproj" />
     <Project Path="plugins/Workbench.Summary.Sample/Workbench.Summary.Sample.csproj" />
     <Project Path="plugins/Workbench.TestCases.Sample/Workbench.TestCases.Sample.csproj" />
   </Folder>

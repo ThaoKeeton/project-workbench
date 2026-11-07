@@ -2,7 +2,7 @@
 
 Windows 原生插件工作台基础版：同一个 WinUI 3 窗口承载独立插件提供的原生页面、设置与异步命令。使用标准 Windows 控件，不嵌入其他应用窗口，不使用 WebView。
 
-默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已通过当前发布目录主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。业务包需按需安装，下载配套 `workbench-business-plugins` 后按 [业务插件安装说明](docs/install-business-plugins.md) 选择内层 ZIP 或原厂文件夹；[固定来源与测试边界](tests/integration/README.md) 另列。Figma 和电脑自动化尚未接入。
+默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已通过当前发布目录主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。业务包需按需安装，下载配套 `workbench-business-plugins` 后按 [业务插件安装说明](docs/install-business-plugins.md) 选择内层 ZIP 或原厂文件夹；[固定来源与测试边界](tests/integration/README.md) 另列。另有按需安装的 [测试设计插件](docs/testing-plugin.md)：本地需求/规范化 Figma JSON、可追溯用例、自动保存/CSV 和 SIMULATED 虚拟执行；远程 Figma、AI 和真实电脑自动化尚未接入。
 
 ## 在 Windows 构建和启动
 
@@ -13,7 +13,7 @@ pwsh -File .\scripts\build.ps1
 .\artifacts\native\app\Workbench.App.exe
 ```
 
-脚本清理 `artifacts/native`，发布自包含的 .NET/Windows App SDK 应用目录，并分别编译、暂存两个插件包。分发和解压时必须保留 **整个 `artifacts/native/app/` 目录**，不能只复制 EXE。固定 Windows App SDK `1.8.260921001`；不裁剪、不 AOT、不单文件发布。API 目标为 `net10.0-windows10.0.19041.0`，该 API 下限不表示 Windows 10 已获运行时支持或通过兼容性验收；Windows 10 企业版/LTSC 需另行验证。
+脚本清理 `artifacts/native`，发布自包含的 .NET/Windows App SDK 应用目录，并分别编译、暂存两个分发示例及一个独立可安装测试 ZIP（不自动安装）。分发和解压时必须保留 **整个 `artifacts/native/app/` 目录**，不能只复制 EXE。固定 Windows App SDK `1.8.260921001`；不裁剪、不 AOT、不单文件发布。API 目标为 `net10.0-windows10.0.19041.0`，该 API 下限不表示 Windows 10 已获运行时支持或通过兼容性验收；Windows 10 企业版/LTSC 需另行验证。
 
 首次打开“插件”，审查包详情，再点击“启用”并明确确认信任。启用后左侧出现插件页面及各自设置入口。“命令”可生成本地摘要草稿或导出演示 CSV。设置页支持跟随系统、浅色和深色主题。
 
@@ -41,6 +41,7 @@ ProjectWorkbench/
   data/<plugin-id>/                 # 草稿和导出
   secrets/<plugin-id>/*.bin          # Windows DPAPI CurrentUser 密文
   .workbench-project/context.json   # 当前项目的非秘密上下文
+  .workbench-project/testing/       # 项目测试源/用例/执行/模拟证据，严格 schema1
   .workspaces/catalog.json          # 项目列表；旧 default 仍使用上面的原目录
   .workspaces/projects/<GUID>/      # 新项目的独立根，含各自 settings/data/secrets 等
 ```
@@ -83,4 +84,4 @@ GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbenc
 - [Core 生命周期与存储约定](src/Workbench.Core/README.md)
 - [设计范围](docs/superpowers/specs/2026-11-06-native-workbench-design.md)
 
-可选测试契约 1（最低宿主 0.4.0）的当前中间提交提供守护的源快照和用例存储；宿主测试上下文、运行服务和独立原生测试插件尚未接入。已有预置测试列表仍是示例。见 [测试服务](docs/testing-services.md)。
+可选测试服务 1（最低宿主 0.4.0）已接入项目源/用例/执行/证据上下文、共享控制器和独立原生“测试设计”入口。下载同一运行的 `workbench-testing-plugin-0.1.0`，在“插件”安装其中 ZIP，再审查并信任启用；其包不加入固定六文件业务 companion。已有预置测试列表仍是独立示例。新增源码的实际 Windows CI 与下载字节审计由当前运行报告确认，不能用 Linux 参考编译替代。见 [测试插件安装与操作](docs/testing-plugin.md) 和 [测试服务](docs/testing-services.md)。

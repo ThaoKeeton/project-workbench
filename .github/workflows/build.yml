@@ -21,6 +21,7 @@ jobs:
           ./tests/scripts/NativeSmokeReport.Tests.ps1
           ./tests/scripts/WorkspaceProbeReport.Tests.ps1
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
+          ./tests/scripts/TestingPluginProbe.Tests.ps1
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -51,6 +52,7 @@ jobs:
           ./tests/scripts/NativeSmokeReport.Tests.ps1
           ./tests/scripts/WorkspaceProbeReport.Tests.ps1
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
+          ./tests/scripts/TestingPluginProbe.Tests.ps1
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -64,6 +66,12 @@ jobs:
         run: |
           ./tests/scripts/DeliveryHostVersion.Tests.ps1
           ./tests/scripts/BusinessPluginDelivery.Tests.ps1 -AppDirectory ./artifacts/native/app
+      - name: Independent testing package integrity and actual package-store install
+        shell: pwsh
+        run: |
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
+          dotnet run --project ./tests/Workbench.Testing.PackageProbe/Workbench.Testing.PackageProbe.csproj -c Release -- ./artifacts/native/testing-plugin/workbench-testing-plugin-0.1.0.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Actual testing package-store acceptance failed.' }
       - name: Export and verify production plugins paired with current host
         shell: pwsh
         run: |
@@ -80,6 +88,9 @@ jobs:
       - name: Native project workspaces and actual process restore
         shell: pwsh
         run: ./scripts/project-workspace-probe.ps1 -TimeoutSeconds 180
+      - name: Independent testing plugin actual native pass failure cancel and process restore
+        shell: pwsh
+        run: ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240
       - name: Independent DingTalk and UPCAM in current shipping app
         shell: pwsh
         run: ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300 -ProductionInputRoot ./artifacts/native/business-plugins
@@ -112,6 +123,22 @@ jobs:
           name: independent-business-plugin-probes
           path: artifacts/native/business-probes/
           if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: testing-plugin-probes
+          path: artifacts/native/testing-probes/
+          if-no-files-found: warn
+      - name: Reverify independently installable testing delivery
+        shell: pwsh
+        run: |
+          Import-Module ./scripts/TestingPluginDelivery.psm1 -Force
+          Test-TestingPluginDelivery -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-testing-plugin-0.1.0
+          path: artifacts/native/testing-plugin/
+          if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: workbench-sdk-0.4.0

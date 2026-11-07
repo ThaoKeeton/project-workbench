@@ -8,8 +8,9 @@ the existing context/WinUiView signatures stay compatible.
 
 The host implements the optional testing context with guarded source/case
 storage, durable run journals, passive evidence and retained owner initialization.
-The independent native testing plugin remains a later integration stage. Existing preset case-list
-plugins remain examples. Consumers should check the optional derived interface
+The independent native testing plugin now consumes these services through the portable
+controller and same-window code controls; see [installation and exact source/runtime limits](testing-plugin.md).
+Existing preset case-list plugins remain examples. Consumers should check the optional derived interface
 and declare `minimumHostVersion: "0.4.0"` when using testing services. Existing
 project-only plugins may retain 0.3.0; frozen business packages retain their
 original 0.2.0 minimum and bytes.
@@ -46,8 +47,10 @@ cannot reproduce arbitrary Unicode.
 Real IO tests append and reopen independently chosen multiline/astral/tabs,
 whitespace-only and exact 8192-unit state, checking exact text, file bytes and
 hash. Invalid Unicode, null/empty/oversized state and non-null state on another
-event kind refuse without changing existing bytes. Native detail rendering from
-this committed text, including glyphs omitted by the BMP, remains a later gate.
+event kind refuse without changing existing bytes. The native plugin renders this committed text separately from its BMP, including
+Unicode omitted by the bounded glyph renderer. Actual shipping-EXE reopened
+rendering/decoder probes are implemented; current Windows execution remains a
+separate pending gate until the current source's reports pass.
 
 ## Implemented source and case behavior
 
@@ -67,8 +70,8 @@ bytes, including a UTF-8 BOM when present; `Revision` separately hashes the exac
 stored JSON envelope bytes. Titles, document IDs and locators are literal data,
 including a locator such as `../../x`. They never form filesystem paths.
 Provider metadata declares a mapping; it is not cryptographic proof of any
-remote document. Builtin source parsing/generation belongs to the later domain
-plugin, not this generic store.
+remote document. Builtin local source parsing/generation is implemented in the independent portable
+domain plugin; the generic store does not parse provider wire formats.
 
 CreateCaseSet mints new case/step IDs. A fork uses drafts and receives new IDs
 even when it preserves another producer's exact traces. Every case and step has
@@ -85,7 +88,7 @@ Allowed typed actions are `SetText(task.title, value)`,
 SetText permits empty text for negative examples. Values are bounded to 4096
 UTF-16 code units. No arbitrary selector, process, shell, network or OS input is
 represented. Manual steps cannot enter an executable plan. Core commits records;
-adapter execution belongs to the later domain runner.
+adapter execution is implemented by the independent supervised domain runner.
 
 ReadCaseRevision returns the matching current revision or that exact immutable
 archive. It never falls back to another revision. The internal freeze helper
@@ -387,7 +390,7 @@ leave a durable nonterminal run for next-generation owner initialization.
 
 Portable tests exercise the real captured facade, package-loaded fixture,
 manager/HostRuntime/root leases, held caller prefixes, filesystem initialization
-gates, defensive copies and safe lifecycle errors. The portable SDK-only `Workbench.Testing.Domain` now implements and consumes the local providers, rule generator, CSV exporter, coalesced CAS editor, typed virtual adapter, passive renderer and supervised controller. Task4 tests compose the real Core registration/facade/supervisor before Commit and use actual filesystem gates and write obstructions. The entry-facing controller and immutable models live under `plugins/Workbench.Testing.Domain`. Remaining gates include native detail rendering from committed state, independent plugin packaging and installation in actual WinUI, and the full Windows workflow/PRI artifact checks. Existing native,
+gates, defensive copies and safe lifecycle errors. The portable SDK-only `Workbench.Testing.Domain` now implements and consumes the local providers, rule generator, CSV exporter, coalesced CAS editor, typed virtual adapter, passive renderer and supervised controller. Task4 tests compose the real Core registration/facade/supervisor before Commit and use actual filesystem gates and write obstructions. The entry-facing controller and immutable models live under `plugins/Workbench.Testing.Domain`. The independent native entry, package allow-list/source/ZIP auditing, package-store install probe, and actual shipping-EXE seed/verify probes are now implemented. Current-source actual WinUI/PRI/process execution and final downloaded-byte auditing remain pending the controller's Windows workflow gate; Linux reference compilation and synthetic report regressions do not establish those results. Existing native,
 management/theme/restart/workspace/business/process checks remain required;
 portable Core tests do not substitute for them. Windows Server automation stays
 separate from deferred Windows 11 human/picker/IME/DPI/accessibility/device checks.

@@ -77,4 +77,4 @@ Linux 可显式执行 `pwsh ./scripts/export-sdk.ps1 -ReferenceOnly`，生成独
 
 包回滚只回退代码、保留当前业务数据，更新前保留数据/配置/密文备份；不自动回放历史发送回执或做任意数据格式降级。业务插件需自己维护 schema 和去重兼容。
 
-测试契约 1 使用 `IPluginTestingContext : IPluginProjectContext`，最低宿主 0.4.0；原有接口和 WinUiView 工厂签名不变。当前中间提交只实现守护的源/用例存储，尚未接入宿主测试上下文、运行实现或独立原生测试插件。完整边界见 [测试服务](../testing-services.md)。
+测试契约 1 使用 `IPluginTestingContext : IPluginProjectContext`，最低宿主 0.4.0；原有接口和 WinUiView 工厂签名不变。当前源码已实现守护的源/用例/执行/证据上下文、portable 控制器、typed 虚拟执行和独立同窗口原生测试插件；单独的 `workbench-testing-plugin-0.1.0` ZIP 不加入固定业务 companion。当前 Windows 全流程和下载字节审计结果由实际同一运行报告确认，不以 Linux 参考编译替代。完整边界见 [测试服务](../testing-services.md)。

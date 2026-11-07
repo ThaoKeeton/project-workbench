@@ -201,3 +201,9 @@ UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析�
 - [ ] 凭据框每次打开均为空，保存/删除后清空；仅显示“已保存（未验证值）”，错误及日志不包含值；使用合成凭据验收。
 - [ ] ZIP 与文件夹选择器均可取消；更新/回滚/移除提示重启、重新信任和代码/当前数据/外部存储边界；Prepared 可取消，已开始的恢复 journal 不能丢弃。
 - [ ] 关闭等待期间可查看管理状态并重试，不能重新启用或启动新工作；宿主包写入未结束时同样保留锁，Windows 11 多窗口/重复关闭实际交互正常。
+
+## Testing plugin 0.1.0 source-stage gate
+
+The 0.4.0 source now includes a separately installable `com.projectworkbench.testing` ZIP and actual shipping-EXE `--testing-probe seed|verify` acceptance implementation. `scripts/testing-plugin-probe.ps1` binds the real ZIP SHA256, two separate process IDs, native Closed, OS exit and root leases; `testing-plugin-probes` carries original journal/receipt/CSV/SIMULATED BMP bytes plus immutable runner sidecars. The synthetic interrupted journal seed is explicitly not an OS crash or executed device action. Seed evidence copying precedes the final immediate native Close input; verify proves that input persisted. See [installation, controls and exact verification limits](testing-plugin.md).
+
+Current-source Windows CI execution and downloaded-byte audit remain pending the controller's source/aggregate gates. Linux portable/package-store/script checks and native reference compilation do not establish native runtime/PRI success. Existing frozen business and host gates stay required. Windows 11 human pickers, IME, DPI, accessibility and real-device/provider work remain deferred and unexecuted.

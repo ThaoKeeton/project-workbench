@@ -113,4 +113,4 @@ com.example.notes/
 
 可参考 [摘要示例](../plugins/Workbench.Summary.Sample/SummaryPlugin.cs)、[测试用例示例](../plugins/Workbench.TestCases.Sample/TestCasesPlugin.cs) 和 [Core 文档](../src/Workbench.Core/README.md)。
 
-可选测试契约 1 通过 `IPluginTestingContext : IPluginProjectContext` 定义，最低宿主为 0.4.0。当前中间提交只实现源快照与用例存储，宿主测试上下文和独立原生测试插件尚未接入；不会向用户暴露占位服务。见 [测试服务边界](testing-services.md)。原有仅项目服务插件仍可声明 0.3.0，固定业务插件的最低宿主及字节保持不变。
+可选测试契约 1 通过 `IPluginTestingContext : IPluginProjectContext` 定义，最低宿主为 0.4.0。当前源码已实现源/用例/执行/证据上下文、共享控制器与独立原生测试插件；按 [测试插件安装说明](testing-plugin.md) 安装单独 ZIP。实际本轮 Windows/PRI/进程证据仍由同一运行报告确认。见 [测试服务边界](testing-services.md)。原有仅项目服务插件仍可声明 0.3.0，固定业务插件的最低宿主及字节保持不变。

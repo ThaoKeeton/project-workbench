@@ -54,6 +54,8 @@ try {
         Copy-Item (Join-Path $fixtureBuild $name) $fixtureOutput
     }
     Copy-Item (Join-Path $repo 'tests/Workbench.NativeFixture/plugin.json') $fixtureOutput
+    # Independently installable testing ZIP stays outside app/Plugins and the frozen business companion.
+    & (Join-Path $repo 'scripts/package-testing-plugin.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $outputRoot 'testing-plugin')
     if (-not (Test-Path (Join-Path $appOutput 'Workbench.App.exe'))) { throw 'Published executable is missing.' }
     Write-Host "Complete self-contained app directory: $appOutput"
 }
