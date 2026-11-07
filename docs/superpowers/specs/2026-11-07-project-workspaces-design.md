@@ -1,0 +1,101 @@
+# Project workspaces and testing-extension platform
+
+Controller-authored proposal based on trusted user directions, not claimed individually approved choices. User explicitly delegated ordinary decisions and postponed human acceptance. Delivery hardening is closed at exact a5aac3d498a553508a8f5b20ea1093e10dc9c9d9 by actual run42325243844 and actual paired downloads. A full draft was checked by a fresh Sol Max builder: no consequential unanswered question remained; storage limits and task bindings were then finalized by the controller. The implementation follows this spec in stages. First implementation targets native project workspaces; testing/automation is a required staged platform direction, not a placeholder UI.
+
+## Goals and boundaries
+
+Default one project opens directly into useful current-project content. Ordinary single-project UI shows no multi-project list, switcher, project count or management panel. With multiple available projects, a compact native selector provides a clear switch; all plugin pages remain in the same WinUI window. Existing saved data, settings, approvals, credentials, tasks and code history must survive adoption and single/multiple mode transitions. New projects start isolated and do not inherit credentials, authorization, active ledgers or external business profiles. Normal new settings/context edits auto-apply; no redundant activation checkbox/save click.
+
+Continue .NET10/x64/AppSDK1.8.260921001; trusted in-process code, no sandbox/hot-unload/forcekill claims. Keep frozen DingTalk0.3.2 and UPCAM0.1.0/acceptance identities/bytes. Existing business repositories read-only. No real credentials/provider/Webhook/messages or user PC. Necessary unit/integration/WindowsServer automatic checks remain during development; Windows11 human acceptance is deferred and never called passed. No denied draftPR retry/merge/deploy.
+
+## Approaches and controller selection
+
+A project-name label alone cannot isolate data. A complete immediate move to a new global package/profile layout risks current files/leases/consents. Choose a managed catalog with per-project existing-runtime roots, adopting legacy data in place and retiring the old active runtime before another activates. Keep managed roots initially; arbitrary external workspace import/export is future work. This choice costs duplicated installed code across projects and retained process assemblies, but avoids copying active business state or weakening current package maintenance.
+
+## Phase 1: real project foundation (implementation scope)
+
+### Storage and adoption
+
+The base root remains LocalAppData/ProjectWorkbench. A strict schema1 catalog under .workspaces records stable IDs, names, active ID and archived flag/revision; roots are derived from validated IDs rather than arbitrary persisted paths. Legacy default ID maps to the existing base root itself: no old file moves/copies/renames, no reset of enabled intent/trust/secret/runtime state. New generated GUID roots live under .workspaces/projects/<id>; names never form paths. Each active runtime receives that project's UserRoot, so existing settings/secrets/tasks/Data/Plugins conventions continue. The catalog/base lease is separate from project metadata and preserved across switch.
+
+Catalog JSON is bounded, validates schema/IDs/uniqueness/derived managed roots/active entry, rejects links/traversal/unknown versions and preserves malformed bytes. Missing catalog adopts in place; malformed catalog never silently resets. Writes use unique owned temporary files, retained previous catalog snapshots and atomic publication; failures preserve prior state. Create the managed project identity before publishing catalog membership. Failure leaves an explicit recoverable orphan, never recursively deletes possibly useful files. Archive/unarchive only changes catalog visibility and cannot delete/move project files; the active project cannot be archived until another is selected. Returning to one available project hides multi UI while retained archived data stays discoverable through explicit Open project.
+
+Logical separation is a storage/lifecycle convention, not protection from malicious trusted code. External DingTalk canonical state and UPCAM profiles remain governed by vendor authorities/locks and are not automatically made project-private or duplicated. Each project's host credentials/settings remain separate.
+
+### Ownership and switch transaction
+
+Normal app owns the base host.lock for its entire lifetime, including when a secondary root is active; this also excludes old0.2 normal instances. Default runtime borrows a validated matching controller-owned base lease instead of reacquiring it. Secondary runtime additionally owns its project root lease. Keep existing isolated/direct HostRuntime constructor/probe ownership semantics unchanged; no unsafe unchecked skip-lease flag.
+
+One serialized switch: flush host-owned editors and cooperative plugin drafts; prepare target metadata/paths without activating code; terminally stop old known work using existing HostShutdown semantics; retain the old stopped manager/root while starting candidate; only after candidate initialization and catalog active-ID commit succeeds publish its native pages and dispose old runtime. The target must not start while old work still stops or vendor leases/singleton remain owned.
+
+If old preparation/stop is incomplete, keep current project, resources, lease and fixed retry guidance, and never activate target. If candidate construction/init or active-ID persistence fails, retire candidate fully before restoring old manager's approved enabled intent. If candidate retirement is still pending, retain BOTH owned sessions/leases in an explicit transition-recovery state, show relevant cleanup/retry status, and do not resume old or activate a third project. Main-window close must join all owned sessions, including failed candidate, and preserve ownership when uncertain. Failure never means successful rollback; old restore may itself report failed plugins. Catalog active-ID changes only on success. No process forcekill/unload.
+
+The actual effective root must replace all normal UI root references (theme, settings paths, diagnostics, install/data labels), not leave readonly RunOptions.UserRoot pointing writes into the first project. Theme load resets to system/default and recovery flag before applying the selected project's file; missing preferences must not inherit previous project's theme.
+
+### Context and UI
+
+Home/current project area provides actual editable project instructions/context, persisted under the active managed project metadata directory. Use ordinary autosave with bounded content and serialized revision/conflict checks. Atomic failed/conflicting operations preserve original bytes; a successful intentional text edit replaces the current document. Catalog history snapshots are retained for structural recovery; this stage does not promise unlimited note history. Flush latest pending editor text before switch/close. A failed/conflicting write retains the draft and prevents leaving until resolved; never silently discard or overwrite external edits. No model/network is needed for this local feature.
+
+Single-project normal shell has current-project title/context only; an application File menu exposes explicit New/Open actions when requested, without a permanent multi manager. Once>1 nonarchived entries exist, show the compact selector; switching is an intentional action, not a second configuration activation checkbox. Create/Open/Archive surfaces are actual native controls. No test-generation/device panels are shown until runnable capabilities exist.
+
+### SDK evolution and draft safety
+
+Keep IPluginContext/IPluginRuntimeContext/WinUiView signatures, API1/runtime1/assembly1.0.0.0. Add OPTIONAL project services through a derived IPluginProjectContext with Project identity/context store and one registration-time before-leave hook; old binaries remain valid. SDK/app0.3.0 is the next preview identity when these callable additions land, while old business minimumHost0.2 stays valid. Update host version, source/SDK snapshots/NuGet/artifact names and PE delivery metadata validation deliberately; do not falsify old PE fixtures or publish changed released0.2 packages as immutable originals.
+
+Project identity contains ID/name, not authority over arbitrary filesystem roots. Context service reads a versioned project document and updates with expected revision; detached/revoked plugin context cannot keep using host service delegates. Contributions/hooks register during Initialize, publish only on successful commit and revoke on disable/failure. Before-leave callback execution must use the existing retained-stop-task/supervisor discipline: a single stored task, bounded wait, cancellation/retry and retention of work/root if it ignores cancellation. Current ExecuteCommandAsync is not a generic owned-callback tracker; do not assume it provides this. A pending preparation must also be joined by terminal Stop before context disposal. Do not add an unobserved Task.Run or hold the manager gate forever. Close includes outstanding preparation work.
+
+First-party summary/test-case example drafts must be retained across project switching/disable/restart, rather than their current no-op Stop discarding edits. Use shared owned persistence for autosave/prepare/Stop, and retain current generated-draft non-overwrite protection. Ordinary preference edits auto-save, so remove redundant sample preference Save controls and adjust affected original assertions to verify automatic effect. Explicit document export/save may remain purposeful. Preserve old regression coverage goals/counts and report any assertion changes caused by new intended behavior; never claim original strings unchanged if changed. Unknown third-party uncommitted private widget state cannot be serialized generically; document that boundary and provide cooperative hook for plugins. Do not copy/commit unapproved credential drafts.
+
+## Phase 2: runnable traceable test-design plugin (next stage)
+
+Implement actual optional contributions for requirement/Figma data-source snapshots, source locators/revisions/hashes, case sets/steps/expected outcomes and CSV export. Start with explicit synthetic/local snapshots; no real Figma/provider request or model credential. Deterministic generation must be labeled rule-based/synthetic, not AI. Exports should quote correctly and prevent spreadsheet formula injection. Each case references the exact immutable source revision/node/document location, and later source updates do not rewrite past evidence. Plugin view is native WinUI, registered through existing host contribution mechanism, installed as a real package; no placeholder panel claims this exists during Phase1.
+
+Use a visible project task/run model for queued/running/cancel-requested/cancelled/completed/failed/interrupted states, timestamps, immutable step records, safe error codes and evidence artifact hashes. Cancellation joins owned work. Recover after interruption through explicit resumption policy/checkpoints; never promise exactly-once delivery/undo or auto-repeat irreversible steps. Project tasks retain source and case revision.
+
+## Phase 3: controlled execution adapters (staged)
+
+A target device/session ID and allowed action scope are mandatory. The first runnable adapter is explicitly synthetic, operating only a virtual fixture and producing clearly labeled simulated frames/results, not real desktop screenshots. A real computer adapter is separately unimplemented/unverified until target device/session, capabilities, permission/operation boundaries and confirmations are implemented and authorized. No real user's PC, arbitrary shell, provider/Webhook/send default. Host-service policy is not a security sandbox against arbitrary trusted native code. Secrets never go in context/source/task/evidence logs.
+
+## Precedents (primary sources read2026-11-07, inference into our design)
+
+Obsidian's folders/configuration motivate local project data ownership, VSCode contributions motivate optional views/commands/tasks/providers, ChatGPT projects motivate scoped files/instructions/context, and Claude Code motivates visible actual task progress distinct from background work. We adopt these concepts into native host services rather than embed their applications.
+- https://obsidian.md/help/manage-vaults
+- https://obsidian.md/help/configuration-folder
+- https://code.visualstudio.com/api/extension-guides/overview
+- https://code.visualstudio.com/api/extension-guides/workspace-trust
+- https://help.openai.com/en/articles/10169521-projects-in-chatgpt
+- https://code.claude.com/docs/en/interactive-mode#task-list
+
+## Verification and builder latitude
+
+Use actual temporary-filesystem catalog/context tests for adoption hashes, path/unknown-schema/refusal, create/archive/restore retention, atomic write failure and conflicting revisions. Integrate with actual PluginManager/TestPlugin for stopped/pending callbacks/leases and context separation, plus additive shipping WindowsServer native workspace probes for single-UI suppression, multiple switching, context/theme isolation, draft retention, failure/retry/close. Keep actual production DingTalk/UPCAM compatibility/dedup and all prior business51 checks; no real data/provider. Verify real downloaded new-version host/SDK/plugin artifacts and sources. Windows11/manual/reallegacy2GUI/realhighermigration remain separate deferred observations.
+
+Builder can settle internal class/file splits, debounce interval within responsive UX, exact catalog field names/limits, UI label/style details and storage helper reuse. They cannot trade away in-place data adoption, no normal redundant click, default single-project UI, truthful capability states, known-work lease retention, existing binary compatibility or synthetic-only boundaries. Design check should identify any remaining consequential ambiguity before task planning.
+
+## Binding Global Constraints
+
+- Work only in project-workbench on feat/native-plugin-workbench; baseline a5aac3d498a553508a8f5b20ea1093e10dc9c9d9, original work/main and business repositories preserved.
+- Keep .NET SDK10.0.403, net10.0/win-x64, WindowsAppSDK1.8.260921001, unpackaged/self-contained directory; no trim/AOT/single-file/embedded independent GUI/WebView/plugin XAML.
+- Final app/SDK preview0.3.0, stable assembly1.0.0.0, API1/runtime services1; old IPluginContext/IPluginRuntimeContext/WinUiView signatures unchanged; optional project services1 only.
+- Frozen DingTalk0.3.2/c0c1d33 and UPCAM0.1.0/6370b9d production bytes/provenance remain unchanged; genuine acceptance48e67e8 stays test-only. Real prebuilt old-SDK business compatibility remains required.
+- Legacy default root stays in place. New project roots derive from managed IDs only; archive/mode changes never delete/move data or copy credentials/consents/active business ledgers.
+- Single-project normal UI has no multiple-project selector/count/manager; normal new settings/context edits auto-apply without an additional activation checkbox/save click.
+- All known preparation/service/editor/background/Stop work must actually finish before ownership is released or another project's runtime starts; no forced Stop/hot unload/security sandbox claim.
+- Preserve existing regression coverage, native14/management17+theme1/platform7/business51; explain and strengthen intentional sample autosave expectation changes rather than hide removed checks.
+- No real credentials/provider HTTP/Webhook/messages/user-computer control, business-repo mutation, denied PR retry, merge or deployment. Default local/synthetic data only.
+- Distinguish implemented/callable SDK/design-only/unverified capabilities and Linux/reference/Server automatic/Windows11 manual evidence; human acceptance is deferred, never passed by implication.
+- Host failures never evaluate arbitrary exception Message/ToString/GetBaseException or echo provider/settings/evidence values; user-entered project/context content is rendered only in its intended native editor.
+
+## Concrete storage and service decisions for planning
+
+Catalog limits:256KiB encoded JSON,128 retained entries, names trimmed/nonblank/at most80 UTF-16 units with no control characters and valid Unicode. ID is literal default or32lowerhex generatedGUID; default maps base root, others .workspaces/projects/<id>. Schema1, unknown fields/versions/duplicates/root aliases refuse without rewriting. Revision is SHA256 of raw valid file bytes; missing token is literal missing. Catalog recovery is conditional: retain original damaged bytes before restoring a validated previous snapshot, keep orphan project folders recoverable, never quietly rebuild an empty roster over existing metadata.
+
+Context store is <projectUserRoot>/.workbench-project/context.json, schema1 with bound project ID, text and timestamp; maximum text1MiB UTF8 and encoded input8MiB. Missing reads return an empty missing snapshot without writing; corrupt/unknown/mismatched files are preserved and are not empty-editable defaults. Expected-revision conflict/failure keeps original and editor buffer; a durable conflict-copy action may allow explicit reload without losing text. Normal successful edits need no redundant save button or unlimited auto-backup history.
+
+A project-bound runtime scope has immutable ID/root and mutable display-name snapshot after catalog rename succeeds. Host-owned editor autosave is serialized/debounced, flushes before switch/close, and never commits unapproved credential inputs. Optional before-leave hook runs off dispatcher as one retained task; pending callbacks/service calls are joined before context disposal. Host switch/close/first-party terminal UI actions invoke preparation before losing draft state. Existing arbitrary legacy plugin drafts cannot be generically serialized; persisted business data and existing vendor stop/authorization rules remain authoritative.
+
+Version transition is intentional at the optional-SDK task. Generalize host PE parsing to coherent declared semantic/file versions and exact source matching; retain strict clean/source checks and fixed business minimumHost0.2 pins. Actual current CI must verify new app0.3 and SDK0.3 from their real binaries, not modified metadata fixtures. SDK source allow-list adds the actual ProjectContracts.cs, artifact becomes workbench-sdk-0.3.0, projectServices1 is recorded; assembly/API/runtime identities remain compatible.
+
+The next traceable-testing plugin and controlled-device adapter receive separate implementation plans after this foundation. Their named source/case/run/evidence/cancel/recovery interfaces above are design reservations until implemented; do not expose placeholder feature panels or advertise a real AI/Figma/desktop backend. This design is the overall platform direction, not a claim that those later stages are complete.
+
+The runtime factory receives the controller-owned validated base lease so default construction never reacquires its own lock. The coordinator stays UI-neutral; only the native shell builds HostRuntimeOptions. A candidate with HasPendingStops after Initialize is not a completed switch even if Initialize returned normally. Ordinary invalid/failed plugins without pending live ownership may remain management diagnostics in an otherwise opened project. Missing/corrupt context read is not an editable empty reset; dirty failed saves block departure, while an untouched read-error preserves its bytes and does not require a write to leave.
