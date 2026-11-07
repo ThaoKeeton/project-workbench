@@ -63,3 +63,13 @@
 - [ ] Retain request CTS and actual operation until settlement; cancel action requests cancellation, busy remains through actual ignored-cancellation work. Preserve current session inputs across page unload/reopen/failure. Make partial receipt result and errors readable without success overwrite. Keep deterministic local generation intact, update remote/SIMULATED capability copy accurately.
 - [ ] Run focused portable/native helper and packaging tests; run full portable suite once for final combined source; run effective reference compile with `-p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false`; parse touched PowerShell. Retain logs/TRX/build evidence and commit.
 - [ ] Controller then runs independent aggregate review, current-source Windows CI (execution evidence even if artifact quota fails), capacity report and next controlled-automation design. Do not describe new native remote controls or live providers as exercised unless separate evidence exists.
+
+### Task 4: Independent final delivery checks before uploads
+
+**Files:** `.github/workflows/build.yml`; short accurate note in `docs/testing-plugin.md` if needed.
+
+**Interfaces:** Consume existing same-source production outputs; preserve both final validator commands and every upload/permission/trigger. No new carrier or remote mutation.
+
+- [ ] Move `Reverify independently installable testing delivery` and `Reverify the tested production download before upload` verbatim immediately after `Verify SDK snapshot integrity and identity`, before debug/upload steps. Preserve default-success conditions; quota errors must still fail uploads/workflow.
+- [ ] Parse actual YAML and inspect exact ordering/one occurrence, `git diff --check`, no full Core rerun or implementation-mirroring test for this reversible ordering edit; current-source CI is the combined evidence gate.
+- [ ] Document quota vs functional checks accurately, self-review, commit and report exact narrow diff/commands. Do not delete artifacts, change permissions, suppress errors, create a release or bypass403.
