@@ -60,6 +60,7 @@ public sealed partial class ProjectTestStore
         {
             cancellationToken.ThrowIfCancellationRequested();
             _ = ProjectWorkspaceStorage.PathIn(_directory, Path.GetFileName(path));
+            if (Path.GetFileName(path) == "runs") continue; // Optional schema1 area, fully validated below.
             if (!expected.Remove(Path.GetFileName(path))) throw TestValidation.Error("TestStoreCorrupt");
         }
         if (expected.Count != 0) throw TestValidation.Error("TestStoreCorrupt");
@@ -108,6 +109,7 @@ public sealed partial class ProjectTestStore
             }
             if (count == 0) throw TestValidation.Error("TestStoreCorrupt");
         }
+        await ValidateRunsLockedAsync(lease, cancellationToken).ConfigureAwait(false);
     }
 
     private IEnumerable<(string Id, string Path)> EnumerateManagedFiles(string area, int limit, CancellationToken cancellationToken)
@@ -139,6 +141,8 @@ public sealed partial class ProjectTestStore
         options.Converters.Add(new ExactEnumConverter<TestSourceKind>());
         options.Converters.Add(new ExactEnumConverter<TestVirtualScenario>());
         options.Converters.Add(new ExactEnumConverter<TestActionKind>());
+        options.Converters.Add(new ExactEnumConverter<TestRunEventKind>());
+        options.Converters.Add(new ExactEnumConverter<TestStepOutcome>());
         return options;
     }
 
@@ -176,16 +180,16 @@ public sealed partial class ProjectTestStore
             throw TestValidation.Error("TestStoreCorrupt");
     }
 
-    private static byte[] Encode<T>(T value)
+    private static byte[] Encode<T>(T value, int limit = TestValidation.EnvelopeLimit)
     {
-        using var stream = new EnvelopeStream();
+        using var stream = new EnvelopeStream(limit);
         JsonSerializer.Serialize(stream, value, WireJson);
         return stream.ToArray();
     }
 
-    private sealed class EnvelopeStream : MemoryStream
+    private sealed class EnvelopeStream(int limit) : MemoryStream
     {
-        private void Check(int count) { if (Length + count > TestValidation.EnvelopeLimit) throw TestValidation.Error("StoreLimitExceeded"); }
+        private void Check(int count) { if (Length + count > limit) throw TestValidation.Error("StoreLimitExceeded"); }
         public override void Write(byte[] buffer, int offset, int count) { Check(count); base.Write(buffer, offset, count); }
         public override void Write(ReadOnlySpan<byte> buffer) { Check(buffer.Length); base.Write(buffer); }
         public override void WriteByte(byte value) { Check(1); base.WriteByte(value); }

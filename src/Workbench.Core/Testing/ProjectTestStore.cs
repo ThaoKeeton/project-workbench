@@ -4,7 +4,7 @@ using Workbench.Sdk;
 
 namespace Workbench.Core.Testing;
 
-/// <summary>Guarded source/case records for a captured project. This store does not expose run services.</summary>
+/// <summary>Guarded source, case and durable run records for a captured project.</summary>
 public sealed partial class ProjectTestStore
 {
     private readonly string _directory;
@@ -31,7 +31,7 @@ public sealed partial class ProjectTestStore
     {
         TInput input;
         try { input = capture(); }
-        catch (PluginTestingException error) { return Task.FromException<T>(error); }
+        catch (PluginTestingException error) { return Task.FromException<T>(TestValidation.Error(error.ErrorCode)); }
         catch (Exception) { return Task.FromException<T>(TestValidation.Error(invalidCode)); }
         return Schedule(() => action(input));
     }
@@ -63,6 +63,8 @@ public sealed partial class ProjectTestStore
         internal readonly Dictionary<string, TestCaseSetSnapshot> Cases = new(StringComparer.Ordinal);
         internal readonly Dictionary<string, byte[]> CaseBytes = new(StringComparer.Ordinal);
         internal readonly Dictionary<string, TestCaseSetSnapshot> Archives = new(StringComparer.Ordinal);
+        internal readonly Dictionary<string, TestRunSnapshot> Runs = new(StringComparer.Ordinal);
+        internal readonly Dictionary<string, Dictionary<string, TestEvidenceReceipt>> Evidence = new(StringComparer.Ordinal);
         private readonly FileStream _stream;
         internal bool IsDisposed { get; private set; }
 

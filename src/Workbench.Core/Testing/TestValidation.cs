@@ -1,4 +1,5 @@
 using System.Text;
+using System.Buffers.Binary;
 using Workbench.Core.Projects;
 using Workbench.Sdk;
 
@@ -19,6 +20,63 @@ internal static class TestValidation
     internal static void Id(string? id) { if (id is not { Length: 32 } || !ProjectWorkspaceStorage.IsLowerHex(id)) throw Error("InvalidId"); }
     internal static void Hash(string? hash) { if (hash is not { Length: 64 } || !ProjectWorkspaceStorage.IsLowerHex(hash)) throw Error("InvalidId"); }
     internal static void Producer(string? id) { if (!PackageValidator.IsSafePluginId(id)) throw Error("InvalidProducer"); }
+
+    internal static string[] CopySelectedCaseIds(IReadOnlyList<string> selected)
+    {
+        var copied = CopyList(selected, 200, "InvalidRun", id => { Id(id); return id; });
+        if (copied.Distinct(StringComparer.Ordinal).Count() != copied.Length) throw Error("InvalidRun");
+        return copied;
+    }
+
+    internal static TestRunEventDraft CopyRunEventDraft(TestRunEventDraft draft)
+    {
+        if (draft is null || !Enum.IsDefined(draft.Kind) || draft.Outcome is { } outcome && !Enum.IsDefined(outcome)) throw Error("InvalidRun");
+        var count = draft.EvidenceIds?.Count ?? 0;
+        if (count > 256) throw Error("StoreLimitExceeded");
+        var evidence = new string[count];
+        for (var i = 0; i < count; i++) evidence[i] = draft.EvidenceIds![i];
+        foreach (var id in evidence) Id(id);
+        if (evidence.Distinct(StringComparer.Ordinal).Count() != evidence.Length) throw Error("InvalidRun");
+        if (draft.CaseId is not null) Id(draft.CaseId);
+        if (draft.StepId is not null) Id(draft.StepId);
+        if (draft.Kind == TestRunEventKind.StepFinished)
+        {
+            if (draft.NativePlainTextState is not { Length: > 0 } state || !ProjectWorkspaceStorage.ValidUnicode(state)) throw Error("InvalidRun");
+            if (state.Length > 8192) throw Error("StoreLimitExceeded");
+        }
+        else if (draft.NativePlainTextState is not null) throw Error("InvalidRun");
+        return draft with { EvidenceIds = evidence, ErrorCode = draft.ErrorCode is null ? null : SafeErrorCode(draft.ErrorCode) };
+    }
+
+    internal const int EvidenceLimit = 512 * 1024;
+    internal static TestEvidenceDraft CopyEvidenceDraft(TestEvidenceDraft draft)
+    {
+        if (draft is null || draft.Bytes is null || draft.MimeType != "image/bmp" || !draft.IsSimulated) throw Error("InvalidEvidence");
+        if (draft.Bytes.Length > EvidenceLimit) throw Error("StoreLimitExceeded");
+        var bytes = draft.Bytes.ToArray();
+        ValidatePassiveBmp(bytes, "InvalidEvidence");
+        return draft with { Bytes = bytes };
+    }
+
+    internal static void ValidatePassiveBmp(byte[] bytes, string code)
+    {
+        // Fixed BITMAPFILEHEADER + BITMAPINFOHEADER, bottom-up 320x180 BGR, no compression/palette/profiles.
+        if (bytes.Length != 172854 || bytes[0] != 'B' || bytes[1] != 'M'
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(2)) != 172854
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(6)) != 0
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(10)) != 54
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(14)) != 40
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(18)) != 320
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(22)) != 180
+            || BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(26)) != 1
+            || BinaryPrimitives.ReadInt16LittleEndian(bytes.AsSpan(28)) != 24
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(30)) != 0
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(34)) != 172800
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(38)) != 0
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(42)) != 0
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(46)) != 0
+            || BinaryPrimitives.ReadInt32LittleEndian(bytes.AsSpan(50)) != 0) throw Error(code);
+    }
 
     internal static void Text(string? text, int max, bool required, string code)
     {

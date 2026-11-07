@@ -83,3 +83,50 @@ No public service exposes host-owned recovery as an arbitrary caller command. Co
 Additional exact validation choices: collections are nonempty unless explicitly optional: sourceitems1..256/criteria1..16,sets1..200cases/steps1..20,case and step traces1..16,selectedcaseIDs1..200 with totalsteps<=200. Set/case/source/item title1..200,documentId1..200,locator1..512 unique ordinal,description/prerequisites0..4096,instruction/expected/criterion1..4096; required strings cannot be whitespace-only. All strings must be valid Unicode; preserve legitimate astral characters, line breaks and tabs. ProviderId1..100/providerVersion1..40 plain bounded metadata, never paths or remote authority. Safe error allow-list also includes TestRecordNotFound,StoreBusy,InvalidId,InvalidProducer. Host store owner plugin IDs use existing validated plugin-ID rules.
 
 Controller boundary: portable TestingController.InitializeAsync registers its supervised background task but does not register an independent before-leave hook. It exposes PrepareLeaveAsync; native entry registers ONE actual hook that seals/joins owned UI callbacks, then calls controller preparation while services remain active, then releases temporary admission on settled completion. Domain lifecycle tests register the same preparation explicitly. This avoids duplicate hook registration and ensures asynchronous pickers/exports are included. Terminal Stop/Lifetime revocation is separate.
+
+## Task2 implementation clarifications — controller rulings, 2026-11-07
+
+Shared reads permit creating a NEW executor-owned run from another producer's
+case set. The source, canonical case set, archived revision and trace author stay
+unchanged. Append, evidence and retry remain run-owner-only. This resolves the
+shared-read/own-write interpretation; it is not an end-user-approved per-record
+sharing policy and grants no real-device authority.
+
+Run publication freezes exact current expected-revision bytes under the SAME
+outer store lease, before publishing plan+host Queued sequence0 together by a
+same-root staged-directory rename. The fixed target is virtual.task-form.v1.
+Complete unreferenced case archives and complete evidence receipts remain valid,
+retained and counted against caps. Recognized generated partial run/evidence
+stages and event temporary files cause RecoveryRequired and remain untouched;
+unknown/partial published data still preserve/refuse. Only the actual operation's
+own stage may be cleaned after a caught ordinary error/cancellation and guarded
+expected-entry checks. Manual repair of interrupted partial staging remains a
+boundary; there is no public reset/arbitrary recovery or all-crash/power-loss claim.
+
+A failed StepFinished requires the caller's next event to be Failed. The narrow
+controller-authorized exception is internal once-per-new-owner initialization:
+it can append Interrupted to ANY valid old nonterminal run, including one whose
+last durable result failed. Private required schema1 `isRecovery` is true only on
+that host initialization Interrupted (with RecoveryRequired), false on genesis
+and every caller event, and included in the exact-byte journal hash. It is absent
+from SDK drafts. Replay rejects the flag on a different kind or after terminal;
+foreign-owner initialization cannot write it. Original failed result, observed
+text and evidence bytes remain unchanged. This reconciles the caller failed-step
+rule with owner interruption; it never fabricates success or settles recovery as
+Failed. The future captured facade supplies the retained initialization barrier.
+
+The implemented wire, hash masking rule, every allowed transition, BMP header,
+caps/orphans and remaining integration gates are specified in
+[testing-services.md](../../testing-services.md). The event self-hash covers all
+exact file bytes with only its 64 ASCII hash digits replaced by zeros. With the
+fixed 172854-byte BMP and 256 receipts, a valid run reaches 44,250,624 bytes, below
+the conservative 128 MiB cap; no artificial valid 128 MiB test boundary is claimed.
+
+The controller additionally approved a private run-plan envelope limit of
+4 MiB +4096 bytes: valid selected case payload can occupy the full case-envelope
+cap before bounded host session/ancestry/revision/target metadata is added. The
+source/case limit stays4MiB and events256KiB; plan read/write share the private
+limit with no public/test tunable. Real canonical near-limit payload tests cover
+creation/retry/reopen and oversized-plan refusal. Full Core passed before this
+narrow size-bound adjustment; affected store regressions cover the final change,
+and final current full CI remains required at the integration stage.
