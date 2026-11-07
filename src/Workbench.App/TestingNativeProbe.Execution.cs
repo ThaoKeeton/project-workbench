@@ -145,7 +145,7 @@ internal static partial class TestingNativeProbe
         checks.Add("native-project-isolation-empty-read");
         return id;
     }
-    private static async Task VerifyAsync(MainWindow window, RunOptions options, List<string> checks)
+    private static async Task VerifyAsync(MainWindow window, RunOptions options, List<string> checks, ExecutionProgress progress)
     {
         var state = System.Text.Json.JsonSerializer.Deserialize<ProbeState>(await File.ReadAllBytesAsync(StatePath(options.UserRoot)), Json)
             ?? throw new InvalidOperationException("Testing seed identity is missing.");
@@ -166,18 +166,25 @@ internal static partial class TestingNativeProbe
         await CommandAsync(window, "refresh");
         await ShowFrameAsync(page, state.PassedRunId, state.ObservedSequence, state.ObservedText, state.FrameSha256);
         checks.Add("reopened-exact-observed-text-bmp-native-decoder");
+        progress.Admit(RetryOperation.VerifySelectInterruptedRun);
         SelectRun(page, state.InterruptedSeedId);
+        progress.Admit(RetryOperation.VerifyAwaitRetryReady);
         await WaitAsync(() => Task.FromResult(Find<Button>(page, "重试测试执行").IsEnabled));
+        progress.Admit(RetryOperation.VerifyInvokeRetry);
         Invoke(Find<Button>(page, "重试测试执行"));
         string? retryId = null;
+        progress.Admit(RetryOperation.VerifyDiscoverRetry);
         await WaitAsync(async () => { retryId = (await Store(window).ListRunsAsync()).SingleOrDefault(r => r.ParentRunId == state.InterruptedSeedId)?.Id; return retryId is not null; });
+        progress.Admit(RetryOperation.VerifyAwaitRetryCompletion);
         var retry = await WaitRunAsync(window, retryId!, TestRunState.Completed);
+        progress.Admit(RetryOperation.VerifyValidateFrozenRetry);
         Require(retry.Plan.Id != state.InterruptedSeedId && retry.Plan.SessionId != interrupted.Plan.SessionId
             && retry.Plan.CaseRevision == state.FrozenRevision
             && System.Text.Json.JsonSerializer.Serialize(retry.Plan.Cases) == System.Text.Json.JsonSerializer.Serialize(interrupted.Plan.Cases)
             && retry.Events.First(e => e.Kind == TestRunEventKind.StepStarted).StepId == retry.Plan.Cases[0].Steps[0].Id,
             "Linked retry did not use a fresh session and exact frozen cases from step one.");
         checks.Add("linked-new-session-retry-frozen-step-one");
+        progress.Admit(RetryOperation.VerifyRoster);
         Require(window.Workspace.Catalog!.Projects.Any(p => p.Id == state.SecondaryId), "Separate-process project roster lost B.");
         checks.Add("restart-project-roster-preserved");
     }

@@ -47,12 +47,13 @@ internal static partial class TestingNativeProbe
     {
         List<string> checks = [];
         var evidence = new List<object>();
+        var progress = new ExecutionProgress();
         try
         {
             window.AssertUiThread();
             Require(window.Workspace.ActiveProject?.Id == "default", "Testing probe must use the normal default workspace.");
             if (options.TestingProbe == "seed") await SeedAsync(window, options, checks);
-            else await VerifyAsync(window, options, checks);
+            else await VerifyAsync(window, options, checks, progress);
             var output = Path.Combine(Path.GetDirectoryName(options.ReportPath!)!, options.TestingProbe + "-evidence");
             await CopyEvidenceAsync(window.SmokeRuntime.UserRoot, output, evidence);
             var roots = window.Workspace.Catalog!.Projects.Select(p => new ProjectWorkspaceCatalog(options.UserRoot).GetProjectRoot(p.Id)).ToArray();
@@ -96,7 +97,7 @@ internal static partial class TestingNativeProbe
                 await WriteNewAsync(sidecar, JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1, succeeded = false,
                     processId = Environment.ProcessId, phase = options.TestingProbe, checks, evidence,
                     safeError = HostFailure.Describe("TestingNativeProbeFailed", error), errorHResult = error.HResult,
-                    failure = DescribeFailure(error) }, Json));
+                    failure = DescribeFailure(error, progress) }, Json));
             }
             catch { /* Diagnostic IO/serialization must preserve the original native failure and any prior sidecar. */ }
             throw;

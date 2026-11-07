@@ -118,6 +118,18 @@ function ConvertTo-TestingProbeNativeDiagnostic {
                 }
             }
             elseif ($null -ne $detail['sourceFile'] -or $null -ne $detail['sourceLine']) { throw 'TestingDiagnosticInvalid' }
+            if ($null -ne $detail['operation']) {
+                if ($detail['operation'] -isnot [string] -or $detail['operation'] -cnotin @('VerifySelectInterruptedRun','VerifyAwaitRetryReady',
+                    'VerifyInvokeRetry','VerifyDiscoverRetry','VerifyAwaitRetryCompletion','VerifyValidateFrozenRetry','VerifyRoster')) { throw 'TestingDiagnosticInvalid' }
+                $failure.operation = $detail['operation']
+            }
+            if ($null -ne $detail['testingErrorCode']) {
+                if ($detail['testingErrorCode'] -isnot [string] -or $detail['testingErrorCode'] -cnotin @('TestingContextClosed','InvalidTestSource',
+                    'InvalidCaseSet','InvalidRun','InvalidEvidence','RevisionConflict','StoreLimitExceeded','StoreIoFailure','UnsafePath','TestStoreCorrupt',
+                    'RecoveryRequired','ManualStepUnsupported','TargetUnavailable','AssertionFailed','AdapterFailed','TestRecordNotFound','StoreBusy',
+                    'InvalidId','InvalidProducer','TestingFailed')) { throw 'TestingDiagnosticInvalid' }
+                $failure.testingErrorCode = $detail['testingErrorCode']
+            }
         }
     }
     return @{ ProcessId = $Data['processId']; Checks = $checks; Failure = $failure; Stage = $null }

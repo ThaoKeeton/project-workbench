@@ -69,6 +69,54 @@ try {
         if ((Get-FileHash -LiteralPath $runnerPath).Hash -cne $firstHash) { throw "Diagnostic overwrote first runner evidence: $Name" }
         return $diagnostic
     }
+    # Synthetic retry checkpoint/code projection only; these are not observations from PID 7436.
+    foreach ($operation in @('VerifySelectInterruptedRun','VerifyAwaitRetryReady','VerifyInvokeRetry','VerifyDiscoverRetry',
+        'VerifyAwaitRetryCompletion','VerifyValidateFrozenRetry','VerifyRoster')) {
+        $projected = Invoke-SyntheticDiagnosticFailure ('retry-operation-' + $operation) {
+            param($report)
+            $fixture = New-SyntheticSidecar
+            $fixture.failure = @{ category = 'Unexpected'; operation = $operation }
+            $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+        }
+        if ($projected.failure['operation'] -cne $operation -or $projected.failure.category -cne 'Unexpected' -or
+            $null -ne $projected.failure['testingErrorCode'] -or $null -ne $projected.failure.sourceFile) { throw "Safe synthetic retry checkpoint was lost: $operation" }
+    }
+    foreach ($testingCode in @('TestingContextClosed','InvalidTestSource','InvalidCaseSet','InvalidRun','InvalidEvidence','RevisionConflict',
+        'StoreLimitExceeded','StoreIoFailure','UnsafePath','TestStoreCorrupt','RecoveryRequired','ManualStepUnsupported','TargetUnavailable',
+        'AssertionFailed','AdapterFailed','TestRecordNotFound','StoreBusy','InvalidId','InvalidProducer','TestingFailed')) {
+        $projected = Invoke-SyntheticDiagnosticFailure ('testing-code-' + $testingCode) {
+            param($report)
+            $fixture = New-SyntheticSidecar
+            $fixture.failure = @{ category = 'Unexpected'; operation = 'VerifyAwaitRetryCompletion'; testingErrorCode = $testingCode }
+            $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+        }
+        if ($projected.failure['operation'] -cne 'VerifyAwaitRetryCompletion' -or $projected.failure['testingErrorCode'] -cne $testingCode -or
+            $projected.failure.category -cne 'Unexpected' -or $null -ne $projected.failure.sourceFile) { throw "Safe synthetic testing code was lost: $testingCode" }
+    }
+    $optionalNull = Invoke-SyntheticDiagnosticFailure 'optional-retry-fields-null' {
+        param($report)
+        $fixture = New-SyntheticSidecar
+        $fixture.failure.operation = $null; $fixture.failure.testingErrorCode = $null
+        $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+    }
+    if ($null -ne $optionalNull.failure['operation'] -or $null -ne $optionalNull.failure['testingErrorCode'] -or
+        $optionalNull.failure.category -cne 'Assertion') { throw 'Null optional fields changed legacy assertion semantics.' }
+    foreach ($field in @('operation','testingErrorCode')) {
+        $badValues = @('Unknown','verifyinvokeretry','storebusy','StoreBusy ','ProjectOperationFailed','Canceled',
+            '/synthetic/private/path','synthetic private body',"`e[31m", "`n::error::synthetic", '##vso[task.logissue type=error]synthetic',
+            $privateText, 1, 1.5, $true, @('StoreBusy'), @{ code = 'StoreBusy' })
+        for ($badIndex = 0; $badIndex -lt $badValues.Count; $badIndex++) {
+            $rejected = Invoke-SyntheticDiagnosticFailure ("retry-invalid-$field-$badIndex") {
+                param($report)
+                $fixture = New-SyntheticSidecar
+                $fixture.failure = @{ category = 'Unexpected'; operation = 'VerifyInvokeRetry'; testingErrorCode = 'StoreBusy' }
+                $fixture.failure[$field] = $badValues[$badIndex]
+                $fixture | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
+            } -WantedSidecar invalid
+            if ($rejected.checks.Count -ne 0 -or $null -ne $rejected.nativeProcessId -or
+                $null -ne $rejected.failure['operation'] -or $null -ne $rejected.failure['testingErrorCode']) { throw "Rejected synthetic retry detail leaked: $field/$badIndex" }
+        }
+    }
     $safe = Invoke-SyntheticDiagnosticFailure 'safe-prefix' {
         param($report)
         New-SyntheticSidecar | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath ($report + '.evidence.json')
