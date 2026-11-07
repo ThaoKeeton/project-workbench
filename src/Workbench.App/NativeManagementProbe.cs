@@ -69,7 +69,7 @@ internal static class NativeManagementProbe
         await NativeFailureProbe.RunAsync(options, record);
         await NativeRetainedRuntimeProbe.RunAsync(options, record);
         await NativeFailureProbe.VerifyCorruptedThemeAsync(options);
-        recordAdditional("Actual isolated corrupted host theme fell back with ThemeSettingsFailed; native Home/Packages/Settings and explicit theme repair remained usable, then safe close released ownership");
+        recordAdditional("Actual isolated corrupted host theme fell back with ThemeSettingsFailed; conditional recovery retained corrupt bytes, saved unchanged Follow system and survived native reopen without redundant recovery; normal Dark autosave added no backup, navigation and Closed/root leases confirmed safe retirement");
     }
 
     private static async Task VerifyCredentialsAsync(MainWindow window)

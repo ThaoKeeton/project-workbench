@@ -19,7 +19,7 @@ internal static class PackagePresentation
         if (!Enum.IsDefined(action)) return new("包维护状态待确认", Preserve, false);
         if (!result.Succeeded) return action switch
         {
-            PackageAction.Import => new("导入需要处理", "请核对所选目录或 ZIP 根目录是否直接包含 plugin.json、ID 是否已安装，以及 API/最低宿主版本是否兼容。查看“包维护”的诊断后重试；导入不会执行代码或批准信任。", false),
+            PackageAction.Import => new("导入需要处理", "请核对所选目录或 ZIP 根目录是否直接包含 plugin.json，以及 API/最低宿主版本是否兼容。已安装的 ID 请勿重复导入；同一冻结版本无需再次导入。升级请在当前包使用“更新 ZIP”或“更新文件夹”，选择同一 ID、严格更高且兼容的版本。其他导入问题请查看“包维护”的诊断后重试；导入不会执行代码或批准信任。", false),
             PackageAction.Update => new("更新暂存需要处理", "更新需使用同一 ID、严格更高且兼容的版本。" + Preserve, false),
             PackageAction.Rollback => new("代码回滚需要处理", "请核对所选代码历史是否仍有效；回滚不会降级当前业务数据。" + Preserve, false),
             PackageAction.Remove => new("移除暂存需要处理", Preserve, false),

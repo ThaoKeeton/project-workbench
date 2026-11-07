@@ -14,7 +14,11 @@ $script:PayloadPaths = @('dingtalk/package.zip', 'dingtalk/provenance.json', 'up
 
 function Get-DeliveryPath([string]$Path) {
     if ([string]::IsNullOrWhiteSpace($Path)) { throw 'delivery_path: A filesystem path is required.' }
-    return [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($Path))
+    $provider = $null
+    $drive = $null
+    $filesystemPath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($Path, [ref]$provider, [ref]$drive)
+    if ($provider.Name -ne 'FileSystem') { throw 'delivery_path: Only filesystem paths are supported.' }
+    return [IO.Path]::TrimEndingDirectorySeparator([IO.Path]::GetFullPath($filesystemPath))
 }
 function Assert-DeliveryNoLinks([string]$Path) {
     $current = Get-DeliveryPath $Path

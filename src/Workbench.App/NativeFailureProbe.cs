@@ -50,6 +50,8 @@ internal static class NativeFailureProbe
         const string corrupted = "{\"Theme\":\"synthetic-private-native-provider-response\"}";
         using (HostRuntime.AcquireLease(root)) await File.WriteAllTextAsync(path, corrupted);
         var extra = new MainWindow(new(false, root, null));
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        extra.Closed += (_, _) => closed.TrySetResult();
         extra.Activate();
         try
         {
@@ -67,19 +69,76 @@ internal static class NativeFailureProbe
             }
             Require(await File.ReadAllTextAsync(path) == corrupted, "Theme fallback silently replaced the preserved settings file.");
             var settings = extra.SmokeCurrentPage ?? throw new InvalidOperationException("Theme fallback settings page was not attached.");
-            Find<ComboBox>(settings, "应用主题").SelectedIndex = (int)ElementTheme.Dark;
+            var theme = Find<ComboBox>(settings, "应用主题");
+            Require(theme.SelectedIndex == (int)ElementTheme.Default, "Theme fallback did not display Follow system.");
+            Invoke(Find<Button>(settings, "恢复主题设置"));
             await WaitAsync(async () =>
             {
-                if (extra.SmokeActionBusy || extra.SmokeRequestedTheme != ElementTheme.Dark) return false;
+                if (extra.SmokeActionBusy || extra.SmokeRequestedTheme != ElementTheme.Default) return false;
+                var content = await File.ReadAllTextAsync(path);
+                if (content == corrupted) return false; // Automation invocation may still be queued on the dispatcher.
+                using var saved = JsonDocument.Parse(content);
+                return saved.RootElement.GetProperty("Theme").GetInt32() == (int)ElementTheme.Default;
+            });
+            Require(theme.SelectedIndex == (int)ElementTheme.Default, "Saving Follow system changed the displayed selection.");
+            Require(!Descendants<Button>(settings).Any(button => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(button) == "恢复主题设置"),
+                "Successful theme recovery left the recovery action offered.");
+            var backups = Directory.GetFiles(root, "host-settings.json.corrupt-*.bak");
+            Require(backups.Length == 1 && (await File.ReadAllBytesAsync(backups[0])).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(corrupted)),
+                "Theme recovery did not retain the original corrupt bytes in one sibling backup.");
+            await extra.SmokeNavigateAsync("home");
+            Require(extra.SmokeManagementNavigationAvailable, "Saving unchanged Follow system stranded native navigation.");
+            AssertSafe([extra.SmokeNoticeText]);
+        }
+        finally
+        {
+            await extra.FinishSmokeAsync();
+            await closed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        }
+        using (HostRuntime.AcquireLease(root)) { }
+
+        var reopened = new MainWindow(new(false, root, null));
+        var reopenedClosed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        reopened.Closed += (_, _) => reopenedClosed.TrySetResult();
+        reopened.Activate();
+        try
+        {
+            await reopened.InitializeAsync();
+            Require(reopened.SmokeStartupFailure is null && reopened.SmokeManagementNavigationAvailable
+                && reopened.SmokeRequestedTheme == ElementTheme.Default
+                && !reopened.SmokeNoticeText.Contains("ThemeSettingsFailed", StringComparison.Ordinal),
+                "Explicitly saved Follow system did not survive native reopen without the corrupt-theme warning.");
+            var settings = await reopened.SmokeNavigateAsync("settings");
+            var theme = Find<ComboBox>(settings, "应用主题");
+            Require(theme.SelectedIndex == (int)ElementTheme.Default, "Native reopen did not display the saved Follow system preference.");
+            Require(!Descendants<Button>(settings).Any(button => Microsoft.UI.Xaml.Automation.AutomationProperties.GetName(button) == "恢复主题设置"),
+                "Normal theme settings offered redundant recovery.");
+            theme.SelectedIndex = (int)ElementTheme.Dark;
+            await WaitAsync(async () =>
+            {
+                if (reopened.SmokeActionBusy || reopened.SmokeRequestedTheme != ElementTheme.Dark) return false;
                 using var saved = JsonDocument.Parse(await File.ReadAllTextAsync(path));
                 return saved.RootElement.GetProperty("Theme").GetInt32() == (int)ElementTheme.Dark;
             });
-            await extra.SmokeNavigateAsync("home");
-            Require(extra.SmokeManagementNavigationAvailable, "Theme fallback did not allow explicit native preference repair.");
-            AssertSafe([extra.SmokeNoticeText]);
+            foreach (var route in new[] { "home", "packages", "settings" })
+            {
+                var page = await reopened.SmokeNavigateAsync(route);
+                AssertSafe(Descendants<TextBlock>(page).Select(text => text.Text).Append(reopened.SmokeNoticeText));
+            }
+            Require(reopened.SmokeManagementNavigationAvailable, "Dark theme autosave stranded native navigation.");
         }
-        finally { await extra.FinishSmokeAsync(); }
+        finally
+        {
+            await reopened.FinishSmokeAsync();
+            await reopenedClosed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        }
         using var nextOwner = HostRuntime.AcquireLease(root);
+        using var persisted = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+        Require(persisted.RootElement.GetProperty("Theme").GetInt32() == (int)ElementTheme.Dark,
+            "Dark theme autosave did not persist after safe close and root retirement.");
+        var retainedBackups = Directory.GetFiles(root, "host-settings.json.corrupt-*.bak");
+        Require(retainedBackups.Length == 1 && (await File.ReadAllBytesAsync(retainedBackups[0])).SequenceEqual(System.Text.Encoding.UTF8.GetBytes(corrupted)),
+            "Normal Dark autosave created another backup or changed the retained corrupt bytes.");
     }
 
     private static void AssertSafe(IEnumerable<string> text) => Require(text.All(value => !value.Contains("synthetic-private-native-provider-response", StringComparison.Ordinal)),

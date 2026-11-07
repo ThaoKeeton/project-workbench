@@ -8,6 +8,8 @@ namespace Workbench.App;
 
 internal sealed partial class MainWindow
 {
+    private bool _themeSettingsNeedRepair;
+
     private StackPanel HomePage()
     {
         var page = Ui.Page("项目工作台", "一个原生窗口，承载独立插件的页面、命令与设置。");
@@ -115,16 +117,28 @@ internal sealed partial class MainWindow
         var theme = Ui.Named(new ComboBox { Header = "应用主题", HorizontalAlignment = HorizontalAlignment.Stretch, IsEnabled = !_shutdownPending }, "应用主题");
         theme.Items.Add("跟随系统"); theme.Items.Add("浅色"); theme.Items.Add("深色");
         theme.SelectedIndex = (int)_root.RequestedTheme;
-        theme.SelectionChanged += async (_, _) => await RunAsync(async () =>
+        Button? repair = null;
+        async Task SaveCurrentThemeAsync()
         {
             _root.RequestedTheme = (ElementTheme)theme.SelectedIndex;
             var path = Path.Combine(_options.UserRoot, "host-settings.json");
             var temporary = path + ".tmp";
+            var recovering = _themeSettingsNeedRepair;
+            if (recovering) File.Copy(path, path + $".corrupt-{Guid.NewGuid():N}.bak", overwrite: false);
             await File.WriteAllTextAsync(temporary, JsonSerializer.Serialize(new HostPreferences(_root.RequestedTheme)));
             File.Move(temporary, path, overwrite: true);
-            Notice("设置已保存", "主题偏好将在下次启动时恢复。", InfoBarSeverity.Success);
-        });
+            _themeSettingsNeedRepair = false;
+            if (repair is not null) page.Children.Remove(repair);
+            Notice("设置已保存", "主题偏好将在下次启动时恢复。" + (recovering ? "原主题文件已保留为同目录的 .corrupt-*.bak 备份。" : ""), InfoBarSeverity.Success);
+        }
+        theme.SelectionChanged += async (_, _) => await RunAsync(SaveCurrentThemeAsync);
         page.Children.Add(theme);
+        if (_themeSettingsNeedRepair)
+        {
+            repair = Ui.Named(new Button { Content = "恢复主题设置", IsEnabled = !_shutdownPending }, "恢复主题设置");
+            repair.Click += async (_, _) => await RunAsync(SaveCurrentThemeAsync);
+            page.Children.Add(repair);
+        }
         page.Children.Add(Ui.Text($"本地用户目录：{_options.UserRoot}"));
         page.Children.Add(Ui.Text("插件设置通过左侧各插件的“设置”入口打开。JSON 设置与数据文件不是凭据保险箱。"));
         AddDiagnostics(page);
@@ -142,8 +156,9 @@ internal sealed partial class MainWindow
             return preference.Theme;
         }, ElementTheme.Default);
         _root.RequestedTheme = theme.Theme;
+        _themeSettingsNeedRepair = theme.Error is not null;
         if (theme.Error is { } failure)
-            Notice("主题设置无法读取", $"已使用系统主题。请在“工作台设置”重新选择主题并保存；若仍失败，请检查用户目录可写性。{failure}", InfoBarSeverity.Warning);
+            Notice("主题设置无法读取", $"已使用系统主题，原文件尚未改写。请在“工作台设置”保持“跟随系统”并点击“恢复主题设置”，或改选主题自动保存；保存前会保留原文件备份。若仍失败，请检查用户目录可写性。{failure}", InfoBarSeverity.Warning);
     }
 
     private void AddDiagnostics(StackPanel page, bool includePackages = true)

@@ -20,6 +20,15 @@ function New-Inputs([string]$Name) {
     foreach ($plugin in @('dingtalk', 'upcam')) { Copy-Item -LiteralPath (Join-Path $repo "tests/integration/$plugin") -Destination $path -Recurse }
     return $path
 }
+function At-CallerLocation([scriptblock]$Action) {
+    $processDirectory = [Environment]::CurrentDirectory
+    Push-Location -LiteralPath $callerLocation
+    try {
+        Assert-True ($PWD.Provider.Name -eq 'FileSystem' -and $PWD.Path -cne $processDirectory) 'Regression needs different PowerShell and process filesystem locations.'
+        & $Action
+        Assert-True ([Environment]::CurrentDirectory -ceq $processDirectory) 'Delivery changed the caller process current directory.'
+    } finally { Pop-Location }
+}
 function Assert-Refused([string]$InputPath, [string]$Destination, [string]$HostPath = $AppDirectory, [switch]$Strict, [string]$Reason) {
     $before = if (Test-Path -LiteralPath $Destination -PathType Container) {
         @(Get-ChildItem -LiteralPath $Destination -File -Recurse -Force | ForEach-Object { "$($_.FullName):$((Get-FileHash -LiteralPath $_.FullName).Hash)" })
@@ -147,6 +156,88 @@ try {
             Assert-True ((Get-FileHash -LiteralPath (Join-Path $temporary "matrix-input/$($input.packageFile)")).Hash -eq $input.sha256) 'Matrix input bytes differ from the exported payload.'
         }
         Assert-Refused $source $validOutput
+    }
+    $callerLocation = Join-Path $temporary 'caller-location'
+    $callerHost = Join-Path $callerLocation 'host'
+    New-Item $callerHost -ItemType Directory -Force | Out-Null
+    foreach ($name in @('Workbench.App.exe', 'Workbench.App.dll')) { Copy-Item -LiteralPath (Join-Path $AppDirectory $name) -Destination $callerHost }
+    $callerInputs = New-Inputs 'caller-location/inputs'
+    $callerDelivery = Join-Path $callerLocation 'verified'
+    Copy-Item -LiteralPath $validOutput -Destination $callerDelivery -Recurse
+    Check 'exporter resolves relative app from caller PowerShell filesystem location' {
+        At-CallerLocation {
+            $output = Join-Path $temporary 'relative-app-output'
+            & $export -AppDirectory './host' -InputRoot $source -DestinationRoot $output
+            Assert-True (Test-BusinessPluginDelivery -Directory $output -AppDirectory $callerHost) 'Relative app export did not pair with the actual caller host.'
+        }
+    }
+    Check 'exporter resolves relative input from caller PowerShell filesystem location' {
+        At-CallerLocation {
+            $output = Join-Path $temporary 'relative-input-output'
+            & $export -AppDirectory $AppDirectory -InputRoot './inputs' -DestinationRoot $output
+            Assert-True (Test-BusinessPluginDelivery -Directory $output -AppDirectory $AppDirectory) 'Relative input export did not preserve verified production bytes.'
+        }
+    }
+    Check 'exporter publishes relative output only under caller PowerShell filesystem location' {
+        # Reserve a unique name before testing the old process-CWD behavior, and clean only that test-owned output.
+        $relative = "business-delivery-location-$([Guid]::NewGuid().ToString('N'))"
+        $processOutput = [IO.Path]::GetFullPath($relative)
+        Assert-True (-not (Test-Path -LiteralPath $processOutput)) 'Process-location control must start absent.'
+        try {
+            At-CallerLocation {
+                & $export -AppDirectory $AppDirectory -InputRoot $source -DestinationRoot "./$relative"
+                $output = Join-Path $callerLocation $relative
+                Assert-True (Test-Path -LiteralPath (Join-Path $output 'manifest.json')) 'Relative output was not published under the caller PowerShell location.'
+                Assert-True (-not (Test-Path -LiteralPath $processOutput)) 'Relative output was published under process CWD.'
+                Assert-True (Test-BusinessPluginDelivery -Directory $output -AppDirectory $AppDirectory) 'Caller-location output failed public verification.'
+            }
+        } finally { if (Test-Path -LiteralPath $processOutput) { Remove-Item -LiteralPath $processOutput -Recurse -Force } }
+    }
+    Check 'verifier resolves relative delivery from caller PowerShell filesystem location' {
+        At-CallerLocation {
+            Assert-True (Test-BusinessPluginDelivery -Directory './verified' -AppDirectory $AppDirectory) 'Verifier did not read the caller delivery.'
+        }
+    }
+    Check 'verifier resolves relative app from caller PowerShell filesystem location' {
+        At-CallerLocation {
+            Assert-True (Test-BusinessPluginDelivery -Directory $callerDelivery -AppDirectory './host') 'Verifier did not pair the caller host.'
+        }
+    }
+    foreach ($parameter in @('AppDirectory', 'InputRoot', 'DestinationRoot')) {
+        Check "exporter refuses non-filesystem provider for $parameter" {
+            $parameters = @{ AppDirectory = $AppDirectory; InputRoot = $source; DestinationRoot = (Join-Path $temporary "provider-$parameter") }
+            $parameters[$parameter] = 'Env:WORKBENCH_DELIVERY_TEST_ONLY'
+            $refused = $false
+            try { & $export @parameters } catch {
+                $refused = $true
+                Assert-True ($_.Exception.Message.Contains('delivery_path:')) 'Exporter did not refuse the provider at its filesystem boundary.'
+            }
+            Assert-True $refused 'Exporter accepted a non-filesystem provider path.'
+            Assert-True (-not (Test-Path -LiteralPath (Join-Path $temporary "provider-$parameter"))) 'Provider refusal created output.'
+        }
+    }
+    foreach ($parameter in @('Directory', 'AppDirectory')) {
+        Check "verifier refuses non-filesystem provider for $parameter" {
+            $parameters = @{ Directory = $callerDelivery; AppDirectory = $AppDirectory }
+            $parameters[$parameter] = 'Env:WORKBENCH_DELIVERY_TEST_ONLY'
+            $refused = $false
+            try { Test-BusinessPluginDelivery @parameters | Out-Null } catch {
+                $refused = $true
+                Assert-True ($_.Exception.Message.Contains('delivery_path:')) 'Verifier did not refuse the provider at its filesystem boundary.'
+            }
+            Assert-True $refused 'Verifier accepted a non-filesystem provider path.'
+        }
+    }
+    Check 'relative paths from non-filesystem PowerShell location are refused' {
+        Push-Location Env:
+        try {
+            $refused = $false
+            try { & $export -AppDirectory './host' -InputRoot $source -DestinationRoot (Join-Path $temporary 'provider-location') } catch {
+                $refused = $true
+                Assert-True ($_.Exception.Message.Contains('delivery_path:')) 'Relative provider path bypassed the filesystem boundary.'
+            }
+            Assert-True $refused 'Exporter accepted a relative non-filesystem provider path.'
+        } finally { Pop-Location }
     }
     Check 'missing production ZIP is refused' {
         $copy = New-Inputs 'missing'; Remove-Item -LiteralPath (Join-Path $copy 'dingtalk/package.zip')
