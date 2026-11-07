@@ -15,7 +15,7 @@ internal sealed partial class MainWindow
         page.Children.Add(Ui.Card(Ui.Text($"已发现 {Manager.Plugins.Count} 个包 · 已启用 {enabled} 个插件 · {Manager.Contributions.Commands.Count} 个命令", 20)));
         page.Children.Add(Ui.Text("开始使用", 20));
         page.Children.Add(Ui.Text("打开“插件”，审查本地包并明确确认信任后启用。启用后，原生页面和插件设置会出现在左侧导航。"));
-        page.Children.Add(Ui.Text("此版本仅含工作摘要和测试用例两个本地演示。Teambition、钉钉、AI 与电脑自动化尚未接入。示例不读取真实业务数据。"));
+        page.Children.Add(Ui.Text("默认随附工作摘要和测试用例两个本地示例，不读取真实业务数据。钉钉洞察与 UPCAM 可从配套生产插件包按需导入；首次试用请使用演示或本地 sample/preview，真实业务连接和外部操作需要各插件自己的明确确认。安装步骤见配套下载中的 README.zh-CN.md。"));
         page.Children.Add(Ui.Text("后台任务与凭据可在左侧管理。更新、回滚和移除会暂存到下次启动；当前进程不会卸载或替换已加载程序集。"));
         if (_shutdownPending) page.Children.Add(Ui.Text("关闭仍在等待已知插件工作结束。管理页面仅供查询，请使用窗口上方“重试关闭”。"));
         AddDiagnostics(page);
@@ -81,8 +81,8 @@ internal sealed partial class MainWindow
             RefreshNavigation();
             Navigate(new("plugins"));
         }
-        Notice(result.Succeeded ? "已安装，尚未启用" : "安装失败", result.Message,
-            result.Succeeded ? InfoBarSeverity.Success : InfoBarSeverity.Error);
+        var outcome = PackagePresentation.ForResult(PackageAction.Import, result, Packages.PendingOperations.Count != 0);
+        Notice(outcome.Title, outcome.Body, outcome.IsSuccess ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
     }
 
     private StackPanel CommandsPage()
@@ -135,16 +135,15 @@ internal sealed partial class MainWindow
     {
         var path = Path.Combine(_options.UserRoot, "host-settings.json");
         if (!File.Exists(path)) return;
-        try
+        var theme = HostFailure.ReadTheme(() =>
         {
             var preference = JsonSerializer.Deserialize<HostPreferences>(File.ReadAllText(path));
             if (preference is null || !Enum.IsDefined(preference.Theme)) throw new JsonException("无效的主题值。");
-            _root.RequestedTheme = preference.Theme;
-        }
-        catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)
-        {
-            Notice("主题设置无法读取", $"使用系统主题。{error.Message}", InfoBarSeverity.Warning);
-        }
+            return preference.Theme;
+        }, ElementTheme.Default);
+        _root.RequestedTheme = theme.Theme;
+        if (theme.Error is { } failure)
+            Notice("主题设置无法读取", $"已使用系统主题。请在“工作台设置”重新选择主题并保存；若仍失败，请检查用户目录可写性。{failure}", InfoBarSeverity.Warning);
     }
 
     private void AddDiagnostics(StackPanel page, bool includePackages = true)

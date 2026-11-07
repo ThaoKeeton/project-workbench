@@ -30,11 +30,18 @@ internal static class NativeRuntimeProbe
     public static async Task RunAsync(MainWindow window, RunOptions options)
     {
         List<string> checks = [];
+        List<string> additionalChecks = [];
         var evidence = new NativeProbeEvidence(options.RuntimeProbe, checks);
+        void WriteProgress() => options.WriteReport(new { succeeded = false, stage = options.RuntimeProbe, userRoot = options.UserRoot, checks, additionalChecks, startupStages = options.StartupStages });
         void Record(string check)
         {
             checks.Add(check);
-            options.WriteReport(new { succeeded = false, stage = options.RuntimeProbe, userRoot = options.UserRoot, checks, startupStages = options.StartupStages });
+            WriteProgress();
+        }
+        void RecordAdditional(string check)
+        {
+            additionalChecks.Add(check);
+            WriteProgress();
         }
         await evidence.RunAsync(options.ReportPath, async () =>
         {
@@ -43,7 +50,7 @@ internal static class NativeRuntimeProbe
             if (options.RuntimeProbe == "management")
             {
                 evidence.At(NativeProbeCheckpoint.Management);
-                await NativeManagementProbe.RunAsync(window, options, Record);
+                await NativeManagementProbe.RunAsync(window, options, Record, RecordAdditional);
             }
             else await NativeRestartProbe.RunAsync(window, options, Record, evidence);
             evidence.At(NativeProbeCheckpoint.FinalStop);
@@ -51,7 +58,7 @@ internal static class NativeRuntimeProbe
             evidence.At(NativeProbeCheckpoint.FinalStopCompleted);
             evidence.At(NativeProbeCheckpoint.FinalReport);
             options.WriteReport(new { succeeded = true, stage = "completed", probe = options.RuntimeProbe, userRoot = options.UserRoot,
-                processId = Environment.ProcessId, checks, startupStages = options.StartupStages, completedUtc = DateTimeOffset.UtcNow });
+                processId = Environment.ProcessId, checks, additionalChecks, startupStages = options.StartupStages, completedUtc = DateTimeOffset.UtcNow });
             evidence.At(NativeProbeCheckpoint.FinalClose);
             await window.FinishSmokeAsync();
             evidence.At(NativeProbeCheckpoint.Completed);

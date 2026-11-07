@@ -59,12 +59,12 @@ UPCAM 原厂内层 ZIP 有固定的单层包装；配套 `upcam/package.zip` 仅
 
 ## 更新、回滚和证据边界
 
-相同 ID 已安装时使用“更新 ZIP/更新文件夹”，不能再次导入覆盖。更新须同 ID、兼容宿主且版本严格更高；本配套固定版本不构成更高版本迁移验证。更新、代码回滚、移除都先暂存，安全退出后由下次启动执行，再重新审查并信任。Prepared 可取消；维护已开始时保留 journal，在下次启动恢复，查看当前版本、代码历史和诊断，不能从失败提示推断回退成功。
+相同 ID 已安装时使用“更新 ZIP/更新文件夹”，不能再次导入覆盖。更新须同 ID、兼容宿主且版本严格更高；本配套固定版本不构成更高版本迁移验证。更新、代码回滚、移除都先暂存，安全退出后由下次启动执行，再重新审查并信任。界面仅在 Prepared 提供取消，且必须尚未移动代码；若崩溃后 Prepared 元数据与实际目录不同，Core 会拒绝取消。拒绝时及维护已开始后保留文件/journal，在下次启动恢复，查看当前版本、代码历史和诊断，不能从失败提示推断回退成功。
 
 代码回滚只切换历史代码，不恢复、删除或降级当前业务数据、设置和凭据。宿主管理状态快照只覆盖 UserRoot 下的数据/设置/密文及后台文档；明确连接的独立版规范状态、外部 DWS profile 等不自动备份/恢复。移除保留当前数据和代码历史。不要用回滚来尝试跨业务数据 schema 降级。
 
-要切回独立版，先在插件页面停止工作并正常退出宿主，确认宿主及其自有 worker 已退出，再启动独立版。保留测试账户的数据根；本指南的空白模拟试用不需要复制旧账本。若曾连接外部规范状态，先由业务发布方核对共享锁和数据格式兼容性，不能假定旧版可降级读取。本轮尚未执行两个旧 GUI 与宿主的联合实机测试，也不保证任意旧版本都遵守同一互斥协议。
+要切回独立版，先停止工作，再在“插件”停用该插件或安全退出整个宿主，确认其业务连接与自有 worker 已实际退役，再启动维护独立版。仅任务 Stop 可保留钉钉 canonical connection/租约或 UPCAM 空闲 worker/单例；钉钉独立版关闭到托盘也不等于真正退出。保留测试账户的数据根；本指南的空白模拟试用不需要复制旧账本。若曾连接外部规范状态，先由业务发布方核对共享锁和数据格式兼容性，不能假定旧版可降级读取。固定版本、session/profile 范围及源码证据见[独立版兼容性](https://github.com/ThaoKeeton/project-workbench/blob/feat/native-plugin-workbench/docs/standalone-compatibility.md)；本轮尚未执行两个旧 GUI 与宿主的联合实机测试，也不保证任意旧版本都遵守同一互斥协议。
 
-自动矩阵包含真实宿主生命周期与独立生产包的模拟业务检查；UPCAM acceptance 是另一个 ID、另一个测试根中的合成验收，未分发给用户，合成 sent 不代表真实送达。该下载是目录/插件交付，没有安装器或签名保证，也没有建立真实接口/消息、独立旧 GUI 联合运行或多日运行的证据。Windows 11 的主题、DPI、键盘、选择器、屏幕阅读器等人工清单仍待实机观察，见[验证记录](https://github.com/ThaoKeeton/project-workbench/blob/feat/native-plugin-workbench/docs/windows-verification.md)。
+自动矩阵包含真实宿主生命周期与独立生产包的模拟业务检查；UPCAM acceptance 是另一个 ID、另一个测试根中的合成验收，未分发给用户，合成 sent 不代表真实送达。该下载是目录/插件交付，没有安装器或签名保证，也没有建立真实接口/消息、独立旧 GUI 联合运行或多日运行的证据。Windows 11 的主题、DPI、键盘、选择器、屏幕阅读器等人工清单仍待实机观察，见[最小人工验收与结果模板](https://github.com/ThaoKeeton/project-workbench/blob/feat/native-plugin-workbench/docs/windows11-manual.md)和[完整验证记录](https://github.com/ThaoKeeton/project-workbench/blob/feat/native-plugin-workbench/docs/windows-verification.md)。
 
 开发者可在发布完整宿主后运行 `pwsh ./scripts/export-business-plugins.ps1`。它拒绝非空输出、路径相交和链接，只清理自己创建的暂存；重新导出请显式选择新的空目录。Windows CI 使用 `-RequireCurrentSource` 强制实际 DLL 声明来源与当前提交相同、打包源码干净，并将同一导出目录交给原有生产业务矩阵，成功后上传配套产物。

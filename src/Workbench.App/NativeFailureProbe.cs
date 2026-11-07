@@ -1,3 +1,5 @@
+using System.Text.Json;
+using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using static Workbench.App.NativeRuntimeProbe;
 using static Workbench.App.NativeManagementProbe;
@@ -39,6 +41,45 @@ internal static class NativeFailureProbe
             finally { await extra.FinishSmokeAsync(); }
             record($"Actual {mode} factory used safe page/notice codes without exception virtual access; native navigation and Disable remained usable");
         }
+    }
+
+    internal static async Task VerifyCorruptedThemeAsync(RunOptions options)
+    {
+        var root = Path.Combine(options.UserRoot, "corrupted-theme");
+        var path = Path.Combine(root, "host-settings.json");
+        const string corrupted = "{\"Theme\":\"synthetic-private-native-provider-response\"}";
+        using (HostRuntime.AcquireLease(root)) await File.WriteAllTextAsync(path, corrupted);
+        var extra = new MainWindow(new(false, root, null));
+        extra.Activate();
+        try
+        {
+            await extra.InitializeAsync();
+            Require(extra.SmokeStartupFailure is null && extra.SmokeManagementNavigationAvailable,
+                "Corrupted host theme blocked native startup or management navigation.");
+            Require(extra.SmokeRequestedTheme == ElementTheme.Default
+                && extra.SmokeNoticeText.Contains("ThemeSettingsFailed (InvalidData).", StringComparison.Ordinal),
+                "Corrupted host theme did not fall back to the system theme with its stable safe code.");
+            AssertSafe([extra.SmokeNoticeText]);
+            foreach (var route in new[] { "home", "packages", "settings" })
+            {
+                var page = await extra.SmokeNavigateAsync(route);
+                AssertSafe(Descendants<TextBlock>(page).Select(text => text.Text).Append(extra.SmokeNoticeText));
+            }
+            Require(await File.ReadAllTextAsync(path) == corrupted, "Theme fallback silently replaced the preserved settings file.");
+            var settings = extra.SmokeCurrentPage ?? throw new InvalidOperationException("Theme fallback settings page was not attached.");
+            Find<ComboBox>(settings, "应用主题").SelectedIndex = (int)ElementTheme.Dark;
+            await WaitAsync(async () =>
+            {
+                if (extra.SmokeActionBusy || extra.SmokeRequestedTheme != ElementTheme.Dark) return false;
+                using var saved = JsonDocument.Parse(await File.ReadAllTextAsync(path));
+                return saved.RootElement.GetProperty("Theme").GetInt32() == (int)ElementTheme.Dark;
+            });
+            await extra.SmokeNavigateAsync("home");
+            Require(extra.SmokeManagementNavigationAvailable, "Theme fallback did not allow explicit native preference repair.");
+            AssertSafe([extra.SmokeNoticeText]);
+        }
+        finally { await extra.FinishSmokeAsync(); }
+        using var nextOwner = HostRuntime.AcquireLease(root);
     }
 
     private static void AssertSafe(IEnumerable<string> text) => Require(text.All(value => !value.Contains("synthetic-private-native-provider-response", StringComparison.Ordinal)),

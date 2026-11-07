@@ -20,18 +20,21 @@ internal sealed partial class MainWindow
         {
             page.Children.Add(Ui.Text("本次启动的维护结果", 20));
             foreach (var result in _runtime.MaintenanceResults)
-                page.Children.Add(Ui.Text($"{(result.Succeeded ? "完成" : "需要处理（可能已安全恢复旧代码）")}：{result.Message}"));
+            {
+                var outcome = PackagePresentation.ForResult(PackageAction.Startup, result, Packages.PendingOperations.Count != 0);
+                page.Children.Add(Ui.Text($"{outcome.Title}：{outcome.Body}"));
+            }
         }
         page.Children.Add(Ui.Text("待重启操作", 20));
         if (Packages.PendingOperations.Count == 0) page.Children.Add(Ui.Text("没有待执行的操作。"));
         foreach (var pending in Packages.PendingOperations)
         {
             var body = new StackPanel { Spacing = 10 };
-            body.Children.Add(Ui.Text($"{pending.PluginId} · {pending.Kind}", 20));
-            body.Children.Add(Ui.Text($"{pending.OldVersion ?? "—"} → {pending.NewVersion ?? "移除"} · 阶段：{pending.Phase}\n需要完整退出并重新启动；停用不会卸载程序集。"));
-            if (pending.Phase == PackageOperationPhase.Prepared)
-                AddAction(body, "取消暂存", $"取消包维护 {pending.PluginId}", async () => PackageNotice(await Packages.CancelPendingAsync(pending.PluginId)));
-            else body.Children.Add(Ui.Text("维护已经开始，不能取消。保留 journal，在下次启动恢复；请查看诊断。"));
+            var phase = PackagePresentation.ForPending(pending.Phase);
+            body.Children.Add(Ui.Text($"{pending.PluginId} · {PackagePresentation.KindLabel(pending.Kind)}", 20));
+            body.Children.Add(Ui.Text($"{pending.OldVersion ?? "—"} → {pending.NewVersion ?? "移除"} · 阶段：{phase.Label}\n{phase.Body}"));
+            if (phase.CanCancel)
+                AddAction(body, "取消暂存", $"取消包维护 {pending.PluginId}", async () => PackageNotice(PackageAction.Cancel, await Packages.CancelPendingAsync(pending.PluginId)));
             page.Children.Add(Ui.Card(body));
         }
         page.Children.Add(Ui.Text("当前包", 20));
@@ -54,7 +57,7 @@ internal sealed partial class MainWindow
             AddAction(body, "暂存代码回滚", $"回滚代码 {history.PluginId}/{history.HistoryId}", async () =>
             {
                 if (await ConfirmMaintenanceAsync("暂存代码回滚？", $"{history.PluginId} → {history.Version}\n这不会恢复或降级业务数据、凭据或外部存储。下次启动应用后需要重新确认信任。"))
-                    PackageNotice(await Packages.StageRollbackAsync(history.PluginId, history.HistoryId));
+                    PackageNotice(PackageAction.Rollback, await Packages.StageRollbackAsync(history.PluginId, history.HistoryId));
             }, !Packages.PendingOperations.Any(operation => operation.PluginId == history.PluginId));
             page.Children.Add(Ui.Card(body));
         }
@@ -76,10 +79,10 @@ internal sealed partial class MainWindow
         AddAction(actions, "暂存移除", $"暂存移除 {id}", async () =>
         {
             if (await ConfirmMaintenanceAsync("下次启动移除此插件？", $"{id}\n当前运行实例不受暂存影响。安全退出后执行，保留当前数据、设置、凭据和代码历史。"))
-                PackageNotice(await Packages.StageRemoveAsync(id));
+                PackageNotice(PackageAction.Remove, await Packages.StageRemoveAsync(id));
         }, canStage);
         body.Children.Add(actions);
-        if (!canStage) body.Children.Add(Ui.Text("此包已有待执行操作，请到“包维护”查看；Prepared 阶段可取消。"));
+        if (!canStage) body.Children.Add(Ui.Text("此包已有待执行操作，请到“包维护”查看；只有 Prepared 且尚未移动代码的暂存可取消。取消被拒绝时保留维护记录并安全重启。"));
     }
 
     private void AddAction(StackPanel parent, string label, string name, Func<Task> action, bool enabled = true)
@@ -108,13 +111,13 @@ internal sealed partial class MainWindow
             await Manager.DiscoverAsync();
             RefreshNavigation();
         }
-        PackageNotice(result, restartRequired: false);
+        PackageNotice(PackageAction.Import, result);
     }
 
     private async Task StageUpdateAsync(string id, bool zip)
     {
         var path = await PickPackageAsync(zip);
-        if (path is not null) PackageNotice(await Packages.StageUpdateAsync(id, path));
+        if (path is not null) PackageNotice(PackageAction.Update, await Packages.StageUpdateAsync(id, path));
     }
 
     private async Task<bool> ConfirmMaintenanceAsync(string title, string content) => await new ContentDialog
@@ -123,10 +126,10 @@ internal sealed partial class MainWindow
         PrimaryButtonText = "确认暂存", CloseButtonText = "取消", DefaultButton = ContentDialogButton.Close
     }.ShowAsync() == ContentDialogResult.Primary;
 
-    private void PackageNotice(PluginOperationResult result, bool restartRequired = true)
+    private void PackageNotice(PackageAction action, PluginOperationResult result)
     {
         Navigate(new("packages"));
-        Notice(result.Succeeded ? restartRequired && Packages.PendingOperations.Count > 0 ? "已暂存，下次启动执行" : "维护状态已更新" : "包维护需要处理",
-            result.Message, result.Succeeded ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
+        var outcome = PackagePresentation.ForResult(action, result, Packages.PendingOperations.Count != 0);
+        Notice(outcome.Title, outcome.Body, outcome.IsSuccess ? InfoBarSeverity.Success : InfoBarSeverity.Warning);
     }
 }

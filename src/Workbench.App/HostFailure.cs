@@ -5,6 +5,15 @@ namespace Workbench.App;
 /// <summary>Host-caught failures never evaluate exception text or plugin-defined virtual members.</summary>
 internal static class HostFailure
 {
+    internal static (T Theme, string? Error) ReadTheme<T>(Func<T> read, T systemTheme)
+    {
+        try { return (read(), null); }
+        catch (Exception error) when (error is JsonException or IOException or UnauthorizedAccessException)
+        {
+            return (systemTheme, Describe("ThemeSettingsFailed", error));
+        }
+    }
+
     internal static string Describe(string code, Exception error) => $"{code} ({error switch
     {
         OperationCanceledException => "Canceled",

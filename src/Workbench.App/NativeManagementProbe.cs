@@ -9,7 +9,7 @@ namespace Workbench.App;
 
 internal static class NativeManagementProbe
 {
-    public static async Task RunAsync(MainWindow window, RunOptions options, Action<string> record)
+    public static async Task RunAsync(MainWindow window, RunOptions options, Action<string> record, Action<string> recordAdditional)
     {
         var manager = window.SmokeManager;
         Require(window.SmokeManagementNavigationAvailable, "Initialized native navigation was not enabled and attached.");
@@ -68,6 +68,8 @@ internal static class NativeManagementProbe
         record("Local managed maintenance failure remained visible without blocking navigation or an unrelated bundled sample");
         await NativeFailureProbe.RunAsync(options, record);
         await NativeRetainedRuntimeProbe.RunAsync(options, record);
+        await NativeFailureProbe.VerifyCorruptedThemeAsync(options);
+        recordAdditional("Actual isolated corrupted host theme fell back with ThemeSettingsFailed; native Home/Packages/Settings and explicit theme repair remained usable, then safe close released ownership");
     }
 
     private static async Task VerifyCredentialsAsync(MainWindow window)
@@ -215,4 +217,5 @@ internal sealed partial class MainWindow
     internal bool SmokeCloseInProgress => _closing;
     internal Task<bool> SmokeCloseCompletion => _closeCompleted.Task;
     internal string SmokeNoticeText => _notice.Title + " " + _notice.Message;
+    internal ElementTheme SmokeRequestedTheme => _root.RequestedTheme;
 }

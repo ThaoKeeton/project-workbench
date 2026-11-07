@@ -9,6 +9,28 @@ public sealed class HostFailureTests
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
+    public void Shipping_theme_fallback_never_reads_storage_exception_text(bool hostile)
+    {
+        var theme = HostFailure.ReadTheme<int>(() => throw (hostile ? new HostileStorageException() : new IOException(PrivateResponse)), 0);
+        Assert.Equal(0, theme.Theme);
+        Assert.Equal("ThemeSettingsFailed (Storage).", theme.Error);
+        Assert.DoesNotContain(PrivateResponse, theme.Error);
+        var later = HostFailure.ReadTheme(() => 2, 0);
+        Assert.Equal(2, later.Theme);
+        Assert.Null(later.Error);
+    }
+
+    [Fact]
+    public void Corrupted_theme_json_uses_system_theme_with_a_stable_safe_code()
+    {
+        var theme = HostFailure.ReadTheme(() => JsonSerializer.Deserialize<int>("{\"" + PrivateResponse + "\":"), 0);
+        Assert.Equal(0, theme.Theme);
+        Assert.Equal("ThemeSettingsFailed (InvalidData).", theme.Error);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
     public async Task Shipping_view_and_action_boundaries_capture_failures_and_remain_usable(bool hostile)
     {
         Exception Failure() => hostile ? new HostileException() : new InvalidOperationException(PrivateResponse);
@@ -45,5 +67,12 @@ public sealed class HostFailureTests
     {
         public override string Message => throw new InvalidOperationException("Host evaluated plugin Message.");
         public override string ToString() => throw new InvalidOperationException("Host evaluated plugin ToString.");
+    }
+
+    private sealed class HostileStorageException : IOException
+    {
+        public override string Message => throw new InvalidOperationException("Host evaluated storage Message.");
+        public override string ToString() => throw new InvalidOperationException("Host evaluated storage ToString.");
+        public override Exception GetBaseException() => throw new InvalidOperationException("Host evaluated storage GetBaseException.");
     }
 }
