@@ -25,6 +25,16 @@ internal sealed class NativeActionOwner
     internal Task UserAsync(Func<Task> action) => UserAsync(async () => { await action(); return true; });
     internal Task<T> UserAsync<T>(Func<Task<T>> action) => Admit(action, user: true);
     internal Task InternalAsync(Func<Task> action) => Admit(async () => { await action(); return true; }, user: false);
+    internal Task HandleUserAsync(Func<Task> action, Action enter, Action settle, Action<Exception> failed) => UserAsync(async () =>
+    {
+        try { enter(); await action(); }
+        catch (Exception error) { failed(error); }
+        finally
+        {
+            try { settle(); }
+            catch (Exception error) { failed(error); }
+        }
+    });
     private Task<T> Admit<T>(Func<Task<T>> action, bool user)
     {
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);

@@ -18,6 +18,7 @@
     <Compile Include="../../plugins/Workbench.Testing/NativeActionOwner.cs" Link="Testing/NativeActionOwner.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeRunAdmission.cs" Link="Testing/NativeRunAdmission.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeTestingFiles.cs" Link="Testing/NativeTestingFiles.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeEventSelection.cs" Link="Testing/NativeEventSelection.cs" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">

@@ -34,6 +34,18 @@ function Get-TestingHostIdentity {
     if ($version.ProductVersion -cne "0.4.0+$SourceCommit" -or $version.FileVersion -cne '0.4.0.0' -or [Reflection.AssemblyName]::GetAssemblyName($dll).Version.ToString() -cne '1.0.0.0') { throw 'TestingHostSourceMismatch' }
     return @{ sourceCommit = $SourceCommit; productVersion = $version.ProductVersion; fileVersion = $version.FileVersion; assemblyVersion = '1.0.0.0'; executableSha256 = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant(); dllSha256 = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() }
 }
+function Assert-TestingSourceIdentity {
+    param([string]$RecordedCommit, [bool]$RecordedDirty, [string]$CurrentCommit, [bool]$CurrentDirty)
+    if ($RecordedCommit -cne $CurrentCommit -or $RecordedDirty -or $CurrentDirty) { throw 'TestingCurrentSourceMismatch' }
+}
+function Assert-TestingSourceRecords {
+    param([object[]]$Current, [object[]]$Recorded)
+    if ($Current.Count -ne $Recorded.Count) { throw 'TestingSourceFileListInvalid' }
+    foreach ($file in $Current) {
+        $record = @($Recorded | Where-Object path -CEQ $file.path)
+        if ($record.Count -ne 1 -or $record[0].length -ne $file.length -or $record[0].sha256 -cne $file.sha256) { throw 'TestingSourceHashMismatch' }
+    }
+}
 function New-TestingPluginDelivery {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$BuildDirectory, [Parameter(Mandatory)][string]$OutputDirectory, [switch]$ReferenceOnly)
@@ -124,13 +136,8 @@ function Test-TestingPluginDelivery {
     }
     finally { $zip.Dispose() }
     if ($RequireCurrentSource) {
-        if ($metadata.sourceCommit -cne (& git -C $repo rev-parse HEAD).Trim() -or $metadata.sourceTreeDirty -or @(& git -C $repo status --porcelain).Count -ne 0) { throw 'TestingCurrentSourceMismatch' }
-        $current = @(Get-TestingSourceFiles $repo)
-        if ($current.Count -ne @($metadata.sourceFiles).Count) { throw 'TestingSourceFileListInvalid' }
-        foreach ($file in $current) {
-            $record = @($metadata.sourceFiles | Where-Object path -CEQ $file.path)
-            if ($record.Count -ne 1 -or $record[0].length -ne $file.length -or $record[0].sha256 -cne $file.sha256) { throw 'TestingSourceHashMismatch' }
-        }
+        Assert-TestingSourceIdentity -RecordedCommit $metadata.sourceCommit -RecordedDirty $metadata.sourceTreeDirty -CurrentCommit (& git -C $repo rev-parse HEAD).Trim() -CurrentDirty (@(& git -C $repo status --porcelain).Count -ne 0)
+        Assert-TestingSourceRecords -Current @(Get-TestingSourceFiles $repo) -Recorded @($metadata.sourceFiles)
     }
     Write-Host 'Testing delivery verified: independent six-file ZIP, exact bytes and manifest.'
 }

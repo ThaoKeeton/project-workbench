@@ -27,13 +27,32 @@ internal static partial class TestingNativeProbe
         await WaitAsync(() => Task.FromResult(Find<ComboBox>(page, "测试执行列表").Items.OfType<ComboBoxItem>().Any(i => (string)i.Tag == runId)));
         SelectRun(page, runId);
         await WaitAsync(() => Task.FromResult(Find<TextBlock>(page, "测试执行详情").Text.Contains(runId, StringComparison.Ordinal)
-            && Find<ComboBox>(page, "测试执行事件").Items.OfType<ComboBoxItem>().Any(i => (long)i.Tag == sequence)));
+            && Find<ComboBox>(page, "测试执行事件").IsEnabled
+            && Find<ComboBox>(page, "测试执行事件").Items.OfType<ComboBoxItem>().Any(i => i.Tag is KeyValuePair<string, long> key && key.Key == runId && key.Value == sequence)));
         var events = Find<ComboBox>(page, "测试执行事件");
-        events.SelectedItem = events.Items.OfType<ComboBoxItem>().Single(i => (long)i.Tag == sequence);
+        Require(events.IsEnabled, "Native history event selection did not reopen after the actual run selection settled.");
+        events.SelectedItem = events.Items.OfType<ComboBoxItem>().Single(i => i.Tag is KeyValuePair<string, long> key && key.Key == runId && key.Value == sequence);
         await WaitAsync(() => Task.FromResult(Find<TextBlock>(page, "测试实际观察文本").Text == text
             && Find<Image>(page, "SIMULATED 测试帧").Source is BitmapImage { PixelWidth: 320, PixelHeight: 180 }
             && Find<TextBlock>(page, "测试帧状态").Text.Contains("已解码", StringComparison.Ordinal)
             && Find<TextBlock>(page, "测试帧状态").Text.Contains(frameHash, StringComparison.Ordinal)));
+    }
+    private static async Task VerifyHistorySelectionAsync(MainWindow window, FrameworkElement page, TestRunSnapshot a, TestRunSnapshot b)
+    {
+        var aFirst = a.Events.First(e => e.Kind == TestRunEventKind.StepFinished);
+        var aLast = a.Events.Last(e => e.Kind == TestRunEventKind.StepFinished);
+        var bSame = b.Events.Single(e => e.Sequence == aFirst.Sequence);
+        Require(bSame.Kind == TestRunEventKind.StepFinished && bSame.NativePlainTextState != aFirst.NativePlainTextState
+            && b.Events.All(e => e.Sequence != aLast.Sequence), "Native history assertion requires distinct A/B observations and an A-only event sequence.");
+        foreach (var selected in new[] { (Run: a, Event: aLast), (Run: b, Event: bSame), (Run: a, Event: aFirst), (Run: a, Event: aLast) })
+        {
+            var evidence = await Store(window).ReadRunEvidenceAsync(selected.Run.Plan.Id, selected.Event.EvidenceIds.Single());
+            await ShowFrameAsync(page, selected.Run.Plan.Id, selected.Event.Sequence, selected.Event.NativePlainTextState!, evidence.Receipt.Sha256);
+            var key = (KeyValuePair<string, long>)((ComboBoxItem)Find<ComboBox>(page, "测试执行事件").SelectedItem).Tag;
+            Require(key.Key == selected.Run.Plan.Id && key.Value == selected.Event.Sequence
+                && Find<TextBlock>(page, "测试执行详情").Text.Contains(selected.Run.Plan.Id, StringComparison.Ordinal),
+                "Native displayed run/event identity did not match exact observed text and decoded receipt.");
+        }
     }
     private static void VerifyBmp(TestEvidence evidence)
     {

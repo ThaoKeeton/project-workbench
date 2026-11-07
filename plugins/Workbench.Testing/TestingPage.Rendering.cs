@@ -12,7 +12,15 @@ internal sealed partial class TestingPage
     private void Changed(TestingControllerSnapshot snapshot) => _ = NotifyAsync();
     internal Task NotifyAsync(bool reopening = false) => _plugin.Owner.InternalAsync(async () =>
     {
-        try { await DispatchAsync(() => { if (_active) Render(reopening); return Task.CompletedTask; }); }
+        try
+        {
+            await DispatchAsync(() =>
+            {
+                try { if (_active) Render(reopening); }
+                catch (Exception error) { ShowError(error); }
+                return Task.CompletedTask;
+            });
+        }
         catch (Exception) { /* A retired/unavailable dispatcher cannot mutate a later page generation. */ }
     });
     internal Task RetireAsync() => _plugin.Owner.InternalAsync(() => DispatchAsync(() => { Retire(); return Task.CompletedTask; }));
@@ -36,6 +44,7 @@ internal sealed partial class TestingPage
     {
         if (!_active) return;
         var snapshot = Controller.Snapshot; // Always latest; a queued old Changed value must never restore stale text.
+        var current = snapshot.SelectedRun;
         _rendering = true;
         try
         {
@@ -81,6 +90,7 @@ internal sealed partial class TestingPage
             foreach (var editor in new[] { _setName, _title, _prerequisites, _instruction, _expected }) editor.IsEnabled = editable && draft is not null;
             foreach (var button in _authorActions) button.IsEnabled = editable;
             _sets.IsEnabled = _cases.IsEnabled = _steps.IsEnabled = _sources.IsEnabled = editable;
+            _runs.IsEnabled = _events.IsEnabled = editable;
             _run.IsEnabled = editable && selected is not null && selected.Steps.All(s => s.Action is not null) && _plugin.CanStart(snapshot);
             _cancel.IsEnabled = admission && snapshot.OwnsRun && !snapshot.IsStopped;
             _retryDraft.Visibility = draft is { IsDirty: true, ErrorCode: not null } ? Visibility.Visible : Visibility.Collapsed;
@@ -92,31 +102,43 @@ internal sealed partial class TestingPage
                 var item = new ComboBoxItem { Content = $"{run.State} · {run.Id} · 父 {run.ParentRunId ?? "无"}", Tag = run.Id };
                 _runs.Items.Add(item); if (run.Id == snapshot.SelectedRun?.Plan.Id) _runs.SelectedItem = item;
             }
-            var current = snapshot.SelectedRun;
             _runDetails.Text = current is null ? "尚未选择执行" : $"SIMULATED {current.State} · run {current.Plan.Id} · 序列 {current.Sequence} · session {current.Plan.SessionId} · 冻结版本 {current.Plan.CaseRevision}\nhead {current.HeadHash}\n错误 {snapshot.ErrorCode ?? "无"}";
-            var eventSequence = (_events.SelectedItem as ComboBoxItem)?.Tag as long?;
+            var oldEvent = SelectedEventId();
+            long? eventSequence = oldEvent?.RunId == current?.Plan.Id ? oldEvent?.Sequence : null;
             if (_runId != current?.Plan.Id) { _runId = current?.Plan.Id; eventSequence = null; _eventKey = null; _frame.Source = null; }
+            _displayedRun = current;
             _events.Items.Clear();
             if (current is not null) foreach (var e in current.Events)
             {
-                var item = new ComboBoxItem { Content = $"{e.Sequence}: {e.Kind} · {e.Outcome} · {e.ErrorCode}", Tag = e.Sequence };
+                var item = new ComboBoxItem { Content = $"{e.Sequence}: {e.Kind} · {e.Outcome} · {e.ErrorCode}", Tag = new KeyValuePair<string, long>(current.Plan.Id, e.Sequence) };
                 _events.Items.Add(item); if (e.Sequence == eventSequence) _events.SelectedItem = item;
             }
             if (_events.SelectedItem is null && current is not null)
-                _events.SelectedItem = _events.Items.OfType<ComboBoxItem>().LastOrDefault(i => current.Events.Single(e => e.Sequence == (long)i.Tag).Kind == TestRunEventKind.StepFinished)
-                    ?? _events.Items.LastOrDefault();
+            {
+                var last = current.Events.LastOrDefault(e => e.Kind == TestRunEventKind.StepFinished) ?? current.Events.LastOrDefault();
+                _events.SelectedItem = _events.Items.OfType<ComboBoxItem>().LastOrDefault(i => i.Tag is KeyValuePair<string, long> key && key.Key == current.Plan.Id && key.Value == last?.Sequence);
+            }
         }
         finally { _rendering = false; }
-        SelectEvidence();
+        SelectEvidence(current, current?.Plan.Id, SelectedEventId());
     }
     private static void Set(TextBox editor, string value) { if (editor.Text != value) editor.Text = value; }
-    private void SelectEvidence()
+    private NativeEventId? SelectedEventId() => _events.SelectedItem is ComboBoxItem { Tag: KeyValuePair<string, long> key }
+        ? new(key.Key, key.Value) : null;
+    private void SelectEvidence(TestRunSnapshot? displayedRun, string? displayedRunId, NativeEventId? item)
     {
-        var run = Controller.Snapshot.SelectedRun;
-        if (run is null || _events.SelectedItem is not ComboBoxItem { Tag: long sequence }) return;
-        var record = run.Events.Single(e => e.Sequence == sequence);
+        // Use the exact projection that populated the visible list, never an independently newer controller run.
+        var selection = NativeEventSelection.Resolve(displayedRun, displayedRunId, item);
+        if (selection is null)
+        {
+            _eventKey = null; _observed.Text = "尚未选择当前执行的事件"; _frame.Source = null;
+            _frameStatus.Text = "SIMULATED — 等待当前执行的事件";
+            if (item is not null) _ = NotifyAsync(); // Stale/missing item: defer to a coherent render, without a throwing lookup.
+            return;
+        }
+        var record = selection.Event;
         _observed.Text = record.NativePlainTextState ?? $"{record.Kind} · {record.ErrorCode ?? ""}";
-        var key = run.Plan.Id + "/" + record.Sequence;
+        var key = selection.Key;
         if (_eventKey == key) return;
         _eventKey = key;
         _frame.Source = null;
@@ -127,7 +149,7 @@ internal sealed partial class TestingPage
         {
             try
             {
-                var evidence = await Controller.ReadEvidenceAsync(run.Plan.Id, record.EvidenceIds[0]).ConfigureAwait(false);
+                var evidence = await Controller.ReadEvidenceAsync(selection.RunId, record.EvidenceIds[0]).ConfigureAwait(false);
                 await DispatchAsync(async () =>
                 {
                     if (!_active || generation != _generation || _eventKey != key) return;
@@ -142,7 +164,11 @@ internal sealed partial class TestingPage
                     _frameStatus.Text = $"SIMULATED · 已解码 {bitmap.PixelWidth}×{bitmap.PixelHeight} · {evidence.Receipt.Length} 字节 · SHA256 {evidence.Receipt.Sha256}";
                 }).ConfigureAwait(false);
             }
-            catch (Exception error) { await DispatchAsync(() => { if (_active && generation == _generation) ShowError(error); return Task.CompletedTask; }); }
+            catch (Exception error)
+            {
+                try { await DispatchAsync(() => { if (_active && generation == _generation && _eventKey == key) ShowError(error); return Task.CompletedTask; }); }
+                catch (Exception) { /* The original owned dispatcher operation settled; a retired dispatcher cannot show an error. */ }
+            }
         });
     }
 }

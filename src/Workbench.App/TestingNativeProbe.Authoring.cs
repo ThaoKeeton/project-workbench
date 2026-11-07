@@ -83,6 +83,7 @@ internal static partial class TestingNativeProbe
         var failed = await RunCaseAsync(window, page, failedCase.Id, TestRunState.Failed);
         Require(failed.Events.Any(e => e.Kind == TestRunEventKind.StepFinished && e.Outcome == TestStepOutcome.Failed && e.ErrorCode == "AssertionFailed")
             && failed.Events.All(e => e.Kind != TestRunEventKind.Completed), "Deliberate failure was reported as passed.");
+        await VerifyHistorySelectionAsync(window, page, passed, failed);
         checks.Add("labeled-deliberate-assertion-failure");
         await VerifyCancelAsync(window, page, checks);
         var secondary = await VerifyIsolationAsync(window, options, set.Id, checks);

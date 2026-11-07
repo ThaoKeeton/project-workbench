@@ -36,6 +36,7 @@ internal sealed partial class TestingPage : UserControl
     private bool _rendering, _active, _busy;
     private long _generation;
     private string? _caseId, _stepId, _setId, _runId, _eventKey;
+    private TestRunSnapshot? _displayedRun;
 
     internal TestingPage(TestingPlugin plugin)
     {
@@ -100,11 +101,11 @@ internal sealed partial class TestingPage : UserControl
             if (_rendering || !_active || _runs.SelectedItem is not ComboBoxItem { Tag: string id } || id == Controller.Snapshot.SelectedRun?.Plan.Id) return;
             ObserveUser(async () => { await Controller.SelectRunAsync(id); });
         };
-        _events.SelectionChanged += (_, _) => { if (!_rendering && _active) SelectEvidence(); };
+        _events.SelectionChanged += (_, _) => Capture(() => SelectEvidence(_displayedRun, _runId, SelectedEventId()));
         Loaded += (_, _) =>
         {
             _active = true; _generation++; _plugin.Attach(this); Controller.Changed += Changed;
-            Render();
+            _ = NotifyAsync();
         };
         Unloaded += (_, _) => Retire();
     }
@@ -135,19 +136,13 @@ internal sealed partial class TestingPage : UserControl
     private void ObserveUser(Func<Task> action, bool author = true)
     {
         if (!_active || (author && _busy)) return;
-        var work = _plugin.Owner.UserAsync(async () =>
+        var generation = _generation;
+        var work = _plugin.Owner.HandleUserAsync(async () =>
         {
-            var generation = _generation;
-            if (author) _busy = true;
-            Render();
-            try
-            {
-                await action();
-                if (_active && generation == _generation) _message.Text = "本地操作已完成。执行结果以已提交日志为准。";
-            }
-            catch (Exception error) { ShowError(error); }
-            finally { if (author) _busy = false; if (_active && generation == _generation) Render(); }
-        });
+            await action();
+            if (_active && generation == _generation) _message.Text = "本地操作已完成。执行结果以已提交日志为准。";
+        }, () => { if (author) _busy = true; Render(); },
+           () => { if (author) _busy = false; if (_active && generation == _generation) Render(); }, ShowError);
         if (work.IsFaulted) ShowError(work.Exception!.InnerException!);
     }
     private void ShowError(Exception error)
