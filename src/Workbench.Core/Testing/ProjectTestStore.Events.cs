@@ -40,8 +40,9 @@ public sealed partial class ProjectTestStore
         foreach (var existing in run.Events) projection.Apply(ToDraft(existing), lease.Evidence[run.Plan.Id], "TestStoreCorrupt");
         projection.Apply(draft, lease.Evidence[run.Plan.Id], "InvalidRun", isRecovery);
         var bytes = EncodeEvent(run.Plan, run.Sequence + 1, run.HeadHash, draft, isRecovery);
-        await ProjectWorkspaceStorage.AtomicWriteAsync(ProjectWorkspaceStorage.PathIn(RunPath(run.Plan.Id), "events", EventFile(run.Sequence + 1)), bytes, false, cancellationToken).ConfigureAwait(false);
         var value = ParseEvent(run.Plan, run.Sequence + 1, run.HeadHash, bytes, out _);
+        await ProjectWorkspaceStorage.AtomicWriteAsync(ProjectWorkspaceStorage.PathIn(RunPath(run.Plan.Id), "events", EventFile(run.Sequence + 1)), bytes, false, cancellationToken).ConfigureAwait(false);
+        await CommitRunHeadLockedAsync(lease, run.Plan, value, cancellationToken).ConfigureAwait(false);
         var result = new TestRunSnapshot(run.Plan, run.Events.Append(value).ToArray(), projection.State, value.Sequence, value.Hash);
         lease.Runs[run.Plan.Id] = result;
         return result;
@@ -93,6 +94,7 @@ public sealed partial class ProjectTestStore
 
     private async Task<TestRunSnapshot> ReplayEventsLockedAsync(StoreLease lease, TestRunPlan plan, CancellationToken cancellationToken)
     {
+        var head = await ReadRunHeadLockedAsync(lease, plan, cancellationToken).ConfigureAwait(false);
         var root = ProjectWorkspaceStorage.PathIn(RunPath(plan.Id), "events");
         ProjectWorkspaceStorage.DirectoryPath(root, false);
         var files = new SortedDictionary<long, string>();
@@ -119,7 +121,8 @@ public sealed partial class ProjectTestStore
             events.Add(value);
             prior = value.Hash;
         }
-        return new(plan, events.ToArray(), projection.State, events[^1].Sequence, prior);
+        if (events[^1].Sequence != head.Sequence || prior != head.EventHash) throw TestValidation.Error("RecoveryRequired");
+        return new(plan, events.ToArray(), projection.State, head.Sequence, head.EventHash);
     }
 
     private static string EventFile(long sequence) => sequence.ToString("D10", CultureInfo.InvariantCulture) + ".json";

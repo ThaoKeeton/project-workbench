@@ -82,6 +82,7 @@ public sealed partial class ProjectTestStore
             SelectCases(frozen.Cases, selected, "InvalidRun"), VirtualTarget), PlanEnvelopeLimit);
         var plan = ParsePlan(lease, id, bytes);
         var queuedBytes = EncodeEvent(plan, 0, GenesisHash, new(TestRunEventKind.Queued));
+        var queued = ParseEvent(plan, 0, GenesisHash, queuedBytes, out _);
         var runRoot = ProjectWorkspaceStorage.PathIn(_directory, "runs");
         ProjectWorkspaceStorage.DirectoryPath(runRoot, create: true);
         var stage = ProjectWorkspaceStorage.PathIn(runRoot, id + ".stage");
@@ -93,11 +94,11 @@ public sealed partial class ProjectTestStore
             ProjectWorkspaceStorage.DirectoryPath(ProjectWorkspaceStorage.PathIn(stage, "evidence"), create: true);
             await ProjectWorkspaceStorage.AtomicWriteAsync(ProjectWorkspaceStorage.PathIn(stage, "plan.json"), bytes, false, cancellationToken).ConfigureAwait(false);
             await ProjectWorkspaceStorage.AtomicWriteAsync(ProjectWorkspaceStorage.PathIn(stage, "events", EventFile(0)), queuedBytes, false, cancellationToken).ConfigureAwait(false);
+            await ProjectWorkspaceStorage.AtomicWriteAsync(ProjectWorkspaceStorage.PathIn(stage, "head.json"), EncodeRunHead(plan, 0, queued.Hash), false, cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
-            Directory.Move(stage, RunPath(id)); // One same-root publication: plan and genesis are visible together.
+            Directory.Move(stage, RunPath(id)); // One publication: plan, genesis and its authoritative head are visible together.
         }
-        finally { CleanupOwnedStage(stage, ["plan.json", "events/" + EventFile(0)], ["events", "evidence"]); }
-        var queued = ParseEvent(plan, 0, GenesisHash, queuedBytes, out _);
+        finally { CleanupOwnedStage(stage, ["plan.json", "events/" + EventFile(0), "head.json"], ["events", "evidence"]); }
         var run = new TestRunSnapshot(plan, [queued], TestRunState.Queued, 0, queued.Hash);
         lease.Runs.Add(id, run);
         lease.Evidence.Add(id, new(StringComparer.Ordinal));
@@ -141,7 +142,7 @@ public sealed partial class ProjectTestStore
             if (IsStageName(id)) { ValidateRunStage(path); throw TestValidation.Error("RecoveryRequired"); }
             if (!IsManagedId(id)) throw TestValidation.Error("TestStoreCorrupt");
             ProjectWorkspaceStorage.DirectoryPath(path, false);
-            RequireEntries(path, ["plan.json", "events", "evidence"]);
+            RequireRunEntries(path);
             var bytes = await ReadRequiredAsync(ProjectWorkspaceStorage.PathIn(path, "plan.json"), PlanEnvelopeLimit, cancellationToken).ConfigureAwait(false);
             var plan = ParsePlan(lease, id, bytes);
             lease.Evidence.Add(id, await ValidateEvidenceLockedAsync(plan, cancellationToken).ConfigureAwait(false));
@@ -196,7 +197,7 @@ public sealed partial class ProjectTestStore
         {
             var name = Path.GetFileName(entry);
             _ = ProjectWorkspaceStorage.PathIn(path, name);
-            if (name == "plan.json") ProjectWorkspaceStorage.RegularFile(entry);
+            if (name is "plan.json" or "head.json") ProjectWorkspaceStorage.RegularFile(entry);
             else if (name == "events")
             {
                 ProjectWorkspaceStorage.DirectoryPath(entry, false);
@@ -212,7 +213,7 @@ public sealed partial class ProjectTestStore
                 ProjectWorkspaceStorage.DirectoryPath(entry, false);
                 if (Directory.EnumerateFileSystemEntries(entry).Any()) throw TestValidation.Error("TestStoreCorrupt");
             }
-            else if (IsAtomicTemporary(name, "plan.json")) ProjectWorkspaceStorage.RegularFile(entry);
+            else if (IsAtomicTemporary(name, "plan.json") || IsAtomicTemporary(name, "head.json")) ProjectWorkspaceStorage.RegularFile(entry);
             else throw TestValidation.Error("TestStoreCorrupt");
         }
     }

@@ -102,6 +102,7 @@ sources/<sourceId>.json                  immutable SourceEnvelope
 cases/<setId>.json                       current CAS CaseEnvelope
 case-revisions/<setId>/<revision>.json    exact immutable CaseEnvelope bytes
 runs/<runId>/plan.json                   immutable PlanEnvelope
+runs/<runId>/head.json                   authoritative committed sequence/digest
 runs/<runId>/events/0000000000.json       host Queued; contiguous D10 sequence
 runs/<runId>/evidence/<evidenceId>/receipt.json
 runs/<runId>/evidence/<evidenceId>/frame.bmp
@@ -199,10 +200,10 @@ Retry starts again from step 1 and makes no checkpoint or exactly-once claim.
 
 Schema1's `runs` directory is optional for existing source/case-only stores and
 is created by the first run write; it is fully validated when present. A new
-run is assembled in `runs/<newRunId>.stage/` with plan.json, events/ and evidence/;
-the plan and sequence-0 Queued event are individually flushed before one
+run is assembled in `runs/<newRunId>.stage/` with plan.json, head.json, events/
+and evidence/; the plan, sequence-0 Queued event and its matching head are flushed before one
 same-root directory rename publishes `<newRunId>/`. There is no runnable plan
-without its matching genesis. Complete unreferenced case archives are retained
+without its matching genesis and authoritative head. Complete unreferenced case archives are retained
 and counted (256 total), including when a later run publication fails.
 
 PlanEnvelope has these exact required fields:
@@ -236,14 +237,42 @@ nativePlainTextState and isRecovery), and detects an edited final event even
 without a successor. Hash values are literal 64-character lower hex, never
 JSON-escaped. The next event's priorHash must equal that stored verified hash;
 every planHash must equal the exact current plan-file hash. These hashes detect
-corruption; trusted code that rewrites a complete chain is not a security sandbox.
+corruption; trusted code that rewrites a complete chain and anchor is outside this
+cooperating-store integrity boundary. Raw-file SHA256 artifact receipts remain
+separate from the event's masked-slot digest.
+
+Each published run requires `head.json`, a strict schema1 object with exactly
+`schemaVersion,runId,planHash,sequence,eventHash`, at most **4096 encoded bytes**.
+The run/plan identities must match the already-validated plan; sequence is 0..511,
+and eventHash is the committed event's masked-slot digest. Generation0 commits
+Queued sequence0. A missing/malformed/future/wrong-identity head refuses the
+published run and whole store; no legacy run is adopted as a new sequence0.
+
+Under the SAME existing StoreLease, append first validates the complete anchored
+journal and caller CAS, durably writes the next immutable event, then atomically
+replaces head.json with the matching new commitment. Success and lease-cache
+advance occur only after both publications. If head publication fails, the new
+event and old head remain; no immutable event is rolled back or deleted. A
+process interruption can likewise leave a head temporary, head behind/ahead,
+missing committed suffix or extra unanchored tail. These states preserve/refuse;
+they are never guessed, advanced, shortened or replaced by recovery history.
 
 Replay reads **all** contiguous sequence files from 0, verifies each self-hash,
-prior link, plan binding, host UTC, field shape, Unicode, receipts and transition.
+prior link, plan binding, host UTC, field shape, Unicode, receipts and transition,
+then requires the final sequence/digest to exactly equal head.json. Surviving
+files alone do not establish the authoritative head or length. A missing suffix
+therefore cannot become an older valid prefix or replacement Interrupted event.
 File timestamps never select the head. A missing/gapped/duplicate/unknown file,
 future schema/field, malformed event or false Completed refuses the entire store
 and preserves its bytes; no older head, empty view or historical success fallback.
 Append validates expectedSequence **and** expectedHeadHash under the outer lease.
+
+Malformed/missing/wrong-identity anchors return TestStoreCorrupt; oversized heads
+return StoreLimitExceeded. A structurally valid chain whose sequence/digest does
+not match its head, or a recognized `.head.json.<managedId>.tmp`, returns
+RecoveryRequired. Interior gaps and malformed events remain corrupt. Links stay
+unsafe. Every read/append and ANY owner initialization validates these conditions
+before returning data or writing recovery, including anchors on foreign runs.
 
 | Current journal | Allowed next events |
 | --- | --- |
@@ -301,7 +330,8 @@ files. No artificial valid maximum, tunable test limit or automatic pruning is
 claimed. Tests use real complete independent orphan fixtures to exercise counts.
 
 Recognized generated `.stage` directories (complete or partial), or generated
-`.D10.json.<managedId>.tmp` event files, are preserved and cause RecoveryRequired;
+`.D10.json.<managedId>.tmp` event files or `.head.json.<managedId>.tmp` head files,
+are preserved and cause RecoveryRequired;
 they are never treated as runnable/empty data. Unknown entries still refuse as
 corrupt, and links/nonregular paths refuse as unsafe. Partial **published**
 records are malformed and preserved/refused. Only caught ordinary failure or
@@ -315,12 +345,16 @@ there is no public reset/recover API, all-crash recovery or power-loss guarantee
 Internal Core-only `InitializeOwnerAsync(producerPluginId,ct)` is for the future
 facade's retained once-per-new-context barrier. Missing-store initialization
 creates nothing. It first validates the **whole** existing store under one
-lease; any corrupt/staged/unsupported record prevents all recovery writes. It
+lease; every required head and full chain must agree before the first recovery
+write. Any corrupt/staged/unsupported/unanchored record prevents all recovery writes. It
 then appends host-only isRecovery=true Interrupted to only that owner's valid
 nonterminal old runs, preserving all previous event/text/evidence bytes. Terminal
 and foreign-owner runs are untouched. A second initialization adds nothing to
 the already interrupted records. Cancellation between recovery writes can leave
 a validated partially settled group; no multi-run transaction is claimed.
+Recovery appends use the same event-then-head publication protocol. There is no
+fallback to an older head/backup or automatic repair of partial publication, and
+no all-crash, rollback or power-loss transaction guarantee.
 
 The narrow recovery exception after a failed StepFinished is a controller ruling:
 normal callers still must settle Failed; host initialization records interruption

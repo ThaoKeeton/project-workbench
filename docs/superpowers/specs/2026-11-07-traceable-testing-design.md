@@ -46,9 +46,9 @@ CSV is a real file with case/step/instruction/expected/sourceID/revision/locator
 
 ## Runs and evidence
 
-Hostgenerates run/sessionID and captures project/producer, exact case-set revision/source refs, selected ordered cases, target virtual.task-form.v1 and fixed action scope. Creation publishes valid plan+initialQueued together through owned staging then same-root directorypublication; incomplete staged/orphan data stays diagnostic and cannot start execution. Immutable casearchive publication may leave an unreferenced safe orphan on interruption. State transitions use sequence/hash, not filemtime or wallclock ordering.
+Hostgenerates run/sessionID and captures project/producer, exact case-set revision/source refs, selected ordered cases, target virtual.task-form.v1 and fixed action scope. Creation publishes valid plan+initialQueued+matching authoritative head together through owned staging then same-root directorypublication; incomplete staged/orphan data stays diagnostic and cannot start execution. Immutable casearchive publication may leave an unreferenced safe orphan on interruption. State transitions use sequence/hash, not filemtime or wallclock ordering.
 
-Journal files contain contiguous sequence, prior-eventSHA, planSHA, hostUTC, kind and typed payload; filenames include exact eventSHA. InitialQueued then RunStarted; StepStarted BEFORE adapter action; StepFinished only after actualresult and evidencepersist. Terminal Completed only after every plannedstep has a passingfinished record; failedassertion produces Failed. CancelRequested differs from settledCancelled; projectleave uses Interrupted when appropriate. A last StepStarted without result is uncertain, never success. Validate complete chain/plan/schema/order/step/result/evidencereferences; missing/tampered/divergent/futurerecords refuse rather than fallingback to an older success.
+Journal files contain contiguous sequence, prior-event digest, planSHA, hostUTC, kind and typed payload in `events/<D10>.json`. The implementer's delegated wire choice uses SHA256 of exact event bytes with only the root hash string's64 ASCII digits replaced by zeros, then stores that digest in the fixed-width slot; it is NOT straight SHA256 of the final self-containing file. See [the exact wire and head schema](../../testing-services.md#event-wire-and-fixed-replay-policy). A required per-run head.json commits sequence/digest; replay must validate it before accepting history. InitialQueued then RunStarted; StepStarted BEFORE adapter action; StepFinished only after actualresult and evidencepersist. Terminal Completed only after every plannedstep has a passingfinished record; failedassertion produces Failed. CancelRequested differs from settledCancelled; projectleave uses Interrupted when appropriate. A last StepStarted without result is uncertain, never success. Validate complete anchored chain/plan/schema/order/step/result/evidencereferences; missing/tampered/divergent/futurerecords refuse rather than fallingback to an older success.
 
 Evidence service accepts bounded passiveBMP bytes, writes+flushes owned record before return and returns managedid/MIME/length/SHA/simulated receipt. StepFinished can reference only valid owned receipts for same run. Reopen checks exact length/hash/passiveformat. Unreferenced evidence after interruption is retained, never a fabricated stepresult. Virtual frames are exact320x180,24bpp,uncompressed bottom-up BMP (54-byte header,172854 totalbytes) state renderings visibly containing SIMULATED; native Image displays actual bytes. Full actual observed usertext is committed as StepFinished nativePlainTextState and remains readable in native event/state detail after reopen without re-executing the adapter or substituting planned action values; glyphrendering need not reproduce arbitrary Unicode. This intended usertext is separate from diagnostic ErrorCode and never raw exception messages. No activeHTML/SVG/URI or real desktop capture.
 
@@ -130,3 +130,26 @@ limit with no public/test tunable. Real canonical near-limit payload tests cover
 creation/retry/reopen and oversized-plan refusal. Full Core passed before this
 narrow size-bound adjustment; affected store regressions cover the final change,
 and final current full CI remains required at the integration stage.
+
+## Task2 fix1 — authoritative head and partial publication
+
+Review T2-I1 demonstrated that removing the final event left an accepted shorter
+prefix and allowed initialization to replace terminal history. A required strict
+schema1 per-run head.json now commits runId, planHash, sequence and eventHash
+(4096-byte envelope cap). The initial head is staged/flushed with plan+Queued.
+Append under the SAME lease durably publishes its immutable event, then atomically
+publishes the matching head; only then may it return success/advance its cache.
+All read/append/owner-initialization admission validates the required anchor and
+whole chain before recovery writes. Missing/malformed/future heads refuse;
+headbehind/ahead/missingtail/extra-unanchoredtail/head temporaries preserve/refuse
+without deriving an older prefix or guessing a new committed tail. Complete
+orphan evidence/archives keep their existing retain/count policy.
+
+The controller's fix ruling retains the existing delegated D10 filename and
+masked-slot digest representation to limit unrelated changes; it does not
+retroactively claim separate controller preapproval for that original choice.
+Updating the original run paragraph above reconciles the stale hash-bearing
+filename sentence (T2-M1) during this required schema update. Raw-file SHA256
+artifact receipts are separate. No signature/sandbox, hostile chain+anchor
+rewrite defense, automatic reset/repair, rollback or all-crash/power-loss promise
+is introduced. Current full integration CI/native/human gates remain deferred.

@@ -301,6 +301,7 @@ public sealed class ProjectTestRunStoreTests
         var receipt = await store.AddRunEvidenceAsync(Owner, failedStep.Plan.Id, new("image/bmp", Bmp(), true));
         failedStep = await Append(store, failedStep, Finish(failedStep, receipt.Id, "failed 🧪\r\n\t", TestStepOutcome.Failed));
         var stepBytes = SnapshotBytes(RunRoot(disk.User, failedStep.Plan.Id));
+        stepBytes.Remove("head.json"); // The commitment advances; immutable history/evidence must remain byte-exact.
         await Code("InvalidRun", () => Append(store, failedStep, new(TestRunEventKind.Interrupted)));
         var set = await Set(store);
         var foreign = await store.CreateRunAsync(Other, set.Id, set.Revision, [set.Cases[0].Id]);
@@ -354,6 +355,7 @@ public sealed class ProjectTestRunStoreTests
         var second = IndependentEvent(run.Plan, 1, EventDigest(first), "RunStarted");
         var path = EventPath(disk.User, run.Plan.Id, 1);
         await File.WriteAllBytesAsync(path, second);
+        await WriteIndependentHead(disk.User, run.Plan, 1, EventDigest(second));
         Assert.Equal(TestRunState.Running, (await store.ReadRunAsync(run.Plan.Id)).State);
         var node = JsonNode.Parse(second)!.AsObject();
         switch (mutation)
@@ -415,7 +417,9 @@ public sealed class ProjectTestRunStoreTests
         if (mutation != "bytes")
         {
             var modifiedPlan = run.Plan with { PlanHash = Sha(await File.ReadAllBytesAsync(path)) };
-            await File.WriteAllBytesAsync(EventPath(disk.User, run.Plan.Id, 0), IndependentEvent(modifiedPlan, 0, Hash, "Queued"));
+            var genesis = IndependentEvent(modifiedPlan, 0, Hash, "Queued");
+            await File.WriteAllBytesAsync(EventPath(disk.User, run.Plan.Id, 0), genesis);
+            await WriteIndependentHead(disk.User, modifiedPlan, 0, EventDigest(genesis));
         }
         var before = SnapshotBytes(StoreRoot(disk.User));
         await Code("TestStoreCorrupt", () => new ProjectTestStore(disk.User, "default").ReadRunAsync(run.Plan.Id));
@@ -425,6 +429,8 @@ public sealed class ProjectTestRunStoreTests
     [Theory]
     [InlineData("run")]
     [InlineData("partial-run")]
+    [InlineData("partial-run-head")]
+    [InlineData("run-head-temp")]
     [InlineData("evidence")]
     [InlineData("partial-evidence")]
     [InlineData("event-temp")]
@@ -438,6 +444,8 @@ public sealed class ProjectTestRunStoreTests
             var stage = RunRoot(disk.User, run.Plan.Id) + ".stage";
             Directory.Move(RunRoot(disk.User, run.Plan.Id), stage);
             if (stageKind == "partial-run") File.Delete(Path.Combine(stage, "events", "0000000000.json"));
+            if (stageKind is "partial-run-head" or "run-head-temp") File.Delete(Path.Combine(stage, "head.json"));
+            if (stageKind == "run-head-temp") await File.WriteAllTextAsync(Path.Combine(stage, ".head.json." + Id + ".tmp"), "partial");
         }
         else if (stageKind.Contains("evidence", StringComparison.Ordinal))
         {
@@ -470,13 +478,17 @@ public sealed class ProjectTestRunStoreTests
         await File.WriteAllBytesAsync(path, SealEvent(node));
         await Code("TestStoreCorrupt", () => store.ReadRunAsync(run.Plan.Id));
         node["isRecovery"] = true;
-        await File.WriteAllBytesAsync(path, SealEvent(node));
+        var restored = SealEvent(node);
+        await File.WriteAllBytesAsync(path, restored);
+        await WriteIndependentHead(disk.User, run.Plan, recovered.Sequence, EventDigest(restored));
         recovered = await store.ReadRunAsync(run.Plan.Id);
         Assert.Equal(TestRunState.Interrupted, recovered.State);
         var after = JsonNode.Parse(IndependentEvent(run.Plan, recovered.Sequence + 1, recovered.HeadHash, "Interrupted"))!.AsObject();
         after["isRecovery"] = true;
         after["errorCode"] = "RecoveryRequired";
-        await File.WriteAllBytesAsync(EventPath(disk.User, run.Plan.Id, recovered.Sequence + 1), SealEvent(after));
+        var afterBytes = SealEvent(after);
+        await File.WriteAllBytesAsync(EventPath(disk.User, run.Plan.Id, recovered.Sequence + 1), afterBytes);
+        await WriteIndependentHead(disk.User, run.Plan, recovered.Sequence + 1, EventDigest(afterBytes));
         await Code("TestStoreCorrupt", () => store.ReadRunAsync(run.Plan.Id));
     }
 
@@ -493,9 +505,11 @@ public sealed class ProjectTestRunStoreTests
         var exact = SealEventText(text + new string(' ', 256 * 1024 - Encoding.UTF8.GetByteCount(text)));
         var path = EventPath(disk.User, run.Plan.Id, 0);
         await File.WriteAllBytesAsync(path, exact);
+        await WriteIndependentHead(disk.User, run.Plan, 0, EventDigest(exact));
         Assert.Equal(EventDigest(exact), (await store.ReadRunAsync(run.Plan.Id)).HeadHash);
         var second = IndependentEvent(run.Plan, 1, EventDigest(exact), "RunStarted");
         await File.WriteAllBytesAsync(EventPath(disk.User, run.Plan.Id, 1), second);
+        await WriteIndependentHead(disk.User, run.Plan, 1, EventDigest(second));
         File.SetLastWriteTimeUtc(path, new DateTime(2030, 1, 1));
         File.SetLastWriteTimeUtc(EventPath(disk.User, run.Plan.Id, 1), new DateTime(2000, 1, 1));
         Assert.Equal(TestRunState.Running, (await store.ReadRunAsync(run.Plan.Id)).State);
@@ -632,7 +646,10 @@ public sealed class ProjectTestRunStoreTests
             Directory.CreateDirectory(Path.Combine(RunRoot(disk.User, id), "events"));
             Directory.CreateDirectory(Path.Combine(RunRoot(disk.User, id), "evidence"));
             await File.WriteAllBytesAsync(Path.Combine(RunRoot(disk.User, id), "plan.json"), bytes);
-            await File.WriteAllBytesAsync(EventPath(disk.User, id, 0), IndependentEvent(run.Plan with { Id = id, PlanHash = Sha(bytes) }, 0, Hash, "Queued"));
+            var plan = run.Plan with { Id = id, PlanHash = Sha(bytes) };
+            var genesisBytes = IndependentEvent(plan, 0, Hash, "Queued");
+            await File.WriteAllBytesAsync(EventPath(disk.User, id, 0), genesisBytes);
+            await WriteIndependentHead(disk.User, plan, 0, EventDigest(genesisBytes));
             if (i == 0) Assert.Equal(TestRunState.Queued, (await store.ReadRunAsync(id)).State);
         }
         Assert.Equal(256, (await store.ListRunsAsync()).Count);
@@ -649,6 +666,7 @@ public sealed class ProjectTestRunStoreTests
     [InlineData("event")]
     [InlineData("frame")]
     [InlineData("receipt")]
+    [InlineData("head")]
     public async Task ManagedRecordLinksNeverReadOrMutateTheirTargets(string area)
     {
         using var disk = new TestDirectory();
@@ -664,7 +682,7 @@ public sealed class ProjectTestRunStoreTests
             var receipt = await store.AddRunEvidenceAsync(Owner, run.Plan.Id, new("image/bmp", Bmp(), true));
             path = EvidencePath(disk.User, run.Plan.Id, receipt.Id, area == "frame" ? "frame.bmp" : "receipt.json");
         }
-        else path = area == "event" ? EventPath(disk.User, run.Plan.Id, 0) : RunRoot(disk.User, run.Plan.Id);
+        else path = area == "event" ? EventPath(disk.User, run.Plan.Id, 0) : area == "head" ? HeadPath(disk.User, run.Plan.Id) : RunRoot(disk.User, run.Plan.Id);
         if (area == "run") { Directory.Delete(path, true); Directory.CreateSymbolicLink(path, outside); }
         else { File.Delete(path); File.CreateSymbolicLink(path, valuable); }
         await Code("UnsafePath", () => store.ReadRunAsync(run.Plan.Id));
@@ -749,7 +767,10 @@ public sealed class ProjectTestRunStoreTests
         Assert.InRange(retryBytes.Length, caseLimit + 1, caseLimit + 4096);
         var exact = retryBytes.Concat(Enumerable.Repeat((byte)' ', caseLimit + 4096 - retryBytes.Length)).ToArray();
         await File.WriteAllBytesAsync(retryPath, exact);
-        await File.WriteAllBytesAsync(EventPath(disk.User, retry.Plan.Id, 0), IndependentEvent(retry.Plan with { PlanHash = Sha(exact) }, 0, Hash, "Queued"));
+        var paddedPlan = retry.Plan with { PlanHash = Sha(exact) };
+        var paddedGenesis = IndependentEvent(paddedPlan, 0, Hash, "Queued");
+        await File.WriteAllBytesAsync(EventPath(disk.User, retry.Plan.Id, 0), paddedGenesis);
+        await WriteIndependentHead(disk.User, paddedPlan, 0, EventDigest(paddedGenesis));
         Assert.Equal(Sha(exact), (await store.ReadRunAsync(retry.Plan.Id)).Plan.PlanHash);
         var oversized = exact.Append((byte)' ').ToArray();
         await File.WriteAllBytesAsync(retryPath, oversized);
@@ -765,6 +786,226 @@ public sealed class ProjectTestRunStoreTests
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         Converters = { new JsonStringEnumConverter() }
     };
+
+    [Theory]
+    [InlineData("failed")]
+    [InlineData("completed")]
+    [InlineData("step-started")]
+    [InlineData("step-finished")]
+    public async Task DeletedFinalEventCannotBecomeAnOlderHeadOrReplacementRecovery(string finalKind)
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectTestStore(disk.User, "default");
+        var run = await StartStep(store, await Run(store, 1));
+        if (finalKind != "step-started")
+        {
+            var receipt = await store.AddRunEvidenceAsync(Owner, run.Plan.Id, new("image/bmp", Bmp(), true));
+            run = await Append(store, run, Finish(run, receipt.Id, "observed 🧪\r\n\t", finalKind == "failed" ? TestStepOutcome.Failed : TestStepOutcome.Passed));
+            if (finalKind is "failed" or "completed")
+                run = await Append(store, run, new(finalKind == "failed" ? TestRunEventKind.Failed : TestRunEventKind.Completed));
+        }
+        var valid = await new ProjectTestStore(disk.User, "default").ReadRunAsync(run.Plan.Id);
+        Assert.Equal(run.State, valid.State);
+        Assert.Equal(run.Sequence, valid.Sequence);
+        Assert.Equal(run.HeadHash, valid.HeadHash);
+        var untouched = await Run(store, 1);
+        var before = SnapshotBytes(StoreRoot(disk.User));
+        var evidenceDirectory = Path.Combine(Path.GetTempPath(), "workbench-testing-task2-fix1-20261107", "tail-" + finalKind + "-" + Guid.NewGuid().ToString("N"));
+        SaveByteMap(evidenceDirectory, "before", before);
+        var tailPath = EventPath(disk.User, run.Plan.Id, run.Sequence);
+        var removedBytes = await File.ReadAllBytesAsync(tailPath);
+        Assert.Equal(run.HeadHash, EventDigest(removedBytes));
+        File.Delete(tailPath);
+        var afterDeletion = SnapshotBytes(StoreRoot(disk.User));
+        Assert.Equal(before.Count - 1, afterDeletion.Count);
+        SaveByteMap(evidenceDirectory, "deleted", afterDeletion);
+        try
+        {
+            var fresh = new ProjectTestStore(disk.User, "default");
+            await Code("RecoveryRequired", () => fresh.ReadRunAsync(run.Plan.Id));
+            await Code("RecoveryRequired", () => fresh.ListRunsAsync());
+            await Code("RecoveryRequired", () => Append(fresh, run, new(TestRunEventKind.Failed)));
+            await Code("RecoveryRequired", () => fresh.InitializeOwnerAsync(Owner));
+            Assert.False(File.Exists(tailPath));
+            AssertBytes(afterDeletion, StoreRoot(disk.User));
+            Assert.Single(Directory.EnumerateFiles(Path.Combine(RunRoot(disk.User, untouched.Plan.Id), "events")));
+        }
+        finally { SaveByteMap(evidenceDirectory, "after-refusal-attempts", SnapshotBytes(StoreRoot(disk.User))); }
+    }
+
+    [Fact]
+    public async Task InitialAndAppendedHeadCommitTheExactPlanSequenceAndEventDigest()
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectTestStore(disk.User, "default");
+        var run = await Run(store, 1);
+        var genesis = await File.ReadAllBytesAsync(EventPath(disk.User, run.Plan.Id, 0));
+        var originalHead = await File.ReadAllBytesAsync(HeadPath(disk.User, run.Plan.Id));
+        AssertHead(run, originalHead);
+        run = await Append(store, run, new(TestRunEventKind.RunStarted));
+        var newHead = await File.ReadAllBytesAsync(HeadPath(disk.User, run.Plan.Id));
+        AssertHead(run, newHead);
+        Assert.NotEqual(originalHead, newHead);
+        Assert.Equal(genesis, await File.ReadAllBytesAsync(EventPath(disk.User, run.Plan.Id, 0)));
+        var fresh = await new ProjectTestStore(disk.User, "default").ReadRunAsync(run.Plan.Id);
+        Assert.Equal(run.Sequence, fresh.Sequence);
+        Assert.Equal(run.HeadHash, fresh.HeadHash);
+    }
+
+    [Theory]
+    [InlineData("missing", "TestStoreCorrupt")]
+    [InlineData("truncate", "TestStoreCorrupt")]
+    [InlineData("schema", "TestStoreCorrupt")]
+    [InlineData("unknown", "TestStoreCorrupt")]
+    [InlineData("duplicate", "TestStoreCorrupt")]
+    [InlineData("missing-field", "TestStoreCorrupt")]
+    [InlineData("run", "TestStoreCorrupt")]
+    [InlineData("plan", "TestStoreCorrupt")]
+    [InlineData("negative", "TestStoreCorrupt")]
+    [InlineData("over-limit", "TestStoreCorrupt")]
+    [InlineData("invalid-hash", "TestStoreCorrupt")]
+    [InlineData("behind", "RecoveryRequired")]
+    [InlineData("ahead", "RecoveryRequired")]
+    [InlineData("digest", "RecoveryRequired")]
+    [InlineData("temporary", "RecoveryRequired")]
+    public async Task MissingMalformedOrDivergentHeadBlocksTheWholeStoreAndOwnerRecovery(string mutation, string code)
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectTestStore(disk.User, "default");
+        var run = await Run(store, 1);
+        var initial = await File.ReadAllBytesAsync(HeadPath(disk.User, run.Plan.Id));
+        run = await Append(store, run, new(TestRunEventKind.RunStarted));
+        var untouched = await Run(store, 1);
+        Assert.Equal(TestRunState.Running, (await store.ReadRunAsync(run.Plan.Id)).State);
+        var path = HeadPath(disk.User, run.Plan.Id);
+        var node = JsonNode.Parse(await File.ReadAllBytesAsync(path))!.AsObject();
+        switch (mutation)
+        {
+            case "schema": node["schemaVersion"] = 2; break;
+            case "unknown": node["future"] = true; break;
+            case "missing-field": node.Remove("eventHash"); break;
+            case "run": node["runId"] = Id; break;
+            case "plan": node["planHash"] = Hash; break;
+            case "negative": node["sequence"] = -1; break;
+            case "over-limit": node["sequence"] = 512; break;
+            case "invalid-hash": node["eventHash"] = "../bad"; break;
+            case "ahead": node["sequence"] = 2; break;
+            case "digest": node["eventHash"] = Hash; break;
+        }
+        var bytes = Encoding.UTF8.GetBytes(node.ToJsonString());
+        if (mutation == "truncate") bytes = bytes[..^4];
+        if (mutation == "duplicate") bytes = Encoding.UTF8.GetBytes(node.ToJsonString().Replace("\"schemaVersion\":1", "\"schemaVersion\":1,\"schemaVersion\":1", StringComparison.Ordinal));
+        if (mutation == "behind") bytes = initial;
+        await File.WriteAllBytesAsync(path, bytes);
+        if (mutation == "missing") File.Delete(path);
+        if (mutation == "temporary") await File.WriteAllTextAsync(Path.Combine(RunRoot(disk.User, run.Plan.Id), ".head.json." + Id + ".tmp"), "incomplete head update");
+        var before = SnapshotBytes(StoreRoot(disk.User));
+        var fresh = new ProjectTestStore(disk.User, "default");
+        await Code(code, () => fresh.ReadRunAsync(run.Plan.Id));
+        await Code(code, () => fresh.ListSourcesAsync());
+        await Code(code, () => fresh.ListRunsAsync());
+        await Code(code, () => Append(fresh, run, new(TestRunEventKind.Failed)));
+        await Code(code, () => fresh.InitializeOwnerAsync(Owner));
+        AssertBytes(before, StoreRoot(disk.User));
+        Assert.Single(Directory.EnumerateFiles(Path.Combine(RunRoot(disk.User, untouched.Plan.Id), "events")));
+    }
+
+    [Fact]
+    public async Task ActualHeadPublicationFailureRetainsTheNewEventAndOldHeadWithoutAdvancingOrRepair()
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectTestStore(disk.User, "default");
+        var run = await Run(store, 1);
+        var root = RunRoot(disk.User, run.Plan.Id);
+        var initial = await File.ReadAllBytesAsync(HeadPath(disk.User, run.Plan.Id));
+        AssertHead(run, initial);
+        if (OperatingSystem.IsWindows())
+        {
+            // Readers may open the old head, but replacing it is denied without FILE_SHARE_DELETE.
+            using var held = new FileStream(HeadPath(disk.User, run.Plan.Id), FileMode.Open, FileAccess.Read, FileShare.Read);
+            await Code("StoreIoFailure", () => Append(store, run, new(TestRunEventKind.RunStarted)));
+        }
+        else
+        {
+            // The events child stays writable; only creating the adjacent head temporary is denied.
+            var mode = File.GetUnixFileMode(root);
+            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserExecute);
+            try { await Code("StoreIoFailure", () => Append(store, run, new(TestRunEventKind.RunStarted))); }
+            finally { File.SetUnixFileMode(root, mode); }
+        }
+        Assert.Equal(initial, await File.ReadAllBytesAsync(HeadPath(disk.User, run.Plan.Id)));
+        var next = await File.ReadAllBytesAsync(EventPath(disk.User, run.Plan.Id, 1));
+        Assert.Equal("RunStarted", JsonNode.Parse(next)!["kind"]!.GetValue<string>());
+        Assert.Equal(run.HeadHash, JsonNode.Parse(next)!["priorHash"]!.GetValue<string>());
+        Assert.Equal(EventDigest(next), JsonNode.Parse(next)!["hash"]!.GetValue<string>());
+        Assert.Empty(Directory.EnumerateFiles(root, "*.tmp", SearchOption.AllDirectories));
+        var before = SnapshotBytes(StoreRoot(disk.User));
+        SaveByteMap(Path.Combine(Path.GetTempPath(), "workbench-testing-task2-fix1-20261107", "actual-head-failure-" + Guid.NewGuid().ToString("N")), "partial-publication", before);
+        await Code("RecoveryRequired", () => store.ReadRunAsync(run.Plan.Id));
+        await Code("RecoveryRequired", () => store.ListRunsAsync());
+        await Code("RecoveryRequired", () => Append(store, run, new(TestRunEventKind.Failed)));
+        await Code("RecoveryRequired", () => store.InitializeOwnerAsync(Owner));
+        AssertBytes(before, StoreRoot(disk.User));
+    }
+
+    [Fact]
+    public async Task IndependentOldHeadPlusNewEventCrashWindowFixtureIsPreservedWithoutGuessing()
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectTestStore(disk.User, "default");
+        var run = await Run(store, 1);
+        var initial = await File.ReadAllBytesAsync(HeadPath(disk.User, run.Plan.Id));
+        AssertHead(run, initial);
+        var next = IndependentEvent(run.Plan, 1, run.HeadHash, "RunStarted");
+        await File.WriteAllBytesAsync(EventPath(disk.User, run.Plan.Id, 1), next);
+        var before = SnapshotBytes(StoreRoot(disk.User));
+        Assert.Equal(initial, before[Path.GetRelativePath(StoreRoot(disk.User), HeadPath(disk.User, run.Plan.Id))]);
+        await Code("RecoveryRequired", () => new ProjectTestStore(disk.User, "default").ReadRunAsync(run.Plan.Id));
+        await Code("RecoveryRequired", () => store.InitializeOwnerAsync(Owner));
+        AssertBytes(before, StoreRoot(disk.User));
+    }
+
+    [Fact]
+    public async Task HeadEncodedCapIsExactAndOversizedHeaderIsPreserved()
+    {
+        using var disk = new TestDirectory();
+        var store = new ProjectTestStore(disk.User, "default");
+        var run = await Run(store, 1);
+        var path = HeadPath(disk.User, run.Plan.Id);
+        var original = await File.ReadAllBytesAsync(path);
+        var exact = original.Concat(Enumerable.Repeat((byte)' ', 4096 - original.Length)).ToArray();
+        await File.WriteAllBytesAsync(path, exact);
+        Assert.Equal(run.HeadHash, (await store.ReadRunAsync(run.Plan.Id)).HeadHash);
+        var tooLarge = exact.Append((byte)' ').ToArray();
+        await File.WriteAllBytesAsync(path, tooLarge);
+        await Code("StoreLimitExceeded", () => store.ReadRunAsync(run.Plan.Id));
+        await Code("StoreLimitExceeded", () => store.InitializeOwnerAsync(Owner));
+        Assert.Equal(tooLarge, await File.ReadAllBytesAsync(path));
+    }
+
+    private static string HeadPath(string user, string runId) => Path.Combine(RunRoot(user, runId), "head.json");
+    private static void AssertHead(TestRunSnapshot run, byte[] bytes)
+    {
+        var node = JsonNode.Parse(bytes)!.AsObject();
+        Assert.Equal(5, node.Count);
+        Assert.Equal(1, node["schemaVersion"]!.GetValue<int>());
+        Assert.Equal(run.Plan.Id, node["runId"]!.GetValue<string>());
+        Assert.Equal(run.Plan.PlanHash, node["planHash"]!.GetValue<string>());
+        Assert.Equal(run.Sequence, node["sequence"]!.GetValue<long>());
+        Assert.Equal(run.HeadHash, node["eventHash"]!.GetValue<string>());
+    }
+
+    private static Task WriteIndependentHead(string user, TestRunPlan plan, long sequence, string eventHash)
+        => File.WriteAllTextAsync(HeadPath(user, plan.Id), $$"""
+            {"schemaVersion":1,"runId":"{{plan.Id}}","planHash":"{{plan.PlanHash}}","sequence":{{sequence}},"eventHash":"{{eventHash}}"}
+            """);
+
+    private static void SaveByteMap(string directory, string name, Dictionary<string, byte[]> files)
+    {
+        Directory.CreateDirectory(directory);
+        File.WriteAllText(Path.Combine(directory, name + ".json"), JsonSerializer.Serialize(files.ToDictionary(
+            pair => pair.Key, pair => new { Length = pair.Value.Length, Sha256 = Sha(pair.Value), Base64 = Convert.ToBase64String(pair.Value) })));
+    }
     private static byte[] CanonicalCaseFixture(TestCaseSetSnapshot set, IReadOnlyList<TestCase> cases) => JsonSerializer.SerializeToUtf8Bytes(new
     {
         SchemaVersion = 1, set.Id, ProjectId = "default", ProducerPluginId = Owner,
