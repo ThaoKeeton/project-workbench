@@ -6,6 +6,6 @@
   "minimumHostVersion": "0.4.0",
   "entryAssembly": "Workbench.Testing.dll",
   "entryType": "Workbench.Testing.TestingPlugin",
-  "description": "本地需求与 Figma 规范化快照、可追溯用例和 SIMULATED 虚拟表单执行。受信任的进程内插件，不是安全沙箱。",
-  "capabilities": ["native-ui", "project-testing", "local-files", "simulated-testing"]
+  "description": "本地 JSON、明确发起的 Figma 只读导入与 OpenAI 人工审核用例创作；执行与帧均为 SIMULATED。受信任的进程内插件，不是安全沙箱。",
+  "capabilities": ["native-ui", "project-testing", "local-files", "simulated-testing", "remote-figma-read", "openai-case-authoring"]
 }

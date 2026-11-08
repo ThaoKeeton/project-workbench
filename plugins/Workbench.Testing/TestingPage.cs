@@ -32,6 +32,7 @@ internal sealed partial class TestingPage : UserControl
     private readonly Image _frame = Named(new Image { Width = 640, Height = 360, HorizontalAlignment = HorizontalAlignment.Left }, "SIMULATED 测试帧");
     private readonly TextBlock _frameStatus = Named(Text("SIMULATED — 尚未选择证据"), "测试帧状态");
     private readonly List<Button> _authorActions = [];
+    private readonly TestingSourcePanel _sourcePanel;
     private Button _retryDraft = null!, _preserveDraft = null!, _run = null!, _cancel = null!, _retryRun = null!;
     private bool _rendering, _active, _busy;
     private long _generation;
@@ -45,7 +46,7 @@ internal sealed partial class TestingPage : UserControl
         Content = new ScrollViewer { Content = _panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             HorizontalContentAlignment = HorizontalAlignment.Stretch };
         _panel.Children.Add(Text("测试设计", 28));
-        _panel.Children.Add(Text("仅本地规范化 JSON。虚拟目标 virtual.task-form.v1 · 所有帧 SIMULATED。手动步骤不自动通过；本插件不操作电脑、业务接口或远程服务。"));
+        _panel.Children.Add(Text("本地 JSON 与明确发起的远程 Figma / OpenAI 创作。虚拟目标 virtual.task-form.v1 · 所有执行与帧 SIMULATED。手动步骤不自动通过；AI 生成不会启动自动化。"));
         var imports = Row();
         imports.Children.Add(Action("导入需求 JSON", "导入本地需求 JSON", () => PickImportAsync(TestSourceKind.Requirements)));
         imports.Children.Add(Action("导入 Figma 快照 JSON", "导入本地 Figma JSON", () => PickImportAsync(TestSourceKind.Figma)));
@@ -58,6 +59,10 @@ internal sealed partial class TestingPage : UserControl
             if (ids.Length == 0) ids = Controller.Snapshot.Sources.Select(s => s.Id).ToArray();
             await Controller.GenerateAsync(ids);
         }));
+        _sourcePanel = new(plugin, Capture, action => ObserveUser(action, announce: false),
+            action => ObserveUser(action, author: false, announce: false),
+            () => _sources.SelectedItems.OfType<ListViewItem>().Select(i => (string)i.Tag).ToArray());
+        _panel.Children.Add(_sourcePanel);
         _panel.Children.Add(_sets); _panel.Children.Add(_setName); _panel.Children.Add(Named(_status, "测试自动保存状态"));
         var recovery = Row();
         _retryDraft = Action("重试草稿写入", "重试测试草稿", async () => { await Controller.RetryDraftFlushAsync(); });
@@ -103,6 +108,11 @@ internal sealed partial class TestingPage : UserControl
             ObserveUser(async () => { await Controller.SelectRunAsync(id); });
         };
         _events.SelectionChanged += (_, _) => Capture(() => SelectEvidence(_displayedRun, _runId, SelectedEventId()));
+        _sources.SelectionChanged += (_, _) => Capture(() =>
+        {
+            _sourcePanel.CaptureControls();
+            _sourcePanel.Render(_sources.IsEnabled, _plugin.Owner.AdmitsUsers && !Controller.Snapshot.IsStopped);
+        });
         Loaded += (_, _) =>
         {
             _active = true; _generation++; _plugin.Attach(this); Controller.Changed += Changed;
@@ -134,15 +144,15 @@ internal sealed partial class TestingPage : UserControl
         button.Click += (_, _) => ObserveUser(action, author);
         return button;
     }
-    private void ObserveUser(Func<Task> action, bool author = true)
+    private void ObserveUser(Func<Task> action, bool author = true, bool announce = true)
     {
-        if (!_active || (author && _busy)) return;
+        if (!_active || (author && (_busy || _plugin.SourceBusy))) return;
         var generation = _generation;
         var work = _plugin.Owner.HandleUserAsync(async () =>
         {
             await action();
-            if (_active && generation == _generation) _message.Text = "本地操作已完成。执行结果以已提交日志为准。";
-        }, () => { if (author) _busy = true; Render(); },
+            if (announce && _active && generation == _generation) _message.Text = "本地操作已完成。执行结果以已提交日志为准。";
+        }, () => { if (author) _busy = true; if (!announce) _message.Text = ""; Render(); },
            () => { if (author) _busy = false; if (_active && generation == _generation) Render(); }, ShowError);
         if (work.IsFaulted) ShowError(work.Exception!.InnerException!);
     }

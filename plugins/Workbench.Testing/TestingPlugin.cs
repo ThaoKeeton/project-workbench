@@ -11,8 +11,13 @@ public sealed class TestingPlugin : IWorkbenchPlugin
     private readonly object _pagesSync = new();
     private readonly HashSet<TestingPage> _pages = [];
     private readonly SemaphoreSlim _preparation = new(1, 1);
+    private readonly NativeRemoteOperation _remote = new();
+    internal NativeSourceDraft SourceDraft { get; } = new();
+    internal bool SourceBusy => _remote.IsBusy;
+    internal bool SourceSecretsSupported => _secrets.IsSupported;
     private TestingController _controller = null!;
     private IPluginTestingContext _context = null!;
+    private IPluginSecretStore _secrets = null!;
     private CancellationTokenRegistration _lifetimeRegistration;
     internal TestingController Controller => _controller;
     internal NativeActionOwner Owner => _owner;
@@ -32,7 +37,10 @@ public sealed class TestingPlugin : IWorkbenchPlugin
     public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken)
     {
         _context = context as IPluginTestingContext ?? throw new PluginTestingException("TestingContextClosed");
-        _lifetimeRegistration = _context.Lifetime.Register(_owner.Terminal);
+        _secrets = _context.Secrets;
+        _secrets.Register(new("figma-token", "Figma 访问令牌", "仅在原生页面明确读取时使用；需 file_content:read 和目标文件访问权限。"));
+        _secrets.Register(new("openai-api-key", "OpenAI API 密钥", "仅在原生页面明确发送所选来源时使用；可能产生费用。"));
+        _lifetimeRegistration = _context.Lifetime.Register(() => { _owner.Terminal(); _remote.Terminal(); });
         _controller = new(_context);
         await _controller.InitializeAsync(cancellationToken).ConfigureAwait(false);
         _context.RegisterBeforeProjectLeave(PrepareAsync);
@@ -68,6 +76,46 @@ public sealed class TestingPlugin : IWorkbenchPlugin
         var bytes = await NativeTestingFiles.ReadAsync(path, token).ConfigureAwait(false);
         await _controller.ImportAsync(kind, bytes, token).ConfigureAwait(false);
     }
+    internal Task ImportRemoteFigmaAsync(NativeFigmaInput input) => RemoteAsync("正在读取 Figma 并导入", async token =>
+    {
+        var read = NativeSourceCredentials.ForAction(_secrets, "figma-token");
+        SourceDraft.CompleteFigma(await _controller.ImportFigmaAsync(input.Request, input.Criteria, read, token).ConfigureAwait(false));
+    });
+    internal Task GenerateRemoteAiAsync(IReadOnlyList<string> selected) => RemoteAsync("正在发送所选来源到 OpenAI", async token =>
+    {
+        var read = NativeSourceCredentials.ForAction(_secrets, "openai-api-key");
+        SourceDraft.CompleteAi(await _controller.GenerateWithAiAsync(selected, read, token).ConfigureAwait(false));
+    });
+    private async Task RemoteAsync(string label, Func<CancellationToken, Task> action)
+    {
+        var admitted = false;
+        try
+        {
+            await _remote.RunAsync(async token =>
+            {
+                admitted = true;
+                SourceDraft.Begin(label);
+                await NotifyPagesAsync().ConfigureAwait(false);
+                try { await action(token).ConfigureAwait(false); }
+                catch (Exception error) { SourceDraft.Fail(error); }
+                return true;
+            }, async failure =>
+            {
+                if (failure is not null) SourceDraft.Fail(failure);
+                await NotifyPagesAsync().ConfigureAwait(false);
+            }).ConfigureAwait(false);
+        }
+        catch (Exception) when (admitted) { /* The retained settlement records safe failure before busy is released. */ }
+        finally { await NotifyPagesAsync().ConfigureAwait(false); }
+    }
+    internal async Task CancelSourceAsync()
+    {
+        try { await _remote.RequestCancellationAsync().ConfigureAwait(false); }
+        catch (Exception) { /* Remote settlement owns the failure message; a late cancel continuation must not overwrite a later action. */ }
+        await NotifyPagesAsync().ConfigureAwait(false);
+    }
+    private async Task NotifyPagesAsync()
+    { foreach (var page in Pages()) await page.NotifyAsync().ConfigureAwait(false); }
     private FrameworkElement CreatePage()
     {
         _context.Lifetime.ThrowIfCancellationRequested();
@@ -80,12 +128,17 @@ public sealed class TestingPlugin : IWorkbenchPlugin
     {
         await _preparation.WaitAsync(token).ConfigureAwait(false);
         using var seal = _owner.Seal();
+        using var remoteSeal = _remote.Seal();
         try
         {
+            Exception? cancellationFailure = null;
+            try { await _remote.RequestCancellationAsync().ConfigureAwait(false); }
+            catch (Exception error) { SourceDraft.Fail(error); cancellationFailure = error; }
             await _owner.DrainAsync().ConfigureAwait(false);
             await _controller.PrepareLeaveAsync(token).ConfigureAwait(false);
             // Changed is a synchronous bridge; its real dispatcher continuations are independently retained here.
             await _owner.DrainAsync().ConfigureAwait(false);
+            if (cancellationFailure is not null) throw new PluginTestingException("TestingFailed");
         }
         finally
         {
@@ -94,16 +147,24 @@ public sealed class TestingPlugin : IWorkbenchPlugin
                 foreach (var page in Pages()) await page.NotifyAsync(reopening: true).ConfigureAwait(false);
                 await _owner.DrainAsync().ConfigureAwait(false);
             }
-            finally { seal.Dispose(); _preparation.Release(); }
+            finally { remoteSeal.Dispose(); seal.Dispose(); _preparation.Release(); }
         }
     }
     public async Task StopAsync(CancellationToken cancellationToken)
     {
         _owner.Terminal();
+        _remote.Terminal();
+        Exception? cancellationFailure = null;
+        try { await _remote.RequestCancellationAsync().ConfigureAwait(false); }
+        catch (Exception error) { SourceDraft.Fail(error); cancellationFailure = error; }
         await _owner.DrainAsync().ConfigureAwait(false);
-        if (_controller is not null) await _controller.StopAsync(cancellationToken).ConfigureAwait(false);
-        foreach (var page in Pages()) await page.RetireAsync().ConfigureAwait(false);
-        await _owner.DrainAsync().ConfigureAwait(false);
-        _lifetimeRegistration.Dispose();
+        try { if (_controller is not null) await _controller.StopAsync(cancellationToken).ConfigureAwait(false); }
+        finally
+        {
+            foreach (var page in Pages()) await page.RetireAsync().ConfigureAwait(false);
+            await _owner.DrainAsync().ConfigureAwait(false);
+            _lifetimeRegistration.Dispose();
+        }
+        if (cancellationFailure is not null) throw new PluginTestingException("TestingFailed");
     }
 }

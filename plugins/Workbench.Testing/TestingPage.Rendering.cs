@@ -48,7 +48,7 @@ internal sealed partial class TestingPage
         _rendering = true;
         try
         {
-            var sourceIds = _sources.SelectedItems.OfType<ListViewItem>().Select(i => (string)i.Tag).ToHashSet(StringComparer.Ordinal);
+            var sourceIds = _plugin.SourceDraft.Reopen().SelectedSourceIds.ToHashSet(StringComparer.Ordinal);
             _sources.Items.Clear();
             foreach (var source in snapshot.Sources)
             {
@@ -86,7 +86,8 @@ internal sealed partial class TestingPage
             _mapping.Text = step is null ? "" : (step.Action is null ? "手动：不会自动通过" : $"SIMULATED {step.Action.Kind} {step.Action.ElementId} 值：{step.Action.Value}")
                 + "\n" + string.Join("\n", step.Traces.Select(t => $"来源 {t.SnapshotId}@{t.SnapshotRevision} · 定位 {t.Locator} · 条件 {t.CriterionIndex}"));
             var admission = _plugin.Owner.AdmitsUsers || reopening;
-            var editable = admission && !_busy && !snapshot.IsAuthoringBusy && !snapshot.IsPreparing && !snapshot.IsStopped;
+            var editable = admission && !_busy && !_plugin.SourceBusy && !snapshot.IsAuthoringBusy && !snapshot.IsPreparing && !snapshot.IsStopped;
+            _sourcePanel.Render(editable, admission && !snapshot.IsStopped);
             foreach (var editor in new[] { _setName, _title, _prerequisites, _instruction, _expected }) editor.IsEnabled = editable && draft is not null;
             foreach (var button in _authorActions) button.IsEnabled = editable;
             _sets.IsEnabled = _cases.IsEnabled = _steps.IsEnabled = _sources.IsEnabled = editable;

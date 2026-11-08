@@ -2,6 +2,8 @@
 
 `com.projectworkbench.testing` 是独立安装的受信任进程内插件，最低宿主 0.4.0、API 1、Testing services 1。它在工作台同一个 WinUI 窗口提供中文“测试设计”页面，不嵌入独立应用、XAML 或 WebView。ALC 和能力清单不是安全沙箱。
 
+能力清单在现有四项提示上增加 `remote-figma-read` 与 `openai-case-authoring`，用于说明明确发起的远程动作；它们不是受强制执行的权限边界。此开发阶段保持 SDK/ABI/宿主/插件版本，面向用户的成熟升级需另行增加包版本并完成发布门禁。
+
 Windows 构建 `pwsh ./scripts/build.ps1` 后，完整宿主位于 `artifacts/native/app`，测试交付单独位于 `artifacts/native/testing-plugin`。CI 对应下载名为 `workbench-win-x64`、`workbench-sdk-0.4.0` 和 `workbench-testing-plugin-0.1.0`；选择同一运行/源码提交的产物。在“插件”导入测试交付中的 `workbench-testing-plugin-0.1.0.zip`，审查指纹并确认信任启用。安装不会自动信任或运行。更新需要安全退出并重启。
 
 测试 ZIP 精确包含 `plugin.json`、`Workbench.Testing.dll`、`Workbench.Testing.Domain.dll`、`Workbench.Testing.deps.json` 和 `Fixtures/requirements.synthetic.json`、`Fixtures/figma.synthetic.json`。不带 SDK/Core/宿主/WinUI/WinRT/.NET 运行时副本。外层交付另有 `provenance.json`、`SHA256SUMS`、`README.md`，绑定实际 ZIP、每项文件长度/哈希和源码提交/文件哈希。它不加入原有六文件业务 companion；旧 DingTalk/UPCAM 固定字节和来源保持不变。
@@ -10,14 +12,18 @@ Windows 构建 `pwsh ./scripts/build.ps1` 后，完整宿主位于 `artifacts/na
 
 - “导入需求 JSON”/“导入 Figma 快照 JSON”：原生文件选择器打开本地只读流，最多读取 1 MiB 加一个超限探测字节。Figma 格式是本地规范化 JSON，不是 `.fig` 或任意 API 返回。格式见 [测试服务](testing-services.md)。
 - “打包需求示例（含故意失败）”/“打包 Figma 示例”：通过相同有界文件读取/解析路径打开实际随包 JSON；缺失或损坏时报错，不替换成嵌入的备用数据。所有示例明确为合成数据。
+- “读取 Figma 并导入”：填写文件 key、可选版本及 1–16 个节点，每个节点每行一个手工验收条件（忽略空行，保留条件中的空格；每节点 1–16 条、总计最多 200 条）。增加/移除行保留其他输入。只读请求需 `file_content:read` 和实际文件访问权限，详见[领域契约](figma-readonly-capture.md)。通过宿主项目凭据页管理 `figma-token`（Figma 访问令牌）和 `openai-api-key`（OpenAI API 密钥）；初始化仅注册元数据。凭据不写入表单、设置、日志或命令；不支持受保护存储时禁用远程动作。
+- “发送所选来源到 OpenAI 并生成”：必须在上方实际选中 1–8 个来源，最多 32 个验收条件；不会采用未选则全选的本地规则。模型固定 `gpt-5.4-mini-2026-03-17`，明确发送来源身份/版本和标题、描述、验收条件，可能产生费用。结果必须人工审核，每一步 Action 均为空，不启动自动化。先保存精确输入/响应与原始 trace 的回执，再独立创建用例集；仅回执确认时显示回执 ID、状态和安全错误，不显示创建成功，不自动重试或删除。显式刷新可检查不确定提交的实际记录。
+- Figma 未提交表单、来源选择和远程状态仅保留在当前项目会话，同项目页面卸载/重开及失败后仍可修正；切换项目或退出后不恢复未提交表单。成功确认的来源、回执和用例写入项目存储。没有普通表单保存按钮；初始化、输入修改、导航、刷新和本地生成不触发远程请求。
 - 选择来源后生成用例（未选则使用全部）；选中用例集/用例/步骤编辑完整文本。最多 200 用例，每用例 20 步。输入不以 MaxLength 静默裁剪，超限草稿保留供修正。元数据编辑保留映射；修改步骤说明或预期后该步骤变手动。
 - 编辑即捕获并按版本合并自动保存；“测试自动保存状态”显示输入/保存版本及安全错误码。没有普通“保存”复选框。失败阻止导出、运行和离开；同一模型/控件保留最后输入。“重试草稿写入”仅在失败时显示，RevisionConflict 才提供“保留草稿为新集并重新加载”。新集成功保存后才重新加载原记录。
 - “导出 CSV…”用实际宿主窗口绑定的保存选择器选择目标，通过临时文件和替换写入。命令“导出当前用例 CSV 到插件本地目录”使用相同导出器/写入器，输出 `data/com.projectworkbench.testing/testing-cases.csv`。UTF8 BOM、CRLF、全部字段引号；所有文本单元格前加一个撇号，仅经验证的序号保留数字。CSV 单元格值有意改变，项目存储不变；不保证任意表格软件重存后的安全性。
 - “运行选中用例（虚拟）”一次点击完成排队/显式启动；Cancel 独立可用，不排在 Run 的通用忙锁后。仅允许 `virtual.task-form.v1` 的 typed SetText/Click/AssertText。手动/未映射步骤不自动通过。示例分别演示正向、空标题拒绝和标注的故意断言失败。
 - 选择已提交执行及事件，查看实际 journal 状态、步骤结果、错误、冻结版本、head/session/父执行和完整 NativePlainTextState。旁边 Image 解码真实持久化证据：320×180、24bpp、未压缩自下向上 BMP，172854 字节，始终标示 **SIMULATED**；它不是桌面截图。有限字形可能显示 `?`，原始 Unicode 观察文本另行完整显示。
 - “取消并等待结束”区分 CancelRequested 与实际结束的 Cancelled，并等待实际工作/清理；不承诺撤销或 exactly once。“从第一步重试（新执行）”使用父执行冻结用例创建新的关联 run/session，不按断点继续。
+- “取消远程操作”使用异步取消回调，不阻塞 UI dispatcher；仍等待忽略取消的真实 IO、回调和 UI 后续工作。忙状态持续到实际结束。离开项目和 Stop 在等待已接收动作前先请求远程取消；同项目的页面 Unloaded 不取消远程动作。
 
-每个 entry 只注册一个 before-leave hook。所有实际 UI、命令、picker、读取、导出、解码及 dispatcher 回调在同步前缀前登记实际所有权。离开先临时封住新用户动作、等待已接受回调，再在服务仍开放时取消/刷新控制器，最后等待准备产生的实际通知/dispatcher 工作。其他参与者准备失败时同一页保持可修正。Unloaded 退订页面/更新代际；不会停止项目控制器或丢弃已接受 picker。Stop 永久封住入口并加入实际工作；context Close 后不发起新保存。原生 picker 的原始异步操作一直持有到真实结束，不把取消 await 包装当作 picker 已退出。
+每个 entry 只注册一个 before-leave hook。所有实际 UI、命令、picker、读取、导出、解码及 dispatcher 回调在同步前缀前登记实际所有权。离开先临时封住新用户动作、请求远程取消并等待真实取消回调和已接受动作，再在服务仍开放时取消/刷新控制器，最后等待准备产生的实际通知/dispatcher 工作。取消回调失败也执行原有草稿刷新与实际工作屏障。其他参与者准备失败时同一页保持可修正。Unloaded 退订页面/更新代际；不会停止项目控制器、取消远程动作或丢弃已接受 picker。Stop 永久封住入口并先请求远程取消，再加入实际工作；context Close 后不发起新保存。原生 picker 的原始异步操作一直持有到真实结束，不把取消 await 包装当作 picker 已退出。
 
 记录位于当前项目 `.workbench-project/testing`，包含捕获的 projectId、严格 schema1、托管 GUID ID 与哈希。损坏/未知字段/孤儿数据保留并拒绝，不清空重建；没有任意恢复按钮、自动删旧数据或把显示名/定位符拼成存储路径。来源、用例、执行与证据的具体边界见 [测试服务](testing-services.md)。
 
@@ -42,4 +48,4 @@ Seed 验证打包 JSON/CSV 实际 IO、最后原生输入、映射失效、真�
 
 每阶段必须满足实际 WinUI Closed、宿主 OS exit 0 和目录锁重新取得，PID 独立于检查数量。报告记录 Server OS/架构、ZIP 哈希、实际 PID、合成 seed 标志和原始 event/receipt/CSV/BMP 文件哈希。原生报告和一次性 runner sidecar 分开保留；失败停止后续阶段且不会覆盖已有证据。输出为 `artifacts/native/testing-probes/<UTC-GUID>`，CI 名 `testing-plugin-probes`。Seed 的文件副本在最后立即离开输入之前采集；最终保存由 verify 重开的实际记录证明。
 
-当前源阶段不能宣称新的实际 Windows CI 或下载字节审计已通过。由本轮准确 clean HEAD 的 Windows 报告确认新增门禁，同时保留旧 native14、management17/theme1、restart7、workspace16+3 和 business27+24/12进程门禁。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma 已实现私有、有界的只读 REST 领域后端（见[后端契约](figma-readonly-capture.md)），尚无原生页面入口，也未执行真实服务调用；AI/模型、业务 provider、Webhook/消息和真实电脑控制仍未接入或执行，没有未来供应商/设备占位页面。
+当前源阶段不能宣称新的实际 Windows CI 或下载字节审计已通过。由本轮准确 clean HEAD 的 Windows 报告确认新增门禁，同时保留旧 native14、management17/theme1、restart7、workspace16+3 和 business27+24/12进程门禁。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma 与 OpenAI 控制器以合成凭据、内存 HTTP 和真实 Core 项目存储验证；原生远程控件的 Linux reference 编译不代表 Windows 实际操作。当前 native probe 仍检查既有本地工作流，未单独操作新增远程控件。真实 Figma/OpenAI 账号、业务 provider、Webhook/消息和真实电脑控制均未执行。
