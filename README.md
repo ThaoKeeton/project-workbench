@@ -2,11 +2,11 @@
 
 Windows 原生插件工作台基础版：同一个 WinUI 3 窗口承载独立插件提供的原生页面、设置与异步命令。使用标准 Windows 控件，不嵌入其他应用窗口，不使用 WebView。
 
-默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已通过当前发布目录主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。业务包需按需安装，下载配套 `workbench-business-plugins` 后按 [业务插件安装说明](docs/install-business-plugins.md) 选择内层 ZIP 或原厂文件夹；[固定来源与测试边界](tests/integration/README.md) 另列。另有按需安装的 [测试设计插件](docs/testing-plugin.md)：本地需求/规范化 Figma JSON、可追溯用例、自动保存/CSV 和 SIMULATED 虚拟执行。原生页面新增明确发起的[有界远程 Figma 只读导入](docs/figma-readonly-capture.md)及所选来源的 OpenAI 用例创作；凭据使用宿主项目凭据存储，必须人工审核，生成步骤保持手动。验证使用合成凭据、内存 HTTP 与真实 Core 项目存储；新远程控件的 Windows 实际操作、真实服务和真实电脑自动化尚未验证。
+默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已在历史固定运行中通过配套主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。本轮开发版本的完整复验尚未通过，历史记录见[验证边界](docs/windows-verification.md)。业务包需按需安装，下载配套 `workbench-business-plugins` 后按 [业务插件安装说明](docs/install-business-plugins.md) 选择内层 ZIP 或原厂文件夹；[固定来源与测试边界](tests/integration/README.md) 另列。另有按需安装的 [测试设计插件](docs/testing-plugin.md)：本地需求/规范化 Figma JSON、可追溯用例、自动保存/CSV 和 SIMULATED 虚拟执行。原生页面新增明确发起的[有界远程 Figma 只读导入](docs/figma-readonly-capture.md)及所选来源的 OpenAI 用例创作；凭据使用宿主项目凭据存储，必须人工审核，生成步骤保持手动。验证使用合成凭据、内存 HTTP 与真实 Core 项目存储；新远程控件的 Windows 实际操作、真实服务和完整受控 Windows 自动化尚未验证。
 
 ## 在 Windows 构建和启动
 
-主要开发与验收环境为受支持的 **Windows 11 24H2 或更新版本、x64**。安装 [.NET 10 SDK](https://learn.microsoft.com/dotnet/core/install/windows)（仓库固定 `10.0.403`，允许更新补丁）和 PowerShell 7。若使用 IDE，需要 Visual Studio 2026 18.0+；CLI 构建无需安装 IDE。首次还原需要 NuGet 网络访问。
+主要开发与验收环境为受支持的 **Windows 11 24H2 或更新版本、x64**。安装 [.NET 10 SDK](https://learn.microsoft.com/dotnet/core/install/windows)（仓库固定 `10.0.403`，允许更新补丁）和 PowerShell 7。还需安装可由 `vswhere` 发现的 MSVC x64 C++ 工具和 Windows SDK；`scripts/build-owned-lab.ps1` 使用真实 `cl`、`rc`、`link` 构建静态 CRT 原生 helper，NuGet/.NET SDK 不能代替这一步。若使用 IDE，需要 Visual Studio 2026 18.0+；CLI 可使用带上述组件的 Build Tools。首次还原需要 NuGet 网络访问。
 
 ```powershell
 pwsh -File .\scripts\build.ps1

@@ -1,14 +1,14 @@
-# 测试设计插件 0.1.0
+# 测试设计插件 0.2.0（开发中）
 
 `com.projectworkbench.testing` 是独立安装的受信任进程内插件，最低宿主 0.4.0、API 1、Testing services 1。它在工作台同一个 WinUI 窗口提供中文“测试设计”页面，不嵌入独立应用、XAML 或 WebView。ALC 和能力清单不是安全沙箱。
 
-能力清单在现有四项提示上增加 `remote-figma-read` 与 `openai-case-authoring`，用于说明明确发起的远程动作；它们不是受强制执行的权限边界。此开发阶段保持 SDK/ABI/宿主/插件版本，面向用户的成熟升级需另行增加包版本并完成发布门禁。
+能力清单在现有四项提示上增加 `remote-figma-read` 与 `openai-case-authoring`，用于说明明确发起的远程动作；它们不是受强制执行的权限边界。开发包已升至 0.2.0，增加私有 Windows 驱动和自带合成目标 helper；最低宿主 0.4.0、SDK/API 1、程序集版本 1.0.0.0 不变。完整原生检查、同窗口受控执行页面及维护验收仍未完成，不能将开发包视为已验收发布。
 
-Windows 构建 `pwsh ./scripts/build.ps1` 后，完整宿主位于 `artifacts/native/app`，测试交付单独位于 `artifacts/native/testing-plugin`。CI 对应下载名为 `workbench-win-x64`、`workbench-sdk-0.4.0` 和 `workbench-testing-plugin-0.1.0`；选择同一运行/源码提交的产物。在“插件”导入测试交付中的 `workbench-testing-plugin-0.1.0.zip`，审查指纹并确认信任启用。安装不会自动信任或运行。更新需要安全退出并重启。
+Windows 构建需要 .NET 10 SDK、PowerShell 7、MSVC x64 C++ 工具和 Windows SDK，见[构建说明](../README.md)。执行 `pwsh ./scripts/build.ps1` 后，完整宿主位于 `artifacts/native/app`，测试交付单独位于 `artifacts/native/testing-plugin`。CI 配置的下载名为 `workbench-win-x64`、`workbench-sdk-0.4.0` 和 `workbench-testing-plugin-0.2.0`；实际有可用产物时，选择同一运行/源码提交的产物。在“插件”导入测试交付中的 `workbench-testing-plugin-0.2.0.zip`，审查指纹并确认信任启用。安装不会自动信任或运行。更新需要安全退出并重启。
 
 CI 在 SDK 快照验证后、任何原生产物上传前，复核测试交付与业务交付；上传配额不足仍会使工作流失败，并可能没有可下载产物。Server 自动检查不替代 Windows 11 人工验收或实际下载字节审计。
 
-测试 ZIP 精确包含 `plugin.json`、`Workbench.Testing.dll`、`Workbench.Testing.Domain.dll`、`Workbench.Testing.deps.json` 和 `Fixtures/requirements.synthetic.json`、`Fixtures/figma.synthetic.json`。不带 SDK/Core/宿主/WinUI/WinRT/.NET 运行时副本。外层交付另有 `provenance.json`、`SHA256SUMS`、`README.md`，绑定实际 ZIP、每项文件长度/哈希和源码提交/文件哈希。它不加入原有六文件业务 companion；旧 DingTalk/UPCAM 固定字节和来源保持不变。
+测试 ZIP 精确包含八个文件：`plugin.json`、`Workbench.Testing.dll`、`Workbench.Testing.Domain.dll`、`Workbench.Testing.Windows.dll`、`Workbench.Testing.deps.json`、`Workbench.OwnedLab.exe`、`Fixtures/requirements.synthetic.json` 和 `Fixtures/figma.synthetic.json`。不带 SDK/Core/宿主/WinUI/WinRT/.NET 运行时副本。外层交付另有 `provenance.json`、`SHA256SUMS`、`README.md`，绑定实际 ZIP、每项文件长度/哈希和源码提交/文件哈希，并核验 Production helper、实际工具链和静态 CRT 来源。它不加入原有六文件业务 companion；旧 DingTalk/UPCAM 固定字节和来源保持不变。ReferenceOnly 描述符明确不可用，不能生成生产 ZIP。
 
 页面支持：
 
@@ -35,19 +35,27 @@ CI 在 SDK 快照验证后、任何原生产物上传前，复核测试交付与
 
 ```sh
 dotnet test tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj -c Release --nologo
-dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release --nologo -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
+dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release --nologo -p:OwnedLabReferenceOnly=true -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
 pwsh ./scripts/package-testing-plugin.ps1 -ReferenceOnly
-pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/testing-plugin -AllowReferenceOnly
-dotnet run --project tests/Workbench.Testing.PackageProbe -c Release -- artifacts/native/testing-plugin/workbench-testing-plugin-0.1.0.zip
+pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
 pwsh ./tests/scripts/TestingPluginProbe.Tests.ps1
 pwsh ./scripts/export-sdk.ps1 -ReferenceOnly
 pwsh ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-reference-snapshot
 ```
 
-`-ReferenceOnly` 明确记录不生成/验证 Windows PRI 与实际运行。交付输出不覆盖旧目录；重做时使用新的 `-OutputDirectory`。Windows 构建完成后执行 `pwsh ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240`，只打开 `%TEMP%/ProjectWorkbench-testing-probe/<GUID>` 的专用合成根。真实 shipping EXE 两进程 seed/verify 使用实际安装 ZIP、注册页面/命令和公开 Core 存储，不静态引用测试 entry/domain。
+`package-testing-plugin.ps1 -ReferenceOnly` 只编译不可用驱动，不生成 ZIP 或新的交付目录；不能接着用旧目录假装验证了新包。SDK 的 ReferenceOnly 快照也不证明 Windows PRI 或运行。生产交付输出不覆盖旧目录；单独重新打包时使用新的 `-OutputDirectory`。Windows 构建后才能执行实际包与原生检查：
+
+```powershell
+pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
+dotnet run --project tests/Workbench.Testing.PackageProbe -c Release -- artifacts/native/testing-plugin/workbench-testing-plugin-0.2.0.zip
+pwsh ./scripts/owned-lab-probe.ps1 -DeliveryDirectory ./artifacts/native/testing-plugin
+pwsh ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240
+```
+
+独立 owned-lab 检查使用真实自带合成窗口，要求全部 27 项；它不证明插件内受控执行页面或通用电脑控制。现有虚拟执行探针只打开 `%TEMP%/ProjectWorkbench-testing-probe/<GUID>` 的专用合成根。真实 shipping EXE 两进程 seed/verify 使用实际安装 ZIP、注册页面/命令和公开 Core 存储，不静态引用测试 entry/domain。
 
 Seed 验证打包 JSON/CSV 实际 IO、最后原生输入、映射失效、真实文件共享阻塞导致保存/普通 Close 失败且同一控件可修正、冲突副本与原字节、虚拟 pass/negative/labeled failure、真实 BMP Image 解码、实际 store IO 等待中的取消和原生项目隔离。取消探针明确是在第一步前等待真实存储锁，并非中断真实桌面动作。Seed 在最后一次 context 切换后用公开存储生成 **synthetic inflight journal seed**：只有 RunStarted/StepStarted，没有设备动作或结果。它不是 OS 崩溃。另一个实际 EXE 的新 context 初始化将其 Interrupted；正常 Retry 用冻结用例从第一步完成新 session。Verify 还重开实际 journal/receipt/BMP，比较精确观察文本和字节。最终输入在真实 TextBox 接受后立即进入普通离开/Close，不等自动保存。
 
 每阶段必须满足实际 WinUI Closed、宿主 OS exit 0 和目录锁重新取得，PID 独立于检查数量。报告记录 Server OS/架构、ZIP 哈希、实际 PID、合成 seed 标志和原始 event/receipt/CSV/BMP 文件哈希。原生报告和一次性 runner sidecar 分开保留；失败停止后续阶段且不会覆盖已有证据。输出为 `artifacts/native/testing-probes/<UTC-GUID>`，CI 名 `testing-plugin-probes`。Seed 的文件副本在最后立即离开输入之前采集；最终保存由 verify 重开的实际记录证明。
 
-当前源阶段不能宣称新的实际 Windows CI 或下载字节审计已通过。由本轮准确 clean HEAD 的 Windows 报告确认新增门禁，同时保留旧 native14、management17/theme1、restart7、workspace16+3 和 business27+24/12进程门禁。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma 与 OpenAI 控制器以合成凭据、内存 HTTP 和真实 Core 项目存储验证；原生远程控件的 Linux reference 编译不代表 Windows 实际操作。当前 native probe 仍检查既有本地工作流，未单独操作新增远程控件。真实 Figma/OpenAI 账号、业务 provider、Webhook/消息和真实电脑控制均未执行。
+截至诊断修复 `58f56ef`，其 [CI 42457380425](https://github.com/ThaoKeeton/project-workbench/actions/runs/42457380425) 未观察到运行器或任何执行步骤，启动原因未知；不能宣称当前 Windows 或下载字节审计通过。之前 `8692de5` 的 Windows 构建、核心 1238 项和八文件安装检查通过，但 owned-lab 只完成 9/27 项后异常退出，原因仍待定位；该轮没有上传产物。上述历史结果不补作当前版本的结果。完整门禁仍需准确源码对应的全新 Windows 运行，保留 host/runtime/workspace/virtual/business 51 项及 12 个 PID+出生实例、SDK 和两项最终交付复核。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma 与 OpenAI 控制器以合成凭据、内存 HTTP 和真实 Core 项目存储验证；原生远程控件的 Linux reference 编译不代表 Windows 实际操作。当前 native probe 仍检查既有本地工作流，未单独操作新增远程控件。真实 Figma/OpenAI 账号、业务 provider、Webhook/消息和真实用户电脑均未操作。
