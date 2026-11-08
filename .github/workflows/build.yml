@@ -42,6 +42,8 @@ jobs:
         run: |
           dotnet build tests/Workbench.OwnedLab.WindowsProbe -c Release --nologo -p:OwnedLabReferenceOnly=true -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
           if ($LASTEXITCODE -ne 0) { throw 'Owned reference probe compilation failed.' }
+          dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release --nologo -p:OwnedLabReferenceOnly=true -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
+          if ($LASTEXITCODE -ne 0) { throw 'Full App/Testing/SourceAcceptance reference compilation failed.' }
           dotnet tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0/Workbench.OwnedLab.WindowsProbe.dll --reference-only-check
           if ($LASTEXITCODE -ne 0) { throw 'Owned reference descriptor/queue refusal failed.' }
           dotnet tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0/Workbench.OwnedLab.WindowsProbe.dll --scenario-policy-check

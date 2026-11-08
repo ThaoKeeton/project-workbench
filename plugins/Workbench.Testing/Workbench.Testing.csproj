@@ -12,6 +12,7 @@
     <FileVersion>0.2.0.0</FileVersion>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Workbench.Testing.SourceAcceptance" />
     <ProjectReference Include="../../src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj" />
     <ProjectReference Include="../Workbench.Testing.Domain/Workbench.Testing.Domain.csproj" />
     <ProjectReference Include="../Workbench.Testing.Windows/Workbench.Testing.Windows.csproj" />

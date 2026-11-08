@@ -32,6 +32,10 @@ CI 在 SDK 快照验证后、任何原生产物上传前，复核测试交付与
 
 实际有用命令 ID：`import-example-requirements`、`import-example-figma`、`generate-all`、`export-local-csv`、`queue-mapped`、`start-queued`、`cancel-run`、`retry-selected`、`refresh`。现有无参数 PluginCommand ABI 未改动。普通页面 Run 仍为一次点击；排队/启动命令供明确本地工作流使用。
 
+独立源码夹具 `com.projectworkbench.testing.source-acceptance`（0.2.0，最低宿主 0.4.0）通过内部组合入口委托同一个生产 TestingPlugin、页面、控制器与生命周期。它只有终端内存 HTTP，使用固定合成值、明确的单次 arm/release 与有界 schema1 只读计数；计数仅代表夹具处理器进入/返回，不是 provider 送达或存储提交。被选 Figma 来源与 AI 回执由真实解析器和 Core 文件存储产生，AI 步骤仍为手动。生产默认入口继续使用真实客户端；初始化、编辑、刷新和导航不会自动请求。
+
+此第一阶段只验证可移植组合及实际独立入口的 managed ReferenceOnly 编译。夹具不进入普通 `app/Plugins`，不创建 fixture ZIP，也不改变生产八文件交付。十文件 fixture 包、实际已安装控件、Windows DPAPI 和原生 Stop 释放协议另行待验：Stop 撤销 SDK 命令后，不能再靠 release 命令解除 held IO。Linux 测试用同一份夹具源码、真实 Core/supervisor 和明确的合成 protector，不是 WinUI/DPAPI/真实 provider 证明。凭据沿用 `runtime userRoot + pluginId` 命名空间；生产工作区协调器为不同项目选择独立 runtime root，协议另核对捕获的 projectId。同一 userRoot/同一 pluginId 仅改 projectId 元数据仍共用既有 secret store；受信进程内夹具不宣称更强隔离。
+
 源码验证与 Windows 验收分开记录。Linux 可执行：
 
 ```sh
@@ -59,4 +63,4 @@ Seed 验证打包 JSON/CSV 实际 IO、最后原生输入、映射失效、真�
 
 每阶段必须满足实际 WinUI Closed、宿主 OS exit 0 和目录锁重新取得，PID 独立于检查数量。报告记录 Server OS/架构、ZIP 哈希、实际 PID、合成 seed 标志和原始 event/receipt/CSV/BMP 文件哈希。原生报告和一次性 runner sidecar 分开保留；失败停止后续阶段且不会覆盖已有证据。输出为 `artifacts/native/testing-probes/<UTC-GUID>`，当前 CI 收进 `native-verification-evidence`；经独立进程出生/EXE/安装文件与 PNG 校验的窗口内容图像另在 `workbench-ui-gallery`。图中的 SIMULATED 虚拟 BMP 仍是模拟层，宿主 PNG 才是 WinUI 内容渲染；owned 面板空闲画面不证明实际受控执行。Seed 的文件副本在最后立即离开输入之前采集；最终保存由 verify 重开的实际记录证明。
 
-截至诊断修复 `58f56ef`，其 [CI 42457380425](https://github.com/ThaoKeeton/project-workbench/actions/runs/42457380425) 未观察到运行器或任何执行步骤。后续读取到的两个 job 失败注释均明确指出：账户近期付款失败，或支出上限需要提高；具体是哪一种、金额及剩余额度尚未确认。没有改动账单或重跑，等待有权限的人处理后再恢复当前源码验证；不能宣称当前 Windows 或下载字节审计通过。之前 `8692de5` 的 Windows 构建、核心 1238 项和八文件安装检查通过，但 owned-lab 只完成 9/27 项后异常退出，原因仍待定位；该轮没有上传产物。上述历史结果不补作当前版本的结果。完整门禁仍需准确源码对应的全新 Windows 运行，保留 host/runtime/workspace/virtual/business 51 项及 12 个 PID+出生实例、SDK 和两项最终交付复核。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma 与 OpenAI 控制器以合成凭据、内存 HTTP 和真实 Core 项目存储验证；原生远程控件的 Linux reference 编译不代表 Windows 实际操作。当前 native probe 仍检查既有本地工作流，未单独操作新增远程控件。真实 Figma/OpenAI 账号、业务 provider、Webhook/消息和真实用户电脑均未操作。
+截至诊断修复 `58f56ef`，其 [CI 42457380425](https://github.com/ThaoKeeton/project-workbench/actions/runs/42457380425) 未观察到运行器或任何执行步骤。后续读取到的两个 job 失败注释均明确指出：账户近期付款失败，或支出上限需要提高；具体是哪一种、金额及剩余额度尚未确认。这些是当时的历史阻塞；随后用户公开仓库并授权标准 public runner Actions，没有改动账单。协调器实际核验的后续源码运行及各项通过/失败范围见 [Windows 验证记录](windows-verification.md)，不得用旧阻塞或其他源码的结果替代本阶段 SourceAcceptance 验收。之前 `8692de5` 的 Windows 构建、核心 1238 项和八文件安装检查通过，但 owned-lab 只完成 9/27 项后异常退出，原因仍待定位；该轮没有上传产物。上述历史结果不补作当前版本的结果。完整门禁仍需准确源码对应的全新 Windows 运行，保留 host/runtime/workspace/virtual/business 51 项及 12 个 PID+出生实例、SDK 和两项最终交付复核。Windows Server 自动化不代替 Windows 11 人工 picker/IME/DPI/屏幕阅读器/真实设备验收。远程 Figma 与 OpenAI 控制器以合成凭据、内存 HTTP 和真实 Core 项目存储验证；原生远程控件的 Linux reference 编译不代表 Windows 实际操作。当前 native probe 仍检查既有本地工作流，未单独操作新增远程控件。真实 Figma/OpenAI 账号、业务 provider、Webhook/消息和真实用户电脑均未操作。

@@ -9,6 +9,15 @@ namespace Workbench.Testing;
 
 public sealed class TestingPlugin : IWorkbenchPlugin
 {
+    private readonly TestingSourceServices _sources;
+    public TestingPlugin() : this(TestingSourceServices.CreateDefault()) { }
+    internal TestingPlugin(TestingSourceServices sources)
+    {
+        ArgumentNullException.ThrowIfNull(sources);
+        ArgumentNullException.ThrowIfNull(sources.Figma);
+        ArgumentNullException.ThrowIfNull(sources.Ai);
+        _sources = sources;
+    }
     private readonly NativeActionOwner _owner = new();
     private readonly object _pagesSync = new();
     private readonly HashSet<TestingPage> _pages = [];
@@ -62,7 +71,7 @@ public sealed class TestingPlugin : IWorkbenchPlugin
         _secrets = _context.Secrets;
         _secrets.Register(new("figma-token", "Figma 访问令牌", "仅在原生页面明确读取时使用；需 file_content:read 和目标文件访问权限。"));
         _secrets.Register(new("openai-api-key", "OpenAI API 密钥", "仅在原生页面明确发送所选来源时使用；可能产生费用。"));
-        _controller = new(_context);
+        _controller = _sources.CreateController(_context);
         _activity = new(_controller, _remote);
         var scope = new OwnedScope(_context.Project.Identity.Id, _context.PluginId, _context.DataDirectory);
         _pilot = new(scope, new Win32OwnedDriverFactory(scope, TimeProvider.System), TimeProvider.System);

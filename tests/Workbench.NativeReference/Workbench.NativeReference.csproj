@@ -18,5 +18,6 @@
     <ProjectReference Include="../../src/Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj" />
     <ProjectReference Include="../Workbench.NativeFixture/Workbench.NativeFixture.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="../../plugins/Workbench.Testing/Workbench.Testing.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../Workbench.Testing.SourceAcceptance/Workbench.Testing.SourceAcceptance.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 </Project>
