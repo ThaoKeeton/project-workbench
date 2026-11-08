@@ -15,6 +15,20 @@ public sealed partial class TestingController
         internal string? ExecutionError,TerminalError;
     }
     private Attempt? CurrentAttempt { get { lock(_sync) return _attempt; } }
+    // The plugin holds its source/virtual reservation; independent Domain callers share no such guarantee.
+    internal Task<bool> TryJoinPriorTerminalRunAsync()=>Admit(async()=>
+    {
+        var previous=CurrentAttempt;
+        if(previous is null) return true;
+        lock(_sync)
+        {
+            if(previous.Released) return true;
+            if(!DomainErrors.IsTerminal(previous.Current.State)) return false; // Not an operation failure or cancellation request.
+        }
+        await JoinRunWorkAsync(previous).ConfigureAwait(false);
+        await RetireAttemptAsync(previous).ConfigureAwait(false);
+        lock(_sync) return previous.Released;
+    },false);
     private void RecordRun(Attempt attempt,TestRunSnapshot run)
     {
         lock(_sync)

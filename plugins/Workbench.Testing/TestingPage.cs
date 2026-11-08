@@ -32,6 +32,7 @@ internal sealed partial class TestingPage : UserControl
     private readonly Image _frame = Named(new Image { Width = 640, Height = 360, HorizontalAlignment = HorizontalAlignment.Left }, "SIMULATED 测试帧");
     private readonly TextBlock _frameStatus = Named(Text("SIMULATED — 尚未选择证据"), "测试帧状态");
     private readonly List<Button> _authorActions = [];
+    private readonly List<Button> _activityActions = [];
     private readonly TestingSourcePanel _sourcePanel;
     private Button _retryDraft = null!, _preserveDraft = null!, _run = null!, _cancel = null!, _retryRun = null!;
     private bool _rendering, _active, _busy;
@@ -48,17 +49,17 @@ internal sealed partial class TestingPage : UserControl
         _panel.Children.Add(Text("测试设计", 28));
         _panel.Children.Add(Text("本地 JSON 与明确发起的远程 Figma / OpenAI 创作。虚拟目标 virtual.task-form.v1 · 所有执行与帧 SIMULATED。手动步骤不自动通过；AI 生成不会启动自动化。"));
         var imports = Row();
-        imports.Children.Add(Action("导入需求 JSON", "导入本地需求 JSON", () => PickImportAsync(TestSourceKind.Requirements)));
-        imports.Children.Add(Action("导入 Figma 快照 JSON", "导入本地 Figma JSON", () => PickImportAsync(TestSourceKind.Figma)));
-        imports.Children.Add(Action("打包需求示例（含故意失败）", "导入打包需求示例", () => _plugin.ImportBundledAsync(TestSourceKind.Requirements, _plugin.Lifetime)));
-        imports.Children.Add(Action("打包 Figma 示例", "导入打包 Figma 示例", () => _plugin.ImportBundledAsync(TestSourceKind.Figma, _plugin.Lifetime)));
+        imports.Children.Add(Action("导入需求 JSON", "导入本地需求 JSON", () => PickImportAsync(TestSourceKind.Requirements), activity: true));
+        imports.Children.Add(Action("导入 Figma 快照 JSON", "导入本地 Figma JSON", () => PickImportAsync(TestSourceKind.Figma), activity: true));
+        imports.Children.Add(Action("打包需求示例（含故意失败）", "导入打包需求示例", () => _plugin.ImportBundledAsync(TestSourceKind.Requirements, _plugin.Lifetime), activity: true));
+        imports.Children.Add(Action("打包 Figma 示例", "导入打包 Figma 示例", () => _plugin.ImportBundledAsync(TestSourceKind.Figma, _plugin.Lifetime), activity: true));
         _panel.Children.Add(imports); _panel.Children.Add(_sources);
-        _panel.Children.Add(Action("从选中来源生成（未选则使用全部）", "生成测试用例", async () =>
+        _panel.Children.Add(Action("从选中来源生成（未选则使用全部）", "生成测试用例", () => _plugin.GenerateAsync(() =>
         {
             var ids = _sources.SelectedItems.OfType<ListViewItem>().Select(i => (string)i.Tag).ToArray();
             if (ids.Length == 0) ids = Controller.Snapshot.Sources.Select(s => s.Id).ToArray();
-            await Controller.GenerateAsync(ids);
-        }));
+            return ids;
+        }), activity: true));
         _sourcePanel = new(plugin, Capture, action => ObserveUser(action, announce: false),
             action => ObserveUser(action, author: false, announce: false),
             () => _sources.SelectedItems.OfType<ListViewItem>().Select(i => (string)i.Tag).ToArray());
@@ -72,14 +73,14 @@ internal sealed partial class TestingPage : UserControl
         _panel.Children.Add(_steps); _panel.Children.Add(_instruction); _panel.Children.Add(_expected); _panel.Children.Add(_mapping);
         var execution = Row();
         execution.Children.Add(Action("导出 CSV…", "导出测试 CSV", PickExportAsync));
-        _run = Action("运行选中用例（虚拟）", "运行选中测试用例", async () =>
+        _run = Action("运行选中用例（虚拟）", "运行选中测试用例", () => _plugin.RunAsync(() =>
         {
             var id = _caseId ?? throw new PluginTestingException("InvalidCaseSet");
-            await _plugin.RunAsync([id]);
-        });
+            return [id];
+        }), activity: true);
         _cancel = Action("取消并等待结束", "取消测试执行", async () => { await Controller.CancelAsync(); }, author: false);
         _retryRun = Action("从第一步重试（新执行）", "重试测试执行", async () =>
-        { await _plugin.RetryAsync(Controller.Snapshot.SelectedRun?.Plan.Id ?? throw new PluginTestingException("InvalidRun")); });
+        { await _plugin.RetryAsync(() => Controller.Snapshot.SelectedRun?.Plan.Id ?? throw new PluginTestingException("InvalidRun")); }, activity: true);
         execution.Children.Add(_run); execution.Children.Add(_cancel); execution.Children.Add(_retryRun); _panel.Children.Add(execution);
         _panel.Children.Add(_runs); _panel.Children.Add(_runDetails); _panel.Children.Add(_events); _panel.Children.Add(_observed);
         _panel.Children.Add(Text("SIMULATED — 内存虚拟表单的被动 BMP，非真实桌面截图", 18));
@@ -137,10 +138,11 @@ internal sealed partial class TestingPage : UserControl
         // Only already-settled admission rejection escapes the delegate. No unowned UI postfix.
         if (work.IsFaulted) ShowError(work.Exception!.InnerException!);
     }
-    private Button Action(string label, string name, Func<Task> action, bool author = true)
+    private Button Action(string label, string name, Func<Task> action, bool author = true, bool activity = false)
     {
         var button = Named(new Button { Content = label }, name);
         if (author) _authorActions.Add(button);
+        if (activity) _activityActions.Add(button);
         button.Click += (_, _) => ObserveUser(action, author);
         return button;
     }
@@ -159,7 +161,8 @@ internal sealed partial class TestingPage : UserControl
     private void ShowError(Exception error)
     {
         if (!_active) return;
-        _message.Text = "操作未完成：" + (error is PluginTestingException known ? SafeCode(known.ErrorCode) : "LocalFileOrTestingFailure") + "。原始文件和未保存草稿已保留；请修正后重试。";
+        var code = error switch { NativeActivityAdmissionException refused => SafeCode(refused.ErrorCode), PluginTestingException known => SafeCode(known.ErrorCode), _ => "LocalFileOrTestingFailure" };
+        _message.Text = "操作未完成：" + code + "。原始文件和未保存草稿已保留；请修正后重试。";
     }
     private static string SafeCode(string code) => code is "RevisionConflict" or "StoreIoFailure" or "StoreBusy" or "InvalidCaseSet" or "InvalidTestSource" or "ManualStepUnsupported" or "StoreLimitExceeded" or "TestingContextClosed" or "InvalidRun" ? code : "TestingFailed";
     private static TextBox Editor(string header, string name) => Named(new TextBox { Header = header, AcceptsReturn = true, TextWrapping = TextWrapping.Wrap, MinHeight = 50 }, name);

@@ -18,6 +18,7 @@
     <Compile Include="../../src/Workbench.App/TestingNativeProbe.Diagnostics.cs" Link="Host/TestingNativeProbe.Diagnostics.cs" />
     <Compile Include="../../plugins/Shared/SampleTextBuffer.cs" Link="Samples/SampleTextBuffer.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeActionOwner.cs" Link="Testing/NativeActionOwner.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeActivityCoordinator.cs" Link="Testing/NativeActivityCoordinator.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeSourceDraft.cs" Link="Testing/NativeSourceDraft.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeRemoteOperation.cs" Link="Testing/NativeRemoteOperation.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeRunAdmission.cs" Link="Testing/NativeRunAdmission.cs" />

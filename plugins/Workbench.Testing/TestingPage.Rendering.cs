@@ -90,6 +90,7 @@ internal sealed partial class TestingPage
             _sourcePanel.Render(editable, admission && !snapshot.IsStopped);
             foreach (var editor in new[] { _setName, _title, _prerequisites, _instruction, _expected }) editor.IsEnabled = editable && draft is not null;
             foreach (var button in _authorActions) button.IsEnabled = editable;
+            foreach (var button in _activityActions) button.IsEnabled = editable && _plugin.CanStart(snapshot);
             _sets.IsEnabled = _cases.IsEnabled = _steps.IsEnabled = _sources.IsEnabled = editable;
             _runs.IsEnabled = _events.IsEnabled = editable;
             _run.IsEnabled = editable && selected is not null && selected.Steps.All(s => s.Action is not null) && _plugin.CanStart(snapshot);

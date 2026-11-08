@@ -36,10 +36,11 @@ if ($HelperGuardsOnly) {
     $build.macro = ''; $records[0].sha256 = '0' * 64
     Refuses { & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor } 'TestingOwnedHelperSourceInvalid'
     $allSources = @(& $module { param($root) Get-TestingSourceFiles $root } $repo)
-    foreach ($path in @('scripts/OwnedLabProbeStaging.psm1','tests/scripts/OwnedLabProbeStaging.Tests.ps1','scripts/OwnedLabProbeOutput.psm1','tests/scripts/OwnedLabProbeOutput.Tests.ps1')) {
+    foreach ($path in @('scripts/OwnedLabProbeStaging.psm1','tests/scripts/OwnedLabProbeStaging.Tests.ps1','scripts/OwnedLabProbeOutput.psm1','tests/scripts/OwnedLabProbeOutput.Tests.ps1',
+        'plugins/Workbench.Testing/NativeActivityCoordinator.cs','tests/Workbench.Core.Tests/TestingNativeActivityTests.cs','tests/Workbench.Core.Tests/TestingControllerAdmissionTests.cs','tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj')) {
         $record = @($allSources | Where-Object path -CEQ $path)
         $file = Get-Item -LiteralPath (Join-Path $repo $path)
-        if ($record.Count -ne 1 -or $record[0].length -ne $file.Length -or $record[0].sha256 -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Native fixture staging source is missing or incorrect in delivery provenance.' }
+        if ($record.Count -ne 1 -or $record[0].length -ne $file.Length -or $record[0].sha256 -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Native activity/staging source is missing or incorrect in delivery provenance: $path" }
         $changed = @($allSources | ForEach-Object { @{ path = $_.path; length = $_.length; sha256 = $(if ($_.path -ceq $path) { '0' * 64 } else { $_.sha256 }) } })
         Refuses { & $module { param($current,$recorded) Assert-TestingSourceRecords -Current $current -Recorded $recorded } $allSources $changed } 'TestingSourceHashMismatch'
     }

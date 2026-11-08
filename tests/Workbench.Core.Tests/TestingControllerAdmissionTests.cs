@@ -10,6 +10,84 @@ namespace Workbench.Core.Tests;
 
 public sealed class TestingControllerAdmissionTests(ITestOutputHelper output)
 {
+    [Theory]
+    [InlineData("queued")]
+    [InlineData("before-definition")]
+    [InlineData("running")]
+    [InlineData("disposal")]
+    [InlineData("cancel")]
+    [InlineData("failed-start")]
+    public async Task CurrentAttemptRefusal_preserves_actual_live_journal_error_selection_and_accepted_edits(string stage)
+    {
+        var prefix=new AsyncTestGate();var adapter=new GatedVirtualAdapter();
+        var fixture=await TestingDomainFixture.CreateAsync(adapter,delegatePrefix:stage=="before-definition" ? prefix : null);
+        Task<TestRunSnapshot?>? cancel=null;
+        try
+        {
+            var set=await fixture.ImportAndGenerateAsync();var run=await fixture.Controller.QueueRunAsync([set.Cases[0].Id]);
+            if(stage=="failed-start")
+            {
+                using var obstruction=TestingAuthoringTests.WriteObstruction.Create(fixture.SettingsPath);
+                await fixture.Controller.StartQueuedRunAsync();
+            }
+            else if(stage!="queued")
+            {
+                await fixture.Controller.StartQueuedRunAsync();
+                if(stage=="before-definition") await prefix.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                else
+                {
+                    await adapter.ActionGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    if(stage=="disposal") { adapter.ActionGate.Release.TrySetResult();await adapter.DisposeGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10)); }
+                    if(stage=="cancel")
+                    {
+                        var requested=new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                        fixture.Controller.Changed+=snapshot=> { if(snapshot.SelectedRun?.State==TestRunState.CancelRequested) requested.TrySetResult(); };
+                        cancel=fixture.Controller.CancelAsync();await requested.Task.WaitAsync(TimeSpan.FromSeconds(10));
+                    }
+                }
+            }
+            if(stage!="failed-start")
+                Assert.Equal("InvalidId",(await Assert.ThrowsAsync<PluginTestingException>(()=>fixture.Controller.GenerateAsync([]))).ErrorCode);
+            var before=fixture.Controller.Snapshot;var committed=await fixture.Context.Testing.ReadRunAsync(run.Plan.Id);
+            Assert.False(await fixture.Controller.TryJoinPriorTerminalRunAsync());
+            var after=fixture.Controller.Snapshot;var unchanged=await fixture.Context.Testing.ReadRunAsync(run.Plan.Id);
+            Assert.True(after.OwnsRun);Assert.Equal(before.ErrorCode,after.ErrorCode);Assert.Equal(before.SelectedRun?.Plan.Id,after.SelectedRun?.Plan.Id);
+            Assert.Equal(committed.HeadHash,unchanged.HeadHash);Assert.Equal(committed.Sequence,unchanged.Sequence);
+            fixture.Controller.CaptureSetName("Correction during owned virtual work");await fixture.Controller.FlushAsync();
+            Assert.Equal("Correction during owned virtual work",(await fixture.Context.Testing.ReadCaseSetAsync(set.Id)).Name);
+            Assert.Equal(run.Plan.Id,(await fixture.Controller.SelectRunAsync(run.Plan.Id)).Plan.Id);
+        }
+        finally
+        {
+            prefix.Release.TrySetResult();adapter.ReleaseAll();
+            if(cancel is not null) _=await Record.ExceptionAsync(()=>cancel);
+            await fixture.DisposeAsync();
+        }
+    }
+
+    [Fact]
+    public async Task CurrentAttemptRefusal_ignores_selected_terminal_history_and_released_join_is_idempotent()
+    {
+        var adapter=new GatedVirtualAdapter(5);adapter.DisposeGate.Release.TrySetResult();
+        var fixture=await TestingDomainFixture.CreateAsync(adapter);
+        try
+        {
+            Assert.True(await fixture.Controller.TryJoinPriorTerminalRunAsync());
+            var set=await fixture.ImportAndGenerateAsync();var first=await fixture.Controller.RunAsync([set.Cases[0].Id]);
+            Assert.Equal(TestRunState.Completed,Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync()).State);
+            Assert.True(await fixture.Controller.TryJoinPriorTerminalRunAsync());
+            Assert.True(await fixture.Controller.TryJoinPriorTerminalRunAsync());
+            var second=await fixture.Controller.RunAsync([set.Cases[0].Id]);await adapter.ActionGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await fixture.Controller.SelectRunAsync(first.Plan.Id);
+            Assert.False(await fixture.Controller.TryJoinPriorTerminalRunAsync());
+            Assert.Equal(first.Plan.Id,fixture.Controller.Snapshot.SelectedRun!.Plan.Id);
+            Assert.Equal(TestRunState.Running,(await fixture.Context.Testing.ReadRunAsync(second.Plan.Id)).State);
+            adapter.ActionGate.Release.TrySetResult();
+            Assert.Equal(second.Plan.Id,Assert.IsType<TestRunSnapshot>(await fixture.Controller.WaitForRunSettlementAsync()).Plan.Id);
+        }
+        finally { adapter.ReleaseAll();await fixture.DisposeAsync(); }
+    }
+
     [Fact]
     public async Task Actual_definition_callback_completion_excludes_held_action_and_disposal_and_does_not_settle_supervisor_postfix()
     {

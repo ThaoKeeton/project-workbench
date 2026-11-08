@@ -36,26 +36,16 @@ internal sealed class TestingSourcePanel : StackPanel
         _file.TextChanging += (_, _) => _capture(CaptureControls);
         _version.TextChanging += (_, _) => _capture(CaptureControls);
         _add.Click += (_, _) => _capture(() => { CaptureControls(); _plugin.SourceDraft.AddNode(); LoadForm(); });
-        _figma.Click += (_, _) => remoteAction(async () =>
+        _figma.Click += (_, _) => remoteAction(() => _plugin.ImportRemoteFigmaAsync(() =>
         {
-            try
-            {
-                CaptureControls();
-                var input = _plugin.SourceDraft.CaptureFigma();
-                await _plugin.ImportRemoteFigmaAsync(input);
-            }
-            catch (Exception error) { _plugin.SourceDraft.Fail(error); }
-        });
-        _ai.Click += (_, _) => remoteAction(async () =>
+            CaptureControls();
+            return _plugin.SourceDraft.CaptureFigma();
+        }));
+        _ai.Click += (_, _) => remoteAction(() => _plugin.GenerateRemoteAiAsync(() =>
         {
-            try
-            {
-                CaptureControls();
-                var ids = _plugin.SourceDraft.SelectedForAi();
-                await _plugin.GenerateRemoteAiAsync(ids);
-            }
-            catch (Exception error) { _plugin.SourceDraft.Fail(error); }
-        });
+            CaptureControls();
+            return _plugin.SourceDraft.SelectedForAi();
+        }));
         _cancel.Click += (_, _) => cancelAction(_plugin.CancelSourceAsync);
     }
 
@@ -97,8 +87,9 @@ internal sealed class TestingSourcePanel : StackPanel
         foreach (var row in _rows)
         { row.Id.IsEnabled = row.Criteria.IsEnabled = editable; row.Remove.IsEnabled = editable && _rows.Count > 1; }
         _add.IsEnabled = editable && _rows.Count < 16;
-        _figma.IsEnabled = editable && _plugin.SourceSecretsSupported;
-        _ai.IsEnabled = editable && _plugin.SourceSecretsSupported && _plugin.SourceDraft.Reopen().SelectedSourceIds.Count is >= 1 and <= 8;
+        var canStart = _plugin.CanStart(_plugin.Controller.Snapshot);
+        _figma.IsEnabled = editable && canStart && _plugin.SourceSecretsSupported;
+        _ai.IsEnabled = editable && canStart && _plugin.SourceSecretsSupported && _plugin.SourceDraft.Reopen().SelectedSourceIds.Count is >= 1 and <= 8;
         _cancel.IsEnabled = cancellationAdmission && _plugin.SourceBusy;
         _status.Text = _plugin.SourceDraft.Status + (_plugin.SourceSecretsSupported ? "" : "\nSecretStorageUnsupported：当前宿主不支持受保护凭据，远程操作不可用。");
     }
