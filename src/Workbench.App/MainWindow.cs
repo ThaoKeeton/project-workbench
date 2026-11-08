@@ -91,6 +91,7 @@ internal sealed partial class MainWindow : Window
             {
                 if (_options.WorkspaceProbe is not null && !_options.SkipAutomaticProbe) await NativeWorkspaceProbe.PrepareAsync(_options);
                 if (_options.TestingProbe is not null && !_options.SkipAutomaticProbe) await TestingNativeProbe.PrepareAsync(_options);
+                if (_options.SourceAcceptanceProbe is not null && !_options.SkipAutomaticProbe) await TestingSourceAcceptanceProbe.PrepareAsync(_options);
                 if (_workspaceCloseRequested) return; // Close may have arrived before coordinator publication.
                 _workspace = new(_options, (_, scope, owner) =>
                 {
@@ -104,12 +105,13 @@ internal sealed partial class MainWindow : Window
                 if (!result.Succeeded)
                 {
                     ShowWorkspaceRecovery();
-                    if (_options.WorkspaceProbe is not null || _options.TestingProbe is not null) throw new InvalidOperationException("Isolated workspace probe startup failed.");
+                    if (_options.WorkspaceProbe is not null || _options.TestingProbe is not null || _options.SourceAcceptanceProbe is not null) throw new InvalidOperationException("Isolated workspace probe startup failed.");
                     return;
                 }
                 _options.TraceStartup("host-initialization-completed");
                 if (_options.WorkspaceProbe is not null && !_options.SkipAutomaticProbe) await NativeWorkspaceProbe.RunAsync(this, _options);
                 if (_options.TestingProbe is not null && !_options.SkipAutomaticProbe) await TestingNativeProbe.RunAsync(this, _options);
+                if (_options.SourceAcceptanceProbe is not null && !_options.SkipAutomaticProbe) await TestingSourceAcceptanceProbe.RunAsync(this, _options);
                 return;
             }
             _runtime = new HostRuntime(HostRuntimeOptions.Create(_options));

@@ -170,6 +170,10 @@ if ($HelperGuardsOnly) {
     Set-Content (Join-Path $scriptRoot 'artifacts/testing-source-acceptance-package-build/keep.txt') 'older graph'
     Refuses { & (Join-Path $scriptRoot 'scripts/package-testing-plugin.ps1') -Profile SourceAcceptance -OutputDirectory (Join-Path $temp 'never-source') -PairedProductionDirectory (Join-Path $temp 'never-production') } 'TestingDeliveryAlreadyExists'
     if ((Get-Content (Join-Path $scriptRoot 'artifacts/testing-source-acceptance-package-build/keep.txt')) -cne 'older graph' -or (Test-Path (Join-Path $temp 'never-source')) -or (Test-Path (Join-Path $temp 'never-production'))) { throw 'Stale graph guard mutated prior/new outputs.' }; $script:Cases++
+    New-Item (Join-Path $scriptRoot 'artifacts/testing-source-acceptance-reference-build') -ItemType Directory | Out-Null
+    Set-Content (Join-Path $scriptRoot 'artifacts/testing-source-acceptance-reference-build/keep.txt') 'older source reference graph'
+    Refuses { & (Join-Path $scriptRoot 'scripts/package-testing-plugin.ps1') -ReferenceOnly -Profile SourceAcceptance -OutputDirectory (Join-Path $temp 'never-source-reference') -PairedProductionDirectory (Join-Path $temp 'never-production-reference') } 'TestingDeliveryAlreadyExists'
+    if ((Get-Content (Join-Path $scriptRoot 'artifacts/testing-source-acceptance-reference-build/keep.txt')) -cne 'older source reference graph' -or (Test-Path (Join-Path $temp 'never-source-reference')) -or (Test-Path (Join-Path $temp 'never-production-reference'))) { throw 'Source ReferenceOnly guard mutated an earlier graph or created a delivery.' }; $script:Cases++
     Import-Module (Join-Path $repo 'scripts/TestingPluginDelivery.psm1') -Force
     $module = Get-Module TestingPluginDelivery | Where-Object { $_.Path -ceq [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../../scripts/TestingPluginDelivery.psm1')) }
     Remove-Item $temp -Recurse -Force
@@ -194,6 +198,8 @@ if ($HelperGuardsOnly) {
         'tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceScenarioLedger.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceHttpHandlers.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceOwnership.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceReleaseBridge.cs',
         'tests/Workbench.NativeReference/Workbench.NativeReference.csproj','tests/Workbench.NativeReference/GeneratedApplicationReference.cs',
         'tests/Workbench.Core.Tests/SourceAcceptanceTests.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Ownership.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Transport.cs','tests/Workbench.Core.Tests/SourceAcceptanceReleaseTests.cs',
+        'scripts/source-acceptance-probe.ps1','scripts/SourceAcceptanceProbe.psm1','tests/scripts/SourceAcceptanceProbe.Tests.ps1','tests/Workbench.Core.Tests/RunOptionsTests.cs',
+        'src/Workbench.App/TestingSourceAcceptanceProbe.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Controls.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Records.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Lifecycle.cs',
         'docs/testing-plugin.md','docs/windows-verification.md','.github/workflows/build.yml','scripts/TestingPluginDelivery.psm1','tests/scripts/TestingPluginPackage.Tests.ps1',
         'tests/Workbench.Core.Tests/TestingNativeOwnedPilotTests.cs','tests/Workbench.Core.Tests/TestingNativeOwnedEvidenceTests.cs','tests/Workbench.Core.Tests/TestingNativeLifecycleTests.cs',
         'tests/Workbench.Core.Tests/OwnedAdmissionTests.cs','tests/Workbench.Core.Tests/OwnedJournalTests.cs','tests/Workbench.Core.Tests/OwnedFixedPlansTests.cs')) {

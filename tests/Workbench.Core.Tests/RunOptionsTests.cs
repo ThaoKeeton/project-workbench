@@ -8,6 +8,67 @@ public sealed class RunOptionsTests
     [Theory]
     [InlineData("seed")]
     [InlineData("verify")]
+    [InlineData("stop-figma")]
+    [InlineData("stop-ai")]
+    public void Source_acceptance_is_explicit_isolated_and_uses_only_its_lowercase_guid_root(string phase)
+    {
+        var parent = Path.Combine(Path.GetTempPath(), "ProjectWorkbench-source-acceptance-probe");
+        var root = Path.Combine(parent, Guid.NewGuid().ToString("N"));
+        var options = RunOptions.Parse(["--source-acceptance-probe", phase, "--probe-root", root]);
+        Assert.True(options.IsIsolated);
+        Assert.Equal(phase, options.GetType().GetProperty("SourceAcceptanceProbe")?.GetValue(options));
+        Assert.Equal(root, options.UserRoot);
+        Assert.Equal(Path.Combine(root, "source-acceptance-result.json"), options.ReportPath);
+        Assert.Equal(parent, Path.GetDirectoryName(RunOptions.Parse(["--source-acceptance-probe", phase]).UserRoot));
+        foreach (var invalid in new[] { Path.GetTempPath(), Path.Combine(parent, "normal"),
+            Path.Combine(parent, "ABCDEF0123456789ABCDEF0123456789"), Path.Combine(root, "nested"),
+            Path.Combine(Path.GetTempPath(), "ProjectWorkbench-testing-probe", Guid.NewGuid().ToString("N")) })
+            Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--source-acceptance-probe", phase, "--probe-root", invalid]));
+        foreach (var other in new[] { new[] { "--smoke-test" }, ["--workspace-probe", "seed"],
+            ["--business-probe", "seed"], ["--runtime-probe", "management"], ["--testing-probe", "seed"] })
+        {
+            Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--source-acceptance-probe", phase, .. other]));
+            Assert.Throws<ArgumentException>(() => RunOptions.Parse([.. other, "--source-acceptance-probe", phase]));
+        }
+    }
+
+    [Theory]
+    [InlineData("--source-acceptance-probe")]
+    [InlineData("--Source-Acceptance-Probe", "seed")]
+    [InlineData("--source-acceptance-prob", "seed")]
+    [InlineData("--source-acceptance-probe-extra", "seed")]
+    [InlineData("--source-acceptance-probe", "SEED")]
+    [InlineData("--source-acceptance-probe", "unknown")]
+    [InlineData("--source-acceptance-probe", "")]
+    [InlineData("--source-acceptance-probe", "seed", "--source-acceptance-probe", "verify")]
+    [InlineData("--source-acceptance-probe", "seed", "--Probe-Root", "unused")]
+    [InlineData("--source-acceptance-probe", "seed", "--probe-rot", "unused")]
+    [InlineData("--source-acceptance-probe", "seed", "unexpected-positional")]
+    public void Ambiguous_or_unknown_source_options_fail_before_normal_startup(params string[] args)
+        => Assert.Throws<ArgumentException>(() => RunOptions.Parse(args));
+
+    [Theory]
+    [InlineData("--probe-root")]
+    [InlineData("--smoke-report")]
+    public void Source_probe_refuses_missing_and_duplicate_shared_values(string flag)
+    {
+        var root = Path.Combine(Path.GetTempPath(), "ProjectWorkbench-source-acceptance-probe", Guid.NewGuid().ToString("N"));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--source-acceptance-probe", "seed", flag]));
+        Assert.Throws<ArgumentException>(() => RunOptions.Parse(["--source-acceptance-probe", "seed", flag, root, flag, root]));
+    }
+
+    [Fact]
+    public void Ordinary_startup_stays_nonisolated_without_a_source_option()
+    {
+        var options = RunOptions.Parse([]);
+        Assert.False(options.IsIsolated);
+        Assert.Null(options.ReportPath);
+        Assert.Equal(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "ProjectWorkbench"), options.UserRoot);
+    }
+
+    [Theory]
+    [InlineData("seed")]
+    [InlineData("verify")]
     public void Testing_probe_isolated_identity_cannot_fall_through_to_user_or_other_modes(string phase)
     {
         var parent = Path.Combine(Path.GetTempPath(), "ProjectWorkbench-testing-probe");

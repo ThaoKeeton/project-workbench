@@ -94,8 +94,12 @@ await using (var manager = new PluginManager(options))
     checks.Add("discovery-disabled-untrusted-unloaded");
     if ((await packages.InstallAsync(zipPath)).Succeeded) throw new InvalidOperationException("Duplicate install overwrote the actual package.");
     VerifyInstalled();
-    if (plugin.State != PluginState.Disabled || plugin.IsLoaded || plugin.IsTrusted || plugin.DesiredEnabled)
-        throw new InvalidOperationException("Duplicate install changed discovery state.");
+    // The earlier snapshot is immutable; rediscover through a fresh manager after the refused mutation.
+    await using var rediscovered = new PluginManager(options);
+    await rediscovered.DiscoverAsync();
+    var afterDuplicate = rediscovered.Plugins.Single();
+    if (afterDuplicate.Manifest?.Id != pluginId || afterDuplicate.State != PluginState.Disabled || afterDuplicate.IsLoaded || afterDuplicate.IsTrusted || afterDuplicate.DesiredEnabled)
+        throw new InvalidOperationException("Duplicate install changed freshly discovered state.");
     checks.Add("duplicate-refused-bytes-unchanged");
 }
 await Refused(Mutate("wrong-api", m => m["apiVersion"] = 2), "wrong-api", new(0, 4, 0));

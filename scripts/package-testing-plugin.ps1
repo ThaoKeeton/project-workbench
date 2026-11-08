@@ -8,7 +8,7 @@ Set-StrictMode -Version Latest
 $deliveryModule = Import-Module (Join-Path $PSScriptRoot 'TestingPluginDelivery.psm1') -Force -PassThru
 $repo = Split-Path $PSScriptRoot -Parent
 if ($Profile -eq 'Production' -and $PSBoundParameters.ContainsKey('PairedProductionDirectory')) { throw 'TestingProductionPairUnexpected' }
-$build = Join-Path $repo $(if ($ReferenceOnly) { 'artifacts/testing-reference-build' } elseif ($Profile -eq 'SourceAcceptance') { 'artifacts/testing-source-acceptance-package-build' } else { 'artifacts/testing-package-build' })
+$build = Join-Path $repo $(if ($ReferenceOnly) { if ($Profile -eq 'SourceAcceptance') { 'artifacts/testing-source-acceptance-reference-build' } else { 'artifacts/testing-reference-build' } } elseif ($Profile -eq 'SourceAcceptance') { 'artifacts/testing-source-acceptance-package-build' } else { 'artifacts/testing-package-build' })
 # Refuse every reserved root before build/output mutation. Earlier evidence is never deleted.
 & $deliveryModule { param($p) Assert-TestingFreshDirectory $p } $build
 if (-not $ReferenceOnly) {

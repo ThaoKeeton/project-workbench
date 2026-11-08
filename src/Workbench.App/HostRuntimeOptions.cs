@@ -29,7 +29,7 @@ internal static class HostRuntimeOptions
             PluginsRoot = Path.Combine(userRoot, "Plugins"),
             UserRoot = userRoot,
             ProjectScope = projectScope,
-            AdditionalDiscoveryRoots = options.RuntimeProbe is not null || options.BusinessProbe is not null ? [] : [bundled],
+            AdditionalDiscoveryRoots = options.RuntimeProbe is not null || options.BusinessProbe is not null || options.SourceAcceptanceProbe is not null ? [] : [bundled],
             SharedAssemblies = [typeof(WinUiView).Assembly, typeof(FrameworkElement).Assembly,
                 typeof(WinRT.ComWrappersSupport).Assembly, typeof(Windows.Foundation.IAsyncAction).Assembly],
             SharedAssemblyNames = projectionNames
