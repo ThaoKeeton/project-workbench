@@ -7,18 +7,23 @@ namespace Workbench.App;
 
 internal sealed partial class MainWindow
 {
-    private static ScrollViewer? GalleryFocusScroller(FrameworkElement page, FrameworkElement focus)
+    private static ScrollViewer? GalleryFocusScroller(FrameworkElement root, FrameworkElement page, FrameworkElement focus)
     {
-        if (!page.IsLoaded || !focus.IsLoaded || page.XamlRoot is null
-            || !ReferenceEquals(focus.XamlRoot, page.XamlRoot)) return null;
+        if (!root.IsLoaded || !page.IsLoaded || !focus.IsLoaded || root.XamlRoot is null
+            || !ReferenceEquals(page.XamlRoot, root.XamlRoot) || !ReferenceEquals(focus.XamlRoot, root.XamlRoot)) return null;
         ScrollViewer? owner = null;
+        bool containsPage = false;
         for (DependencyObject? parent = focus; parent is not null; parent = VisualTreeHelper.GetParent(parent))
         {
             if (parent is UIElement { Visibility: not Visibility.Visible }) return null;
             if (owner is null && parent is ScrollViewer viewer) owner = viewer;
-            if (ReferenceEquals(parent, page)) return owner is { IsLoaded: true } ? owner : null;
+            if (ReferenceEquals(parent, page)) containsPage = true;
+            // A plugin Grid can use a host ancestor rather than own a scroller.
+            // Prove the complete chain before returning its nearest actual owner.
+            if (ReferenceEquals(parent, root)) return containsPage && owner is { IsLoaded: true }
+                && ReferenceEquals(owner.XamlRoot, root.XamlRoot) ? owner : null;
         }
-        return null; // A shared XamlRoot alone does not prove page/scroll ownership.
+        return null; // A shared XamlRoot alone does not prove page/root/scroll ownership.
     }
 
     private static bool GalleryTryFocusBounds(ScrollViewer scroller, FrameworkElement focus, out Rect bounds)

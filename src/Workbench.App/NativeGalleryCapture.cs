@@ -52,7 +52,7 @@ internal sealed partial class MainWindow
         bool restorationAttempted = false;
         bool PageLive() => GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId);
         bool FocusAttached() => focus is null || (scroller is not null
-            && ReferenceEquals(GalleryFocusScroller(displayedPage, focus), scroller));
+            && ReferenceEquals(GalleryFocusScroller(_root, displayedPage, focus), scroller));
         bool CaptureLive(bool requireVisible = true)
         {
             if (!PageLive()) { status = "blocked"; reasonCode = "page-detached"; return false; }
@@ -126,7 +126,7 @@ internal sealed partial class MainWindow
             if (focus is not null)
             {
                 status = "blocked"; reasonCode = "focus-detached";
-                scroller = GalleryFocusScroller(displayedPage, focus);
+                scroller = GalleryFocusScroller(_root, displayedPage, focus);
                 if (scroller is null) return;
                 originalOffset = scroller.VerticalOffset;
                 status = "blocked"; reasonCode = "focus-outside-viewport";
