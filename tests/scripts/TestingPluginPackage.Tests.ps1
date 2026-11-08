@@ -191,9 +191,9 @@ if ($HelperGuardsOnly) {
         'plugins/Workbench.Testing/TestingSourceServices.cs','plugins/Workbench.Testing/TestingPlugin.cs','plugins/Workbench.Testing/Workbench.Testing.csproj','plugins/Workbench.Testing/plugin.json',
         'tests/Workbench.Testing.SourceAcceptance/Workbench.Testing.SourceAcceptance.csproj','tests/Workbench.Testing.SourceAcceptance/plugin.json',
         'tests/Workbench.Testing.SourceAcceptance/SourceAcceptancePlugin.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceProtocol.cs',
-        'tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceScenarioLedger.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceHttpHandlers.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceOwnership.cs',
+        'tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceScenarioLedger.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceHttpHandlers.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceOwnership.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceReleaseBridge.cs',
         'tests/Workbench.NativeReference/Workbench.NativeReference.csproj','tests/Workbench.NativeReference/GeneratedApplicationReference.cs',
-        'tests/Workbench.Core.Tests/SourceAcceptanceTests.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Ownership.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Transport.cs',
+        'tests/Workbench.Core.Tests/SourceAcceptanceTests.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Ownership.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Transport.cs','tests/Workbench.Core.Tests/SourceAcceptanceReleaseTests.cs',
         'docs/testing-plugin.md','docs/windows-verification.md','.github/workflows/build.yml','scripts/TestingPluginDelivery.psm1','tests/scripts/TestingPluginPackage.Tests.ps1',
         'tests/Workbench.Core.Tests/TestingNativeOwnedPilotTests.cs','tests/Workbench.Core.Tests/TestingNativeOwnedEvidenceTests.cs','tests/Workbench.Core.Tests/TestingNativeLifecycleTests.cs',
         'tests/Workbench.Core.Tests/OwnedAdmissionTests.cs','tests/Workbench.Core.Tests/OwnedJournalTests.cs','tests/Workbench.Core.Tests/OwnedFixedPlansTests.cs')) {

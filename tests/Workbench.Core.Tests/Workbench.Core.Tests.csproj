@@ -9,6 +9,7 @@
     <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceScenarioLedger.cs" Link="SourceAcceptance/SourceAcceptanceScenarioLedger.cs" />
     <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceHttpHandlers.cs" Link="SourceAcceptance/SourceAcceptanceHttpHandlers.cs" />
     <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceOwnership.cs" Link="SourceAcceptance/SourceAcceptanceOwnership.cs" />
+    <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceReleaseBridge.cs" Link="SourceAcceptance/SourceAcceptanceReleaseBridge.cs" />
     <Compile Include="../../src/Workbench.App/HostRuntime.cs" Link="Host/HostRuntime.cs" />
     <Compile Include="../../src/Workbench.App/WorkspaceRootLease.cs" Link="Host/WorkspaceRootLease.cs" />
     <Compile Include="../../src/Workbench.App/ProjectDocumentSession.cs" Link="Host/ProjectDocumentSession.cs" />
