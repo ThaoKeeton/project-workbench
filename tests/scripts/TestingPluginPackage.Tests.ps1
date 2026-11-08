@@ -39,6 +39,7 @@ if ($HelperGuardsOnly) {
     foreach ($path in @('scripts/OwnedLabProbeStaging.psm1','tests/scripts/OwnedLabProbeStaging.Tests.ps1','scripts/OwnedLabProbeOutput.psm1','tests/scripts/OwnedLabProbeOutput.Tests.ps1',
         'plugins/Workbench.Testing/NativeActivityCoordinator.cs','tests/Workbench.Core.Tests/TestingNativeActivityTests.cs','tests/Workbench.Core.Tests/TestingControllerAdmissionTests.cs','tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj',
         'plugins/Workbench.Testing/NativeOwnedPilot.cs','plugins/Workbench.Testing/NativeOwnedEvidence.cs','plugins/Workbench.Testing/NativeTestingLifecycle.cs','plugins/Workbench.Testing/TestingOwnedPilotPanel.cs',
+        'plugins/Workbench.Testing/NativeInvocationFeedback.cs','tests/Workbench.Core.Tests/TestingNativeFeedbackTests.cs',
         'tests/Workbench.Core.Tests/TestingNativeOwnedPilotTests.cs','tests/Workbench.Core.Tests/TestingNativeOwnedEvidenceTests.cs','tests/Workbench.Core.Tests/TestingNativeLifecycleTests.cs',
         'tests/Workbench.Core.Tests/OwnedAdmissionTests.cs','tests/Workbench.Core.Tests/OwnedJournalTests.cs','tests/Workbench.Core.Tests/OwnedFixedPlansTests.cs')) {
         $record = @($allSources | Where-Object path -CEQ $path)
@@ -46,6 +47,7 @@ if ($HelperGuardsOnly) {
         if ($record.Count -ne 1 -or $record[0].length -ne $file.Length -or $record[0].sha256 -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Native activity/staging source is missing or incorrect in delivery provenance: $path" }
         $changed = @($allSources | ForEach-Object { @{ path = $_.path; length = $_.length; sha256 = $(if ($_.path -ceq $path) { '0' * 64 } else { $_.sha256 }) } })
         Refuses { & $module { param($current,$recorded) Assert-TestingSourceRecords -Current $current -Recorded $recorded } $allSources $changed } 'TestingSourceHashMismatch'
+        Write-Host "Source hash corruption refused: $path"
     }
     Write-Host 'Owned helper packaging guards passed; synthetic guard checks do not establish native execution.'
     return

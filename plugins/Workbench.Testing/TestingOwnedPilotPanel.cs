@@ -26,6 +26,8 @@ internal sealed class TestingOwnedPilotPanel : StackPanel
     private readonly TextBlock _frameStatus = Text("尚未选择实际窗口帧");
     private readonly Image _frame = Id(new Image { Width = 640, Height = 360, HorizontalAlignment = HorizontalAlignment.Left }, "frame");
     private readonly NativeEvidenceCache _cache = new();
+    private readonly NativeInvocationFeedback _feedback = new();
+    private NativeInvocationRequest? _messageRequest;
     private bool _rendering;
     private volatile bool _active;
     private long _generation;
@@ -68,26 +70,32 @@ internal sealed class TestingOwnedPilotPanel : StackPanel
         };
     }
 
-    internal void Activate() { _active = true; Interlocked.Increment(ref _generation); }
-    internal void Detach() { _active = false; Interlocked.Increment(ref _generation); }
+    internal void Activate() { Interlocked.Increment(ref _generation); _active = true; }
+    internal void Detach() { _active = false; Interlocked.Increment(ref _generation); _feedback.Retire(); }
     internal void ClearFrame() { _cache.Clear(); _frame.Source = null; }
 
     private void Perform(Func<Task> action)
     {
         if (!_active || _plugin.PageProducersClosed) return;
-        var generation = _generation;
-        var synchronousPrefix = true;
+        var request = _feedback.Begin(Interlocked.Read(ref _generation));
+        bool IsCurrent() => _active && !_plugin.PageProducersClosed && _feedback.IsCurrent(request, Interlocked.Read(ref _generation));
         // Owned Run/Retry never set the whole page's author busy flag: Cancel/history stay usable.
         var work = _plugin.Owner.HandleUserAsync(action,
-            () => { _message.Text = ""; Render(_plugin.Lifecycle.ReadAdmission()); },
-            () => { if (_active && generation == _generation) Render(_plugin.Lifecycle.ReadAdmission()); },
+            () => { if (IsCurrent()) { _messageRequest = null; _message.Text = ""; Render(_plugin.Lifecycle.ReadAdmission()); } },
+            () => { if (_active && !_plugin.PageProducersClosed && request.Generation == Interlocked.Read(ref _generation)) Render(_plugin.Lifecycle.ReadAdmission()); },
             error =>
             {
-                if (synchronousPrefix && _active && generation == _generation)
-                    _message.Text = "操作未完成：" + SafeCode(error) + "。执行记录保持原样。";
+                if (IsCurrent())
+                {
+                    _messageRequest = request;
+                    _message.Text = "操作未完成：" + SafeCode(error) + "。执行状态以已提交记录为准。";
+                }
             });
-        synchronousPrefix = false;
-        if (work.IsFaulted && _active && generation == _generation) _message.Text = "操作未接收：" + SafeCode(work.Exception!.InnerException!) + "。";
+        if (work.IsFaulted && IsCurrent())
+        {
+            _messageRequest = request;
+            _message.Text = "操作未接收：" + SafeCode(work.Exception!.InnerException!) + "。";
+        }
     }
 
     internal void Render(NativeTestingAdmission admission, bool retryFrame = false)
@@ -99,7 +107,8 @@ internal sealed class TestingOwnedPilotPanel : StackPanel
         try
         {
             var recovery = snapshot.ErrorCode == "RecoveryNeeded" || current?.RecoveryNeeded == true;
-            if (!admission.ActivityStarts || _plugin.Owned.IsBusy) _message.Text = "";
+            // A current Cancel/Select failure can arrive while execution is still busy. Latest model renders must retain it.
+            if (_messageRequest is not { } messageRequest || !_feedback.IsCurrent(messageRequest, Interlocked.Read(ref _generation))) _message.Text = "";
             var canStart = admission.ActivityStarts && _plugin.CanStart(_plugin.Controller.Snapshot, admission)
                 && !snapshot.AdmissionClosed && !snapshot.IsBusy && !recovery;
             _run.IsEnabled = canStart;
