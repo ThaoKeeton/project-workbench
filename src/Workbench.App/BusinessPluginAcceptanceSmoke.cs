@@ -261,6 +261,9 @@ internal sealed partial class BusinessPluginSmoke
         await AcceptanceActionAsync(digest, "history-detail-open", "history-detail");
         await AcceptanceTabAsync(digest, "digest-tabs", 2, "history-detail");
         Require(ById<TextBox>(digest, "history-detail").Text.Contains("CI 虚构摘要", StringComparison.Ordinal), "Actual scheduled Core history lacks the upstream fake summarizer result.");
+        if (options.BusinessProbe == "acceptance-seed")
+            await window.SmokeCaptureGalleryAsync(options, "upcam-acceptance-history", "view", AcceptanceId, "digest", digest,
+                "synthetic-fake-provider-sent", sent, ById<TextBox>(digest, "history-detail"));
     }
 
     private async Task<FrameworkElement> AcceptancePageAsync(bool settings)

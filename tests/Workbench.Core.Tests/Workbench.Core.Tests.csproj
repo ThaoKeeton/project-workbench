@@ -15,6 +15,7 @@
     <Compile Include="../../src/Workbench.App/PackagePresentation.cs" Link="Host/PackagePresentation.cs" />
     <Compile Include="../../src/Workbench.App/NativeProbeEvidence.cs" Link="Host/NativeProbeEvidence.cs" />
     <Compile Include="../../src/Workbench.App/NativeStoreObservation.cs" Link="Host/NativeStoreObservation.cs" />
+    <Compile Include="../../src/Workbench.App/NativeGalleryPolicy.cs" Link="Host/NativeGalleryPolicy.cs" />
     <Compile Include="../../src/Workbench.App/TestingNativeProbe.Diagnostics.cs" Link="Host/TestingNativeProbe.Diagnostics.cs" />
     <Compile Include="../../plugins/Shared/SampleTextBuffer.cs" Link="Samples/SampleTextBuffer.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeActionOwner.cs" Link="Testing/NativeActionOwner.cs" />

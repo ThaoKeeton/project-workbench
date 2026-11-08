@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Automation;
 using Microsoft.UI.Xaml.Controls;
 using Workbench.Sdk;
 using static Workbench.App.NativeRuntimeProbe;
@@ -47,6 +48,8 @@ internal static partial class TestingNativeProbe
         var set = await CurrentSetAsync(window, page);
         Require(set.Cases.Any(c => c.Steps.Any(s => s.Action is null)) && set.Cases.Any(c => c.Steps.All(s => s.Action is not null)), "Generation lost manual or explicit mapped cases.");
         checks.Add("traceable-manual-mapped-generation");
+        await window.SmokeCaptureGalleryAsync(options, "testing-authoring", "view", Id, "testing", page,
+            "packaged-sources-generated", set.Cases.Count, Find<TextBox>(page, "测试用例集名称"));
         SelectCase(page, set.Cases[0].Id);
         var editor = Find<TextBox>(page, "测试用例标题");
         editor.Text = "Synthetic =SUM(1,2) \"quoted\" 🧪\r\nfinal metadata";
@@ -90,6 +93,8 @@ internal static partial class TestingNativeProbe
         VerifyBmp(frame);
         await ShowFrameAsync(page, passed.Plan.Id, observed.Sequence, observed.NativePlainTextState!, frame.Receipt.Sha256);
         checks.Add("positive-actual-journal-bmp-native-decoder");
+        await window.SmokeCaptureGalleryAsync(options, "testing-virtual-evidence", "view", Id, "testing", page,
+            "simulated-frame-inside-native-ui", 1, Find<Image>(page, "SIMULATED 测试帧"));
         var empty = await RunCaseAsync(window, page, emptyCase.Id, TestRunState.Completed);
         Require(empty.Events.Any(e => e.NativePlainTextState?.Contains("Title required", StringComparison.Ordinal) == true), "Negative input was not actually rejected by the virtual form.");
         checks.Add("negative-empty-title-run");
@@ -111,6 +116,9 @@ internal static partial class TestingNativeProbe
         seed = await Store(window).AppendRunEventAsync(Id, seed.Plan.Id, seed.Sequence, seed.HeadHash, new(TestRunEventKind.StepStarted, passCase.Id, passCase.Steps[0].Id));
         Require(seed.State == TestRunState.Running && seed.Events.All(e => e.Kind != TestRunEventKind.StepFinished), "Synthetic interruption seed must contain no invented action/result.");
         checks.Add("synthetic-inflight-journal-seed-no-action");
+        var ownedStatus = Descendants<TextBlock>(page).FirstOrDefault(text => AutomationProperties.GetAutomationId(text) == "owned-pilot-status");
+        await window.SmokeCaptureGalleryAsync(options, "testing-owned-panel", "view", Id, "testing", page,
+            "owned-idle-no-run-proof", 0, ownedStatus, requireFocus: true);
         await WriteNewAsync(StatePath(options.UserRoot), System.Text.Json.JsonSerializer.SerializeToUtf8Bytes(new ProbeState(1, Environment.ProcessId,
             set.Id, passed.Plan.Id, observed.Sequence, observed.EvidenceIds.Single(), observed.NativePlainTextState!, frame.Receipt.Sha256,
             seed.Plan.Id, seed.Plan.CaseRevision, secondary, ""), Json));

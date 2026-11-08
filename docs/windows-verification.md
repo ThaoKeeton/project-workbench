@@ -2,6 +2,8 @@
 
 证据分层记录。Linux Core 行为测试、跨目标 C# 参考编译、Windows 发布、真实 WinUI 自动冒烟和 Windows 人工验收各有不同范围，不互相替代。
 
+当前 gallery 源码只在既有隔离合成探针的断言之后，被动渲染实际显示的 `MainWindow.Content`（宿主导航、页面和插件视图）。它不含 OS 标题栏、独立对话框、桌面或其他窗口。每张候选图由真实 WinUI RenderTargetBitmap、WinRT PNG 编码/解码产生；收集器核对启动器独立观察的 PID/出生与退出 FILETIME、当前 EXE/源码/安装插件哈希、原探针报告、PNG 字节/尺寸/非空像素及固定页面清单。无桌面、失效页面、失败原探针和不存在的 Docs 独立导航页在索引中明确列出；Docs 的可用替代是项目上下文编辑器。Testing 虚拟 SIMULATED BMP 即使出现在真实宿主 PNG 中，仍不成为实际设备截图。Linux 参考编译和此文档均不宣称已产生 WinUI 图像；需要同源码 Windows 2025 运行并由人检查下载图像是否裁剪、黑屏或缺失交互表面。Windows 11 的键盘/IME/DPI/选择器/无障碍与真实 provider 仍单独待验。
+
 受控执行页面已分阶段加入生产 TestingPage 源码，使用真实 OwnedPilotController/私有 journal 和固定生产 Win32 工厂。新增可移植测试链接实际 admission/bridge/lifecycle/evidence 实现，组合真实 Core/supervisor 与明确标识的 scripted owned transport，并保留源码、原始 RED/GREEN、参考编译和长度/哈希审计。它们不实例化 Windows/XAML/PRI/dispatcher/BitmapImage，不证明实际 UIA/GDI/job 或宿主根租约重新取得。页面晚到 Loaded/已捕获 Changed 的永久关闭路径已在源码中封闭并经完整参考编译；真实 WinUI 到达顺序仍待 Windows 验收。
 
 当前 all27 standalone、已安装面板/隔离/取消、现有 native/runtime/workspace/virtual/business51 与 12 PID+出生实例、SDK/最终交付、下载字节、干净生产两宿主 StepStarted 崩溃、升级/回滚和单独编译的 SourceAcceptance/实际合成 DPAPI 均未在此 Linux 阶段关闭。历史 9/27 后 CLR abort 仍 UNKNOWN。当前 CI 启动受账户付款/支出注解阻挡，未重试或改动账户；Windows11 人工验收继续延期。
@@ -83,17 +85,17 @@ pwsh -File .\scripts\native-smoke.ps1 -TimeoutSeconds 120
 
 | Artifact | 原始路径 | 用途 |
 | --- | --- | --- |
-| `workbench-win-x64` | `artifacts/native/app/` | 完整自包含可启动目录与两个独立插件包 |
-| `native-smoke-report` | `artifacts/native/native-smoke.json` | 原生运行检查、启动阶段、失败层与临时数据位置 |
-| `native-host-generated-sources` | `src/Workbench.App/obj/**/App.g*.cs`、`XamlTypeInfo.g.cs` | 检查固定 SDK 实际生成的入口、元数据和 InitializeComponent |
-| `native-startup-diagnostics` | `artifacts/native/native-stdout.log`、`native-stderr.log`、失败时的 `native-crash-events.json` | 进程输出及只匹配 Workbench.App 的 Windows Application 崩溃事件；无法读事件时记录原因 |
-| `native-debugger-evidence` | 尝试失败诊断时生成的 `artifacts/native/native-debug/` | Microsoft 签名的 x64 CDB 就地采集 HRESULT、错误消息、原生调用栈和采集状态；仅在尝试采集后上传，采集失败仍上传已有部分证据 |
 | `core-linux-results` | `artifacts/tests/` | Linux TRX |
-| `core-windows-results` | `artifacts/tests/` | Windows TRX（包括 Windows 文件系统分支） |
+| `native-verification-evidence` | `artifacts/native/` 下的 smoke、runtime、workspace、testing、business、owned、debug 与 gallery 原始报告/日志/收据，以及 Windows TRX 和生成源码 | 保留原探针失败与诊断；不含完整应用或插件交付树 |
+| `workbench-ui-gallery` | `artifacts/native/genuine-gallery/` | 仅索引有效时上传；固定 roster 的已核验 PNG 与 blocked/skipped/unreached 行，待人工看图 |
+| `workbench-win-x64` | `artifacts/native/app/` | 仅成功运行时的完整自包含目录 |
+| `workbench-testing-plugin-0.2.0` | `artifacts/native/testing-plugin/` | 仅成功运行时的独立安装包 |
+| `workbench-sdk-0.4.0` | `artifacts/sdk-snapshot.zip` | 仅成功运行时的固定 SDK 快照 |
+| `workbench-business-plugins` | `artifacts/native/business-plugins/` | 仅成功运行时的固定业务包 |
 
 如果 Core、发布或原生启动失败，job 保持失败状态；上传已有产物供排查，缺少必需报告不会被解释为通过。
 
-原生冒烟失败后才运行 `scripts/native-debug.ps1`，默认最多采集 240 秒；如需安装官方调试器，仅安装调试工具组件并验证 Microsoft 签名。采集只发布相关文本，不生成或上传进程内存 dump，不执行堆遍历或导出完整环境。调试器及被调试程序启动前清空继承环境，仅保留明确允许的 OS、运行时和代理配置，不继承 CI token。调试采集不修改原始失败判定。第六轮通过这些文本定位了 InfoBar 默认样式资源加载失败；第七轮补齐主 PRI 发布后完整冒烟通过。成功运行会跳过采集及其 artifact 上传；采集已尝试但失败或取消时，仍上传已有部分证据。必需的应用目录和冒烟报告仍严格要求存在。
+原生冒烟失败后才运行 `scripts/native-debug.ps1`，默认最多采集 240 秒；如需安装官方调试器，仅安装调试工具组件并验证 Microsoft 签名。采集只发布相关文本，不生成或上传进程内存 dump，不执行堆遍历或导出完整环境。调试器及被调试程序启动前清空继承环境，仅保留明确允许的 OS、运行时和代理配置，不继承 CI token。调试采集不修改原始失败判定。第六轮通过这些文本定位了 InfoBar 默认样式资源加载失败；第七轮补齐主 PRI 发布后完整冒烟通过。当前成功运行会跳过调试采集；尝试后产生的部分诊断统一进入 `native-verification-evidence`。应用目录仅在全任务成功时作为交付上传，失败报告仍在验证证据中。
 
 第十/十一轮实际原生失败后均尝试采集并成功上传 `native-debugger-evidence`，保留故障文本。第十二轮实际 job 结果显示采集与对应 artifact 上传均为 skipped；必需应用/报告 artifact 上传成功，日志没有缺少调试文件的 `No files were found` 警告。
 
@@ -126,7 +128,7 @@ runner 为 `management` 建立一个新 GUID 根，并为下列六阶段共享�
 | rollback-verify | 第五进程回到 v1、仍需重新信任；当前数据/凭据保持，暂存移除 |
 | remove-verify | 第六进程移除代码，保留当前 data/settings/secrets/代码历史；generic/guarded 执行计数没有增加 |
 
-报告 `artifacts/native/runtime-probes/<phase>.json` 包括该进程 PID、临时根、检查列表和真实启动顺序；stdout/stderr 与 summary.json 同目录。超时视为失败，runner 保留尚在运行的隔离进程并报告 PID，不以强杀证明停止。CI artifact 为 `native-runtime-probes`。后台/凭据原生行为、Windows 文件锁分支与 DPAPI 只有实际 Windows 运行成功后才算通过。
+报告 `artifacts/native/runtime-probes/<phase>.json` 包括该进程 PID、临时根、检查列表和真实启动顺序；stdout/stderr 与 summary.json 同目录。超时视为失败，runner 保留尚在运行的隔离进程并报告 PID，不以强杀证明停止。当前 CI 收进 `native-verification-evidence`。后台/凭据原生行为、Windows 文件锁分支与 DPAPI 只有实际 Windows 运行成功后才算通过。
 
 SDK artifact `workbench-sdk-0.2.0` 另行导出 manifest、两个 0.2.0 nupkg 和固定版本源码；完整重建/消费步骤与 Linux ReferenceOnly 限制见 [独立插件契约](integrations/plugin-contract-v1.md)。Task 3 不导入真实 UPCAM/钉钉包；真实 RequiresPluginStart 监控仍须遵守其业务自己的新预览/停用撤销策略，不能用通用夹具 Restore 结果冒充业务授权。
 
@@ -160,7 +162,7 @@ pwsh ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300
 | rollback | 原版完整字节恢复且需新信任；不恢复旧业务数据；真实页面/worker sample 仍可用，暂存保留数据的移除 |
 | remove | 启动前移除两个代码目录；业务程序集未加载，保留当前 data/settings/已有 secrets 和六份代码历史；再次验证当前文件 SHA256 |
 
-业务探针的 `artifacts/native/business-probes/<phase>.json` 和 `summary.json` 由 CI artifact `independent-business-plugin-probes` 收集，包含实际 PID、**实际 OS exitCode**、来源提交/ZIP SHA256、合成更新 ZIP SHA256、当前文件/备份/停止状态、已观察 worker 的实际 PID/exitCode、实际 WinUI Closed 事件和启动器退出后重新获取租约的证据。缺失报告、非零退出、PID/来源不匹配或超时均失败；已有原生成功报告也不能覆盖进程失败。超时保留已知进程所有权并停止后续阶段，不强杀来证明正常停止。
+业务探针的 `artifacts/native/business-probes/<phase>.json` 和 `summary.json` 由当前 CI artifact `native-verification-evidence` 收集，包含实际 PID、**实际 OS exitCode**、来源提交/ZIP SHA256、合成更新 ZIP SHA256、当前文件/备份/停止状态、已观察 worker 的实际 PID/exitCode、实际 WinUI Closed 事件和启动器退出后重新获取租约的证据。缺失报告、非零退出、PID/来源不匹配或超时均失败；已有原生成功报告也不能覆盖进程失败。超时保留已知进程所有权并停止后续阶段，不强杀来证明正常停止。
 
 当前源码还要求每个业务宿主实例的实际出生身份：原生宿主从自身 `Process.StartTime.ToUniversalTime().ToFileTimeUtc()` 写入正整数 Int64 `processCreationFileTimeUtc`；启动器在等待前保留刚启动的同一 `Process` 的实际句柄并独立读取创建 FILETIME，仅在确认 OS 已退出后读取实际退出 FILETIME/exitCode。完成报告将原生值分别保留为 `nativeProcessId`/`nativeProcessCreationFileTimeUtc`，并写入启动器的 `processId`/`processCreationFileTimeUtc`/`processExitFileTimeUtc`/`hasExited`/`exitCode`。缺失、字符串/浮点/布尔时间、出生不匹配、退出早于创建、非零退出及重复 PID+创建 FILETIME 均失败；已经退出后复用同一数字 PID、但实际出生值不同的实例有效。启动器核对固定顺序的 12 阶段与原有 27+24 项检查、Closed、包来源/哈希及租约门槛，在上传前输出有界的实际 phase/PID/创建/退出/检查数。查询失败保留已知事实及 null，不以 `completedUtc` 或当前时钟代替出生/退出。主报告失败被通用宿主诊断覆盖时，可将原生 `.evidence.json` 中的 PID/出生/phase/root 保留在标记 `diagnosticOnly` 的 `nativeFailureEvidence` 下；该旁证不补填主报告身份，也不能使失败变为成功。
 
@@ -212,6 +214,6 @@ UPCAM backend 的 Ready 状态与原生控件就绪分别核对：探针解析�
 
 ## Testing plugin 0.2.0 development gate
 
-The host0.4/API1 source builds a separately installable Testing0.2 ZIP with exactly eight files, including the private Windows driver and Production synthetic-target helper. It requires actual MSVC/Windows SDK compilation; ReferenceOnly does not produce a ZIP. Existing shipping-EXE `--testing-probe seed|verify` acceptance binds real ZIP SHA256, separate process instances, native Closed, actual OS exit and root leases; `testing-plugin-probes` retains original journal/receipt/CSV/SIMULATED BMP bytes and immutable runner sidecars. The synthetic interrupted journal seed is explicitly not an OS crash or executed device action. The new standalone `owned-lab-probes` gate requires27 real owned-window checks, separate from virtual evidence and the still-unimplemented owned WinUI panel. See [installation, controls and exact verification limits](testing-plugin.md).
+The host0.4/API1 source builds a separately installable Testing0.2 ZIP with exactly eight files, including the private Windows driver and Production synthetic-target helper. It requires actual MSVC/Windows SDK compilation; ReferenceOnly does not produce a ZIP. Existing shipping-EXE `--testing-probe seed|verify` acceptance binds real ZIP SHA256, separate process instances, native Closed, actual OS exit and root leases; `native-verification-evidence` retains original journal/receipt/CSV/SIMULATED BMP bytes and immutable runner sidecars. The synthetic interrupted journal seed is explicitly not an OS crash or executed device action. The standalone owned-lab gate still requires 27 real owned-window checks, separate from virtual evidence and the present native panel’s idle screenshot. See [installation, controls and exact verification limits](testing-plugin.md).
 
 At diagnostic source58f56ef, run42457380425/1 failed without observed runner/steps; ordinary job logs returned404. A later supported commit-check lookup followed by read-only check-annotation retrieval succeeded: both jobs state recent account payments failed OR the spending limit needs to increase. The exact alternative, account amount and available headroom remain unknown; no billing change or rerun was performed. This startup error differs from the five artifact-quota errors retained in historical8692. Current Core/toolchain/package/native/downstream execution is unavailable; artifacts0 is confirmed. The account remedy is pending an authorized owner, while local source development continues. Historical8692/run42454518257 passed Windows build, freshCore1238 and eight-file installation, then completed9of27 native checks before actual probe exit-532462766; underlying exception remained unavailable. None of those historical counts or hashes is current58 acceptance. The bounded diagnostic source repair passed local real-child regressions and scoped source review only. Full native27/current host/runtime/workspace/virtual/business51checks+12birth-aware instances/SDK/both final checks and independent downloaded-byte audits remain open. Linux reference checks cannot establish native runtime/PRI success. Windows11 human pickers, IME, DPI, accessibility and real-user-device/provider work remain deferred and unexecuted. Earlier tables and downloaded artifacts on this page retain their historical identities.

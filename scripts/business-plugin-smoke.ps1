@@ -6,6 +6,7 @@ param(
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 if (-not $IsWindows) { throw 'Business plugin smoke requires actual Windows WinUI, DPAPI and owned native worker processes.' }
+Import-Module (Join-Path $PSScriptRoot 'NativeGalleryReport.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'BusinessPluginReport.psm1') -Force
 $repo = Split-Path $PSScriptRoot -Parent
 $app = Join-Path $repo 'artifacts/native/app/Workbench.App.exe'
@@ -101,7 +102,25 @@ foreach ($phase in $phases) {
             ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $output 'summary.json') -Encoding utf8
         throw
     }
-    finally { if ($null -ne $process) { $process.Dispose() } }
+    finally {
+        if ($null -ne $process) {
+            if ($phase -in @('seed','acceptance-seed')) {
+                try {
+                    $packageIds = if ($synthetic) { @('com.projectworkbench.dingtalk-insights','com.upcam.task-digest.acceptance') }
+                        else { @('com.projectworkbench.dingtalk-insights','com.upcam.task-digest') }
+                    $sourceRoot = if ($synthetic) { $acceptanceFixtures } else { $fixtures }
+                    $sourceZips = @{}
+                    foreach ($input in $expected) { $sourceZips[$input.pluginId] = Join-Path $sourceRoot $input.packageFile }
+                    Write-NativeGalleryBinding -OriginalReportPath $report -Phase ("business-" + $phase) -ExecutablePath $app `
+                        -SourceCommit ((& git -C $repo rev-parse HEAD).Trim()) -ProcessId $processId `
+                        -ProcessCreationFileTimeUtc $creationFileTimeUtc -ProcessExitFileTimeUtc $exitFileTimeUtc `
+                        -ExitCode $code -HasExited $exited -InstalledRoot (Join-Path $root 'Plugins') -PackageIds $packageIds `
+                        -SourceZipRoot $sourceRoot -SourceZipPaths $sourceZips | Out-Null
+                } catch { Write-Warning 'NativeGalleryBindingUnavailable' }
+            }
+            $process.Dispose()
+        }
+    }
 }
 Assert-BusinessProcessInstances -Phases $completed -ExpectedPhases $phases
 @{ succeeded = $true; userRoot = $productionRoot; productionRoot = $productionRoot; acceptanceRoot = $acceptanceRoot; phases = $completed; productionProvenance = $inputs; acceptanceProvenance = $acceptanceInputs; shippingExecutableSha256 = $binarySha256;

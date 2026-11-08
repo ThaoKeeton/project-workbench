@@ -23,6 +23,7 @@ jobs:
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
           ./tests/scripts/TestingPluginProbe.Tests.ps1
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
+          ./tests/scripts/NativeGalleryReport.Tests.ps1
           ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
           ./tests/scripts/OwnedLabProbeStaging.Tests.ps1
           ./tests/scripts/OwnedLabProbeOutput.Tests.ps1
@@ -59,6 +60,7 @@ jobs:
           name: core-linux-results
           path: artifacts/tests
           if-no-files-found: error
+          retention-days: 1
   native-windows:
     runs-on: windows-2025
     timeout-minutes: 25
@@ -75,6 +77,7 @@ jobs:
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
           ./tests/scripts/TestingPluginProbe.Tests.ps1
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
+          ./tests/scripts/NativeGalleryReport.Tests.ps1
           ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
           ./tests/scripts/OwnedLabProbeStaging.Tests.ps1
           ./tests/scripts/OwnedLabProbeOutput.Tests.ps1
@@ -82,6 +85,7 @@ jobs:
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
       - name: Publish native host and independent plugins
+        id: publish_host
         shell: pwsh
         run: ./scripts/build.ps1
       - name: Core runtime and Windows filesystem tests
@@ -92,36 +96,51 @@ jobs:
           ./tests/scripts/DeliveryHostVersion.Tests.ps1
           ./tests/scripts/BusinessPluginDelivery.Tests.ps1 -AppDirectory ./artifacts/native/app
       - name: Independent testing package integrity and actual package-store install
+        id: testing_package
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
         shell: pwsh
         run: |
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
           dotnet run --project ./tests/Workbench.Testing.PackageProbe/Workbench.Testing.PackageProbe.csproj -c Release -- ./artifacts/native/testing-plugin/workbench-testing-plugin-0.2.0.zip
           if ($LASTEXITCODE -ne 0) { throw 'Actual testing package-store acceptance failed.' }
       - name: Export and verify production plugins paired with current host
+        id: business_export
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
         shell: pwsh
         run: |
           ./scripts/export-business-plugins.ps1 -RequireCurrentSource
           Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
           Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
-      - name: Actual owned Windows UIA capture identity and failure retirement
-        shell: pwsh
-        run: ./scripts/owned-lab-probe.ps1 -DeliveryDirectory ./artifacts/native/testing-plugin
       - name: Real WinUI isolated native smoke
         id: native_smoke
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
       - name: Native runtime management and actual process restarts
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/native-runtime-probe.ps1 -TimeoutSeconds 180
       - name: Native project workspaces and actual process restore
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/project-workspace-probe.ps1 -TimeoutSeconds 180
       - name: Independent testing plugin actual native pass failure cancel and process restore
+        if: ${{ always() && steps.publish_host.outcome == 'success' && steps.testing_package.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240
       - name: Independent DingTalk and UPCAM in current shipping app
+        if: ${{ always() && steps.publish_host.outcome == 'success' && steps.business_export.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300 -ProductionInputRoot ./artifacts/native/business-plugins
+      - name: Collect strict genuine WinUI gallery
+        id: gallery_collect
+        if: always()
+        shell: pwsh
+        run: ./scripts/collect-native-gallery.ps1
+      - name: Actual owned Windows UIA capture identity and failure retirement
+        if: ${{ always() && steps.publish_host.outcome == 'success' && steps.testing_package.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/owned-lab-probe.ps1 -DeliveryDirectory ./artifacts/native/testing-plugin
       - name: Export independent SDK source and NuGet snapshot
         shell: pwsh
         run: ./scripts/export-sdk.ps1
@@ -146,88 +165,53 @@ jobs:
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
-          name: native-runtime-probes
-          path: artifacts/native/runtime-probes/
+          name: native-verification-evidence
+          path: |
+            artifacts/native/native-smoke.json
+            artifacts/native/native-smoke.gallery-binding.json
+            artifacts/native/native-stdout.log
+            artifacts/native/native-stderr.log
+            artifacts/native/native-crash-events.json
+            artifacts/native/gallery/
+            artifacts/native/runtime-probes/
+            artifacts/native/workspace-probes/
+            artifacts/native/testing-probes/
+            artifacts/native/business-probes/
+            artifacts/native/owned-lab-probes/
+            artifacts/native/native-debug/
+            artifacts/tests/
+            src/Workbench.App/obj/**/App.g*.cs
+            src/Workbench.App/obj/**/XamlTypeInfo.g.cs
           if-no-files-found: warn
+          retention-days: 1
       - uses: actions/upload-artifact@v7.0.2
-        if: always()
+        if: ${{ always() && hashFiles('artifacts/native/genuine-gallery/index.json') != '' }}
         with:
-          name: project-workspace-probes
-          path: artifacts/native/workspace-probes/
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: independent-business-plugin-probes
-          path: artifacts/native/business-probes/
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: testing-plugin-probes
-          path: artifacts/native/testing-probes/
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: owned-lab-probes
-          path: artifacts/native/owned-lab-probes/
-          if-no-files-found: warn
+          name: workbench-ui-gallery
+          path: artifacts/native/genuine-gallery/
+          if-no-files-found: error
+          retention-days: 1
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: workbench-testing-plugin-0.2.0
           path: artifacts/native/testing-plugin/
           if-no-files-found: error
+          retention-days: 1
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: workbench-sdk-0.4.0
-          path: |
-            artifacts/sdk-snapshot/
-            artifacts/sdk-snapshot.zip
+          path: artifacts/sdk-snapshot.zip
           if-no-files-found: error
+          retention-days: 1
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: workbench-business-plugins
           path: artifacts/native/business-plugins/
           if-no-files-found: error
+          retention-days: 1
       - uses: actions/upload-artifact@v7.0.2
-        if: always()
         with:
           name: workbench-win-x64
           path: artifacts/native/app/
           if-no-files-found: error
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: native-smoke-report
-          path: artifacts/native/native-smoke.json
-          if-no-files-found: error
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: native-startup-diagnostics
-          path: |
-            artifacts/native/native-stdout.log
-            artifacts/native/native-stderr.log
-            artifacts/native/native-crash-events.json
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v7.0.2
-        if: always() && steps.native_debug.outcome != 'skipped' && steps.native_debug.outcome != ''
-        with:
-          name: native-debugger-evidence
-          path: artifacts/native/native-debug/
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: native-host-generated-sources
-          path: |
-            src/Workbench.App/obj/**/App.g*.cs
-            src/Workbench.App/obj/**/XamlTypeInfo.g.cs
-          if-no-files-found: warn
-      - uses: actions/upload-artifact@v7.0.2
-        if: always()
-        with:
-          name: core-windows-results
-          path: artifacts/tests
-          if-no-files-found: error
+          retention-days: 1

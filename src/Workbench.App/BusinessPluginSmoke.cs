@@ -95,6 +95,9 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
                         await TrustAsync(input.PluginId, approve: false);
                         await TrustAsync(input.PluginId, approve: true);
                     }
+                    var businessPlugins = await window.SmokeNavigateAsync("plugins");
+                    await window.SmokeCaptureGalleryAsync(options, "business-plugins", "plugins", null, null,
+                        businessPlugins, "pinned-installed-packages", _inputs.Length);
                     Record("Both pinned independently built ZIPs installed through shipping PluginPackageStore; disabled/untrusted/unloaded first; real native trust cancel and explicit approval of verified bytes");
                     await DingSeedAsync();
                     await UpcamAsync(full: true);
@@ -208,6 +211,8 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
         var background = await window.SmokeNavigateAsync("background");
         Require(!Find<Button>(background, $"启动后台任务 {Ding}/monitor").IsEnabled && !Find<ToggleSwitch>(background, $"恢复后台任务 {Ding}/monitor").IsEnabled,
             "Current shipping background UI offered generic Start/resume for the real guarded business task.");
+        await window.SmokeCaptureGalleryAsync(options, "business-background", "background", null, null,
+            background, "guarded-task-disabled", 1);
         Invoke(Find<Button>(background, $"打开后台任务所属插件页面 {Ding}/monitor"));
         await DingIdleAsync();
         Require(AutomationProperties.GetName(window.SmokeCurrentPage!) == "DTI 原生工作区", "Generic task UI did not route to the real business confirmation page.");
@@ -225,6 +230,11 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
         Require(File.Exists(Path.Combine(options.UserRoot, "data", Ding, "connection-draft.dpapi")), "Actual native settings did not persist the encrypted business draft.");
         Require(!File.ReadAllText(Path.Combine(options.UserRoot, "settings", Ding, "settings.json")).Contains(Draft), "Business draft entered host plaintext preferences.");
         await DingHostCredentialsAsync(settings);
+        settings = await DingPageAsync("settings");
+        foreach (var name in new[] { "DTI 新 OpenAI key", "DTI 新 Webhook URL", "DTI 新 Webhook 签名密钥" })
+            Require(Find<PasswordBox>(settings, name).Password.Length == 0, "Gallery settings editor was not blank.");
+        await window.SmokeCaptureGalleryAsync(options, "dingtalk-settings", "view", Ding, "settings", settings,
+            "blank-editors-saved-local-draft", 3);
         await window.SmokeNavigateAsync("home");
         var page = await DingPageAsync("workspace");
         Require(Find<CheckBox>(page, "DTI 使用模拟来源").IsChecked == true && Find<CheckBox>(page, "DTI 监控模型整理").IsChecked != true
@@ -243,6 +253,8 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
         await ConfirmAsync(page, "DTI 整理候选", true);
         await DingActionAsync("DTI 整理候选", () => Find<TextBox>(page, "DTI 待核实结果").Text.Contains("待核实") && Find<ComboBox>(page, "DTI 历史结果").Items.Count > 0);
         Record("Actual DingTalk native settings/DPAPI draft and recreated page; real Core demo read cancel/confirm, local search, evidence-backed organization/history; no provider network or send");
+        await window.SmokeCaptureGalleryAsync(options, "dingtalk-workspace", "view", Ding, "workspace", page,
+            "fictional-pending-verification", Find<ComboBox>(page, "DTI 历史结果").Items.Count);
         await StartDingAsync(page);
         var loop = DingTask("MonitoringCompletion");
         await window.SmokeNavigateAsync("home");
@@ -356,6 +368,8 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
             await UpcamReadyAsync(settings);
             CaptureWorkers();
             Require(Directory.EnumerateFiles(Path.Combine(options.UserRoot, "settings", Upcam), "*.json").Any(), "Native default-profile binding was not persisted.");
+            await window.SmokeCaptureGalleryAsync(options, "upcam-preferences", "view", Upcam, "preferences", settings,
+                "local-profile-bound", 1, TryById<Button>(settings, "default-profile"), requireFocus: true);
         }
         var page = await window.SmokeNavigateAsync("view", Upcam, "digest");
         await UpcamReadyAsync(page);
@@ -372,6 +386,9 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
         await WaitForUpcamViewAsync(page, "digest-tabs", 1,
             content => TryById<TextBox>(content, "diagnostic-output") is { IsLoaded: true });
         Require(ById<TextBox>(page, "diagnostic-output").Text == previewOutput && CaptureWorkers().SequenceEqual(workerIds), "Page recreation lost real preview output or duplicated workers.");
+        if (full)
+            await window.SmokeCaptureGalleryAsync(options, "upcam-preview", "view", Upcam, "digest", page,
+                "fictional-worker-preview", workerIds.Length, TryById<TextBox>(page, "diagnostic-output"), requireFocus: true);
         if (full)
         {
             Require(!(await Manager.ExecuteCommandAsync(Upcam, "scheduler-start")).Succeeded, "Production UPCAM started without saved automatic business authority.");

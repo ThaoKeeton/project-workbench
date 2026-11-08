@@ -117,6 +117,10 @@ internal static class NativeWorkspaceProbe
         await EditContextAsync(window, ContextA);
         await EditAudienceAsync(window, AudienceA);
         await SaveSyntheticCredentialAsync(window);
+        var singleContext = await window.SmokeNavigateAsync("context");
+        Require(Find<TextBox>(singleContext, "项目上下文编辑器").Text == ContextA, "Single-project gallery checkpoint lost the saved context.");
+        await window.SmokeCaptureGalleryAsync(options, "workspace-single-context", "context", null, null,
+            singleContext, "single-project-context", 1);
         var summary = await window.SmokeNavigateAsync("view", RunOptions.SampleIds[0], "summary");
         Find<TextBox>(summary, "工作摘要示例草稿").Text = SummaryDraft;
         var rootA = window.SmokeRuntime.UserRoot;
@@ -145,6 +149,10 @@ internal static class NativeWorkspaceProbe
         await EditContextAsync(window, ContextB);
         await EditAudienceAsync(window, AudienceB);
         await SetThemeAsync(window, ElementTheme.Light);
+        var multiContext = await window.SmokeNavigateAsync("context");
+        Require(Find<TextBox>(multiContext, "项目上下文编辑器").Text == ContextB, "Multi-project gallery checkpoint lost the saved context.");
+        await window.SmokeCaptureGalleryAsync(options, "workspace-multi-context", "context", null, null,
+            multiContext, "two-project-context", 2);
         await SelectAsync(window, "default");
         Require(window.SmokeRequestedTheme == ElementTheme.Dark, "Switch to A lost its theme.");
         await VerifyProjectAsync(window, ContextA, AudienceA, secret: true);

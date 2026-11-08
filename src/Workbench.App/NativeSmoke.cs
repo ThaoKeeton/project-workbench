@@ -26,7 +26,7 @@ internal static class NativeSmoke
         void Record(string check)
         {
             checks.Add(check);
-            options.WriteReport(new { succeeded = false, stage = "running", userRoot = options.UserRoot, checks, startupStages = options.StartupStages });
+            options.WriteReport(new { succeeded = false, stage = "running", userRoot = options.UserRoot, processId = Environment.ProcessId, checks, startupStages = options.StartupStages });
         }
         window.AssertUiThread();
         Require(SynchronizationContext.Current is Microsoft.UI.Dispatching.DispatcherQueueSynchronizationContext,
@@ -44,6 +44,10 @@ internal static class NativeSmoke
             && !p.IsLoaded && !p.IsTrusted && !p.DesiredEnabled), "Fresh smoke packages must be disabled and untrusted.");
         Require(manager.Diagnostics.Count == 0 && manager.Plugins.All(p => p.Diagnostics.Count == 0), "Discovery produced diagnostics.");
         Record("Only curated samples discovered; no real user state loaded");
+        var initialHome = await window.SmokeNavigateAsync("home");
+        await window.SmokeCaptureGalleryAsync(options, "home", "home", null, null, initialHome, "curated-disabled", manager.Plugins.Count);
+        var initialPlugins = await window.SmokeNavigateAsync("plugins");
+        await window.SmokeCaptureGalleryAsync(options, "host-plugins-disabled", "plugins", null, null, initialPlugins, "curated-disabled", manager.Plugins.Count);
         try
         {
             using var duplicate = HostRuntime.AcquireLease(options.UserRoot);
@@ -65,6 +69,8 @@ internal static class NativeSmoke
         }
         await AttachAllViewsAsync(window);
         Record("Both independent samples supplied shared WinUiView page/settings identities and attached native controls");
+        var enabledPlugins = await window.SmokeNavigateAsync("plugins");
+        await window.SmokeCaptureGalleryAsync(options, "host-plugins", "plugins", null, null, enabledPlugins, "curated-enabled", manager.Plugins.Count);
         foreach (var theme in new[] { ElementTheme.Default, ElementTheme.Light, ElementTheme.Dark })
             window.SmokeSetTheme(theme);
         Record("System/light/dark requested themes applied to the native root (visual appearance requires manual review)");
@@ -81,6 +87,13 @@ internal static class NativeSmoke
         };
         Require(files.All(file => File.Exists(file) && new FileInfo(file).Length > 0), "Local commands did not write isolated sample files.");
         Record("Local commands wrote nonempty draft and CSV under isolated DataDirectory paths");
+        foreach (var (shot, route) in new[] { ("host-commands", "commands"), ("host-background", "background"),
+            ("host-credentials", "credentials"), ("host-packages", "packages"), ("host-settings", "settings") })
+        {
+            var hostPage = await window.SmokeNavigateAsync(route);
+            await window.SmokeCaptureGalleryAsync(options, shot, route, null, null, hostPage,
+                route == "credentials" ? "blank-credentials" : "local-probe-state", route == "credentials" ? 0 : 1);
+        }
         var preparedSummaryDraft = await VerifySummaryDraftAsync(window, files[0]);
         await VerifySamplePreparationAsync(window, options.UserRoot, preparedSummaryDraft, files[0]);
         var finalSummaryPage = await OpenSummaryAsync(window);
@@ -88,6 +101,7 @@ internal static class NativeSmoke
         await EditAsync(finalSummaryEditor, SummaryStoppedDraft);
         var savedSummaryDraft = finalSummaryEditor.Text;
         Record("Real Summary editor retained navigation edits, explicit Save and regeneration protection; sample preferences autosaved without activation and project preparation flushed both sample drafts");
+        await window.SmokeCaptureGalleryAsync(options, "summary-page", "view", RunOptions.SampleIds[0], "summary", finalSummaryPage, "retained-draft", 1);
         foreach (var id in RunOptions.SampleIds)
         {
             window.SmokeDetach();
@@ -115,6 +129,14 @@ internal static class NativeSmoke
         await AttachAllViewsAsync(window);
         Record("Detached controls, disabled and re-enabled both samples, then attached fresh native factories");
         Record("Summary Stop saved the latest buffered edit; both samples reloaded retained drafts after disable/re-enable");
+        foreach (var (shot, id, viewId) in new[] {
+            ("summary-settings", RunOptions.SampleIds[0], "preferences"),
+            ("cases-page", RunOptions.SampleIds[1], "cases"),
+            ("cases-settings", RunOptions.SampleIds[1], "preferences") })
+        {
+            var pluginPage = await window.SmokeNavigateAsync("view", id, viewId);
+            await window.SmokeCaptureGalleryAsync(options, shot, "view", id, viewId, pluginPage, "asserted-sample-view", 1);
+        }
         await window.SmokeStopAsync();
         Require(manager.Contributions.Views.Count == 0 && manager.Contributions.Commands.Count == 0, "Shutdown retained active contributions.");
         Require(manager.Plugins.All(p => p.Diagnostics.Count == 0), "Lifecycle produced diagnostics.");
@@ -127,6 +149,7 @@ internal static class NativeSmoke
             succeeded = true,
             stage = "completed",
             userRoot = options.UserRoot,
+            processId = Environment.ProcessId,
             uiThreadId = Environment.CurrentManagedThreadId,
             checks,
             startupStages = options.StartupStages,
@@ -334,6 +357,16 @@ internal sealed partial class MainWindow
     {
         AssertUiThread();
         Navigate(new(page, pluginId, viewId));
+        // Keep the real selected sidebar item aligned with the existing attached page.
+        // SelectionChanged is suppressed here so it cannot invoke the factory twice.
+        _refreshing = true;
+        try
+        {
+            var target = new NavigationTarget(page, pluginId, viewId);
+            _navigation.SelectedItem = page == "settings" ? _navigation.SettingsItem
+                : _navigation.MenuItems.OfType<NavigationViewItem>().Single(item => Equals(item.Tag, target));
+        }
+        finally { _refreshing = false; }
         var element = _content.Content as FrameworkElement ?? throw new InvalidOperationException("Navigation did not supply a native page.");
         var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnLoaded(object sender, RoutedEventArgs args) => loaded.TrySetResult();
