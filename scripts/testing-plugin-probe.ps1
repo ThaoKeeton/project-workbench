@@ -14,7 +14,7 @@ $identity = [DateTime]::UtcNow.ToString('yyyyMMddTHHmmssZ') + '-' + [Guid]::NewG
 $output = Join-Path $repo "artifacts/native/testing-probes/$identity"
 New-Item $output -ItemType Directory | Out-Null
 $root = Join-Path (Join-Path ([IO.Path]::GetTempPath()) 'ProjectWorkbench-testing-probe') ([Guid]::NewGuid().ToString('N'))
-$hash = (Get-FileHash (Join-Path $delivery 'workbench-testing-plugin-0.1.0.zip') -Algorithm SHA256).Hash.ToLowerInvariant()
+$hash = (Get-FileHash (Join-Path $delivery (Get-TestingPluginPackageName)) -Algorithm SHA256).Hash.ToLowerInvariant()
 $completed = @(Invoke-TestingPluginProbePhases -OutputDirectory $output -ExpectedRoot $root -ExpectedPackageHash $hash -Observe {
     param($phase, $report, $observation)
     $process = $null

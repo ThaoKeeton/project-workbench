@@ -10,6 +10,37 @@ public sealed class OwnedWireTests
     private const string Session = "0123456789abcdef0123456789abcdef";
 
     [Fact]
+    public void Typed_responses_validate_manually_constructed_packets_and_freeze_captures()
+    {
+        var identity = new byte[64];
+        BinaryPrimitives.WriteUInt32LittleEndian(identity, 10); BinaryPrimitives.WriteUInt64LittleEndian(identity.AsSpan(4), 100);
+        BinaryPrimitives.WriteUInt32LittleEndian(identity.AsSpan(12), 20); BinaryPrimitives.WriteUInt64LittleEndian(identity.AsSpan(16), 200);
+        BinaryPrimitives.WriteUInt64LittleEndian(identity.AsSpan(24), 300);
+        var state = StringBody("title").Concat(StringBody("Saved")).Concat(StringBody("")).Concat(StringBody("1")).ToArray();
+        var ready = new OwnedPacket(OwnedWireKind.Ready, 1, Session, [.. identity, .. state]);
+        Assert.Equal("title", OwnedWireCodec.ReadReady(ready).State.Title);
+        var body = new byte[] { 2, 0 }.Concat(identity).Concat(state).Concat(new byte[] { 54, 163, 2, 0 }).Concat(OwnedLabTestRig.Bmp()).ToArray();
+        var result = new OwnedPacket(OwnedWireKind.Result, 2, Session, body);
+        var observation = OwnedWireCodec.ReadResult(result, OwnedWireKind.SetTitle);
+        Assert.Equal(172854, observation.Bmp.Length); body[^1] = 87; Assert.Equal(0, observation.Bmp[^1]);
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadResult(result, OwnedWireKind.Observe));
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadResult(result, OwnedWireKind.Init));
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadReady(ready with { Body = [.. ready.Body, 0] }));
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadReady(ready with { Kind = OwnedWireKind.Result }));
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadReady(ready with { Sequence = 0 }));
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadReady(ready with { Session = new('A', 32) }));
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadReady(ready with { Body = null! }));
+        Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadReady(null!));
+        foreach (var (code, expected) in new[] { (3, "ProtocolViolation"), (4, "TargetUnavailable"), (5, "DriverFailure"), (6, "CaptureFailure") })
+        {
+            var error = new OwnedPacket(OwnedWireKind.Error, 3, Session, [2, 0, (byte)code, 0]);
+            Assert.Equal(expected, OwnedWireCodec.ReadError(error, OwnedWireKind.SetTitle));
+            Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadError(error, OwnedWireKind.Observe));
+            Assert.Throws<OwnedLabException>(() => OwnedWireCodec.ReadError(error with { Body = [2, 0, 7, 0] }, OwnedWireKind.SetTitle));
+        }
+    }
+
+    [Fact]
     public void Init_body_accepts_only_exact_fixed_target_bounded_grant_and_no_extra_fields()
     {
         var prefix = Encoding.ASCII.GetBytes("abcdef0123456789abcdef0123456789").Concat(StringBody("project")).Concat(StringBody("plugin")).Concat(StringBody("owned.win32.task-form.v1")).Concat(new byte[96]).ToArray();

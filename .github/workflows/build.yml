@@ -22,6 +22,7 @@ jobs:
           ./tests/scripts/WorkspaceProbeReport.Tests.ps1
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
           ./tests/scripts/TestingPluginProbe.Tests.ps1
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -32,6 +33,19 @@ jobs:
           ./tests/scripts/BusinessPluginReport.Tests.ps1
       - name: Core runtime and real filesystem tests
         run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-linux.trx" --results-directory artifacts/tests
+      - name: Explicit owned reference compilation and missing helper refusals
+        shell: pwsh
+        run: |
+          dotnet build tests/Workbench.OwnedLab.WindowsProbe -c Release --nologo -p:OwnedLabReferenceOnly=true -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
+          if ($LASTEXITCODE -ne 0) { throw 'Owned reference probe compilation failed.' }
+          dotnet tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0/Workbench.OwnedLab.WindowsProbe.dll --reference-only-check
+          if ($LASTEXITCODE -ne 0) { throw 'Owned reference descriptor/queue refusal failed.' }
+          ./scripts/package-testing-plugin.ps1 -ReferenceOnly -OutputDirectory ./artifacts/reference-must-not-create-delivery
+          if (Test-Path ./artifacts/reference-must-not-create-delivery) { throw 'Reference compilation produced a production delivery.' }
+          $PSNativeCommandUseErrorActionPreference = $false
+          dotnet build plugins/Workbench.Testing.Windows -c Release --nologo --no-restore -t:Rebuild -p:OwnedLabReferenceOnly=false *> ./artifacts/tests/owned-missing-helper.log
+          if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath ./artifacts/tests/owned-missing-helper.log -Pattern 'UnavailableHelper:' -Quiet)) { throw 'Missing production helper was accepted or failed for an unrelated reason.' }
+          Write-Host 'Reference-only unavailable descriptor and missing production helper refusals passed; no native execution or ZIP.'
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
@@ -53,6 +67,7 @@ jobs:
           ./tests/scripts/WorkspaceProbeReport.Tests.ps1
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
           ./tests/scripts/TestingPluginProbe.Tests.ps1
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -70,7 +85,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
-          dotnet run --project ./tests/Workbench.Testing.PackageProbe/Workbench.Testing.PackageProbe.csproj -c Release -- ./artifacts/native/testing-plugin/workbench-testing-plugin-0.1.0.zip
+          dotnet run --project ./tests/Workbench.Testing.PackageProbe/Workbench.Testing.PackageProbe.csproj -c Release -- ./artifacts/native/testing-plugin/workbench-testing-plugin-0.2.0.zip
           if ($LASTEXITCODE -ne 0) { throw 'Actual testing package-store acceptance failed.' }
       - name: Export and verify production plugins paired with current host
         shell: pwsh
@@ -78,6 +93,9 @@ jobs:
           ./scripts/export-business-plugins.ps1 -RequireCurrentSource
           Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
           Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
+      - name: Actual owned Windows UIA capture identity and failure retirement
+        shell: pwsh
+        run: ./scripts/owned-lab-probe.ps1 -DeliveryDirectory ./artifacts/native/testing-plugin
       - name: Real WinUI isolated native smoke
         id: native_smoke
         shell: pwsh
@@ -140,8 +158,14 @@ jobs:
           path: artifacts/native/testing-probes/
           if-no-files-found: warn
       - uses: actions/upload-artifact@v7.0.2
+        if: always()
         with:
-          name: workbench-testing-plugin-0.1.0
+          name: owned-lab-probes
+          path: artifacts/native/owned-lab-probes/
+          if-no-files-found: warn
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-testing-plugin-0.2.0
           path: artifacts/native/testing-plugin/
           if-no-files-found: error
       - uses: actions/upload-artifact@v7.0.2

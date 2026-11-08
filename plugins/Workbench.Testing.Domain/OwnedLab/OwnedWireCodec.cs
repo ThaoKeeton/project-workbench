@@ -10,6 +10,40 @@ public static class OwnedWireCodec
     public const int MaximumBodyLength = 262144;
     public const int BmpLength = 172854;
 
+    public static (OwnedIdentity Identity, OwnedState State) ReadReady(OwnedPacket packet)
+    {
+        var reader = new BodyReader(Typed(packet, OwnedWireKind.Ready));
+        return (reader.Identity(), reader.State());
+    }
+
+    public static OwnedObservation ReadResult(OwnedPacket packet, OwnedWireKind expectedRequestKind)
+    {
+        var body = Typed(packet, OwnedWireKind.Result);
+        if (expectedRequestKind is not (OwnedWireKind.SetTitle or OwnedWireKind.ClickSave or OwnedWireKind.Observe)) Fail();
+        var reader = new BodyReader(body);
+        if (reader.U16() != (ushort)expectedRequestKind) Fail();
+        var identity = reader.Identity(); var state = reader.State(); reader.U32();
+        return new(identity, state, reader.Take(BmpLength).ToArray());
+    }
+
+    public static string ReadError(OwnedPacket packet, OwnedWireKind expectedRequestKind)
+    {
+        var body = Typed(packet, OwnedWireKind.Error);
+        if (expectedRequestKind is < OwnedWireKind.Init or > OwnedWireKind.Close) Fail();
+        var reader = new BodyReader(body);
+        if (reader.U16() != (ushort)expectedRequestKind) Fail();
+        return reader.U16() switch { 3 => "ProtocolViolation", 4 => "TargetUnavailable", 5 => "DriverFailure", 6 => "CaptureFailure", _ => throw new OwnedLabException("ProtocolViolation") };
+    }
+
+    private static byte[] Typed(OwnedPacket packet, OwnedWireKind kind)
+    {
+        if (packet is null || packet.Body is null) throw new OwnedLabException("ProtocolViolation");
+        if (packet.Kind != kind) Fail();
+        var body = packet.Body.ToArray();
+        Header(packet.Kind, packet.Sequence, packet.Session, body.Length);
+        ValidateBody(kind, body); return body;
+    }
+
     public static byte[] Encode(OwnedPacket packet)
     {
         var body = packet.Body.ToArray();

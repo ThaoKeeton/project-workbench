@@ -1,6 +1,7 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../scripts/TestingPluginProbe.psm1') -Force
+if ((Get-TestingPluginPackageName) -cne 'workbench-testing-plugin-0.2.0.zip') { throw 'Testing probe package identity is stale.' }
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('testing-report-regression-' + [Guid]::NewGuid().ToString('N'))
 New-Item $temp -ItemType Directory | Out-Null
 try {

@@ -1,10 +1,9 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Directory, [switch]$AllowReferenceOnly, [switch]$RequireCurrentSource)
+param([string]$Directory, [switch]$AllowReferenceOnly, [switch]$RequireCurrentSource, [switch]$HelperGuardsOnly)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../scripts/TestingPluginDelivery.psm1') -Force
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '../..'))
-Test-TestingPluginDelivery -Directory $Directory -AllowReferenceOnly:$AllowReferenceOnly -RequireCurrentSource:$RequireCurrentSource
 $temp = Join-Path ([IO.Path]::GetTempPath()) ('testing-package-regression-' + [Guid]::NewGuid().ToString('N'))
 $hiddenParent = Join-Path $temp '.hidden-parent'
 $hiddenLink = Join-Path $hiddenParent 'linked-parent'
@@ -16,8 +15,33 @@ function Refuses([scriptblock]$Action, [string]$Expected) {
     }
     throw "Expected $Expected; corrupt testing delivery was accepted."
 }
+if ($HelperGuardsOnly) {
+    $module = Get-Module TestingPluginDelivery
+    $descriptor = @{ Available = $true; ImageSha = '1' * 64; NativeSourceSha = '2' * 64; SourceCommit = '3' * 40; Msvc = 'actual-msvc-required'; Sdk = 'actual-sdk-required'; Profile = 'Production' }
+    Refuses { & $module { param($d) Assert-TestingOwnedHelper -Image ([byte[]]::new(0)) -Descriptor $d } $descriptor } 'TestingOwnedHelperInvalid'
+    Refuses { & $module { param($d) Assert-TestingOwnedHelper -Image ([byte[]]::new(1024)) -Descriptor $d } $descriptor } 'TestingOwnedHelperInvalid'
+    $descriptor.Profile = 'ReferenceOnly'; $descriptor.Available = $false
+    Refuses { & $module { param($d) Assert-TestingOwnedHelper -Image ([byte[]]::new(1024)) -Descriptor $d } $descriptor } 'TestingOwnedHelperDescriptorInvalid'
+    Refuses { New-TestingPluginDelivery -BuildDirectory $temp -OutputDirectory (Join-Path $temp 'delivery') -ReferenceOnly } 'TestingDeliveryReferenceOnly'
+    Refuses { New-TestingPluginDelivery -BuildDirectory $temp -OutputDirectory (Join-Path $temp 'delivery') } 'TestingOwnedHelperMissing'
+    if (Test-Path (Join-Path $temp 'delivery')) { throw 'Missing/reference helper created a production output.' }
+    $records = @(& $module { param($root) Get-TestingSourceFiles $root } $repo | Where-Object path -CLike 'native/Workbench.OwnedLab/*' | Sort-Object path -CaseSensitive)
+    $sourceText = ($records | ForEach-Object { "$($_.path) $($_.length) $($_.sha256)`n" }) -join ''
+    $sourceText += "profile=Production`nmacro=`n"
+    $descriptor.NativeSourceSha = [Convert]::ToHexStringLower([Security.Cryptography.SHA256]::HashData([Text.UTF8Encoding]::new($false).GetBytes($sourceText)))
+    $build = @{ sources = $records; staticCrt = $true; macro = '' }
+    & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor
+    $build.macro = 'FORBIDDEN_PRODUCTION_FAULT'
+    Refuses { & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor } 'TestingOwnedHelperSourceInvalid'
+    $build.macro = ''; $records[0].sha256 = '0' * 64
+    Refuses { & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor } 'TestingOwnedHelperSourceInvalid'
+    Write-Host 'Owned helper packaging guards passed; synthetic guard checks do not establish native execution.'
+    return
+}
+if (-not $Directory) { throw 'Pass the actual delivery directory or -HelperGuardsOnly.' }
+Test-TestingPluginDelivery -Directory $Directory -AllowReferenceOnly:$AllowReferenceOnly -RequireCurrentSource:$RequireCurrentSource
 function Refresh-Sums([string]$Root) {
-    @('README.md','provenance.json','workbench-testing-plugin-0.1.0.zip' | ForEach-Object { (Get-FileHash (Join-Path $Root $_) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_ }) | Set-Content (Join-Path $Root 'SHA256SUMS')
+    @('README.md','provenance.json','workbench-testing-plugin-0.2.0.zip' | ForEach-Object { (Get-FileHash (Join-Path $Root $_) -Algorithm SHA256).Hash.ToLowerInvariant() + '  ' + $_ }) | Set-Content (Join-Path $Root 'SHA256SUMS')
 }
 try {
     $hiddenDelivery = Join-Path $hiddenParent 'delivery'
@@ -75,7 +99,7 @@ try {
         Remove-Item $temp -Recurse -Force
         New-Item $temp -ItemType Directory | Out-Null
         Copy-Item (Join-Path $Directory '*') $temp -Recurse
-        $zipPath = Join-Path $temp 'workbench-testing-plugin-0.1.0.zip'
+        $zipPath = Join-Path $temp 'workbench-testing-plugin-0.2.0.zip'
         $archive = [IO.Compression.ZipFile]::Open($zipPath, [IO.Compression.ZipArchiveMode]::Update)
         try {
             if ($mutation -eq 'extra-sdk') { $entry = $archive.CreateEntry('Workbench.Sdk.dll'); $text = 'forbidden SDK copy' }

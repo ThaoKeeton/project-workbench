@@ -1,4 +1,5 @@
 Set-StrictMode -Version Latest
+function Get-TestingPluginPackageName { return 'workbench-testing-plugin-0.2.0.zip' }
 function Get-TestingRequiredChecks {
     param([string]$Phase)
     if ($Phase -ceq 'seed') {
@@ -248,4 +249,4 @@ function Invoke-TestingPluginProbePhases {
     }
     return $completed
 }
-Export-ModuleMember -Function Complete-TestingPluginProbeReport, Invoke-TestingPluginProbePhases
+Export-ModuleMember -Function Complete-TestingPluginProbeReport, Invoke-TestingPluginProbePhases, Get-TestingPluginPackageName

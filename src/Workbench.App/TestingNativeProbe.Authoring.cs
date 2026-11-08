@@ -12,7 +12,7 @@ internal static partial class TestingNativeProbe
     private static async Task SeedAsync(MainWindow window, RunOptions options, List<string> checks)
     {
         var installed = window.SmokeManager.Plugins.Single(p => p.Manifest?.Id == Id);
-        Require(installed.Manifest is { Version: "0.1.0", MinimumHostVersion: "0.4.0", EntryAssembly: "Workbench.Testing.dll" }, "Installed independent package identity differed.");
+        Require(installed.Manifest is { Version: "0.2.0", MinimumHostVersion: "0.4.0", EntryAssembly: "Workbench.Testing.dll" }, "Installed independent package identity differed.");
         var page = await EnableAsync(window);
         Require(page.IsLoaded && page.XamlRoot is not null && window.WorkspaceMenu.Items.Count == 1
             && window.WorkspaceSelector.Visibility != Visibility.Visible, "Default same-window UI was not clean and attached.");

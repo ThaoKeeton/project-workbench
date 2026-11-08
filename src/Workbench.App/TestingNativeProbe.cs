@@ -17,7 +17,7 @@ internal static partial class TestingNativeProbe
 {
     private const string Id = "com.projectworkbench.testing";
     private const string Marker = "ProjectWorkbench synthetic testing probe schema1";
-    private static string PackageZip => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "testing-plugin", "workbench-testing-plugin-0.1.0.zip"));
+    private static string PackageZip => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "testing-plugin", "workbench-testing-plugin-0.2.0.zip"));
     private static string MarkerPath(string root) => Path.Combine(root, "isolated-testing-probe.txt");
     private static string StatePath(string root) => Path.Combine(root, "testing-probe-state.json");
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase, PropertyNameCaseInsensitive = true };

@@ -16,6 +16,7 @@ try {
     # This fixed, repository-local output root prevents stale packages entering the distribution.
     if (Test-Path $outputRoot) { Remove-Item $outputRoot -Recurse -Force }
     New-Item $appOutput -ItemType Directory -Force | Out-Null
+    & (Join-Path $repo 'scripts/build-owned-lab.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $outputRoot 'owned-lab')
     $app = Join-Path $repo 'src/Workbench.App/Workbench.App.csproj'
     Invoke-DotNet -Arguments @('restore', $app, '-r', 'win-x64')
     Invoke-DotNet -Arguments @('publish', $app, '--no-restore', '-c', $Configuration, '-r', 'win-x64', '--self-contained', 'true', '-o', $appOutput)
