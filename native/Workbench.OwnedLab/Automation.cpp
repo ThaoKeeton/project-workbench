@@ -18,7 +18,11 @@ State Automation::Read(const TargetProcess& target) {
 }
 void Automation::Set(const TargetProcess& target,std::wstring_view title) {
     ValidateTitle(title); Com<IUIAutomationElement> element; Element(target,1001,element.Put()); Com<IUIAutomationValuePattern> pattern;
-    Ok(element->GetCurrentPatternAs(UIA_ValuePatternId,IID_PPV_ARGS(pattern.Put()))); Ok(pattern->SetValue(std::wstring(title).c_str()));
+    Ok(element->GetCurrentPatternAs(UIA_ValuePatternId,IID_PPV_ARGS(pattern.Put())));
+    String value;
+    value.value=SysAllocStringLen(title.empty() ? L"" : title.data(),static_cast<UINT>(title.size()));
+    if (!value.value) Fail(5);
+    Ok(pattern->SetValue(value.value));
 }
 void Automation::Save(const TargetProcess& target) { Com<IUIAutomationElement> element; Element(target,1002,element.Put()); Com<IUIAutomationInvokePattern> pattern; Ok(element->GetCurrentPatternAs(UIA_InvokePatternId,IID_PPV_ARGS(pattern.Put()))); Ok(pattern->Invoke()); }
 }
