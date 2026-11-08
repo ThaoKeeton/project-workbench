@@ -76,7 +76,7 @@ One product writer at a time. Root controls review, commits' publication, and Ac
 
 ### Task 3: Actual public Windows discriminator and shipping verification
 
-**Files:** No product mutation admitted by this task. Root records evidence in this plan workspace.
+**Files:** No product code mutation admitted by this task. Root records evidence in this plan workspace and may record verified run/download/image facts in `docs/windows-verification.md` and `docs/install-business-plugins.md` after actual audits. Documentation-only outcome recording requires no new runtime build; final review includes it.
 
 **Interfaces:** Consumes reviewed Tasks 1/2 exact HEAD; produces verified run/artifact identity, per-test counts and actual sidecar interpretation.
 

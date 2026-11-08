@@ -1,5 +1,7 @@
 # 钉钉与 UPCAM 生产插件安装
 
+2026-11-08 已核对的配套批次为 [Actions42518602297](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297)，功能源码 `655d7b6496067daad7c5e4cefb1f1da1b8379536`、宿主0.4.0/API1：[完整宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633291911)与[两个业务生产插件](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13632778983)已下载核对实际字节；原生自动矩阵及51项双插件检查通过。下方安装层级/固定插件版本与本批次一致。产物按一天保留，链接是否仍有效以Actions页面为准；这不是installer、签名release或Windows11人工验收。全程只用合成数据，没有真实Webhook或钉钉消息；当前不要求用户开始人工集中验收。
+
 从本仓库**同一次成功的 Windows Actions 运行**下载 `workbench-win-x64` 和 `workbench-business-plugins`。前者是完整宿主目录；后者是可按需安装的两个生产插件。保留整个宿主目录后启动 `Workbench.App.exe`，不能只复制 EXE。人工验收目标为仍在微软服务期内的 Windows 11 24H2 或更新版本、x64；版本下限不表示该版本所有 edition 仍受支持，请核对[微软版本服务信息](https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information)。Server 2025 自动检查与 Windows 11 人工检查分别记录。
 
 `workbench-business-plugins` 的 GitHub 外层下载 ZIP 先解压到普通目录，得到：
@@ -50,7 +52,7 @@ if ((Get-FileHash (Join-Path $app 'Workbench.App.exe')).Hash -ne $manifest.host.
 
 ## 已有的上游下载如何选择
 
-仍可从已发布的上游运行获取原包，避免把独立应用目录当插件：
+若上游产物仍在有效期内，也可从下列运行获取原包；已过期时选择同次新构建的业务配套，避免把独立应用目录当插件：
 
 - [钉钉 42295585483 的产物](https://github.com/ThaoKeeton/dingtalk-insights/actions/runs/42295585483/artifacts/13542127319)：先解压 GitHub 外层下载，再找 `workbench-plugin/DingTalkInsights.Workbench-0.3.2-win-x64.zip`。该内层 ZIP 已有根 `plugin.json`，在“导入 ZIP”选择它。
 - [UPCAM 42268731102 的产物](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42268731102/artifacts/13529430900)：先解压 GitHub 外层下载，找到 `UPCAMTaskDigest-workbench-production-0.1.0-win-x64.zip`，再解压该原厂内层 ZIP，进入 `com.upcam.task-digest` 文件夹。使用“包维护”→“导入文件夹”（或“插件”→“从本地文件夹安装”），在 FolderPicker 中选择**直接包含 `plugin.json` 的这个文件夹**。不要选其父目录；选择器可取消。
