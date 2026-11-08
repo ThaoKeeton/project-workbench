@@ -1,11 +1,15 @@
 [CmdletBinding()]
-param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release')
+param([ValidateSet('Debug', 'Release')][string]$Configuration = 'Release', [switch]$IncludeSourceAcceptance)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
-if (-not $IsWindows) { throw 'Native publish requires Windows; use Core tests or explicit reference-only checks on Linux.' }
+$deliveryModule = Import-Module (Join-Path $PSScriptRoot 'TestingPluginDelivery.psm1') -Force -PassThru
 $repo = Split-Path $PSScriptRoot -Parent
 $outputRoot = Join-Path $repo 'artifacts/native'
 $appOutput = Join-Path $outputRoot 'app'
+& $deliveryModule { param($p) Assert-TestingFreshDirectory $p } $outputRoot
+$packageBuild = Join-Path $repo $(if ($IncludeSourceAcceptance) { 'artifacts/testing-source-acceptance-package-build' } else { 'artifacts/testing-package-build' })
+& $deliveryModule { param($p) Assert-TestingFreshDirectory $p } $packageBuild
+if (-not $IsWindows) { throw 'Native publish requires Windows; use Core tests or explicit reference-only checks on Linux.' }
 function Invoke-DotNet {
     param([string[]]$Arguments)
     & dotnet @Arguments
@@ -13,8 +17,7 @@ function Invoke-DotNet {
 }
 Push-Location $repo
 try {
-    # This fixed, repository-local output root prevents stale packages entering the distribution.
-    if (Test-Path $outputRoot) { Remove-Item $outputRoot -Recurse -Force }
+    # Earlier native artifacts/evidence are preserved; preflight above refuses any nonempty root.
     New-Item $appOutput -ItemType Directory -Force | Out-Null
     & (Join-Path $repo 'scripts/build-owned-lab.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $outputRoot 'owned-lab')
     $app = Join-Path $repo 'src/Workbench.App/Workbench.App.csproj'
@@ -56,7 +59,10 @@ try {
     }
     Copy-Item (Join-Path $repo 'tests/Workbench.NativeFixture/plugin.json') $fixtureOutput
     # Independently installable testing ZIP stays outside app/Plugins and the frozen business companion.
-    & (Join-Path $repo 'scripts/package-testing-plugin.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $outputRoot 'testing-plugin')
+    if ($IncludeSourceAcceptance) {
+        & (Join-Path $repo 'scripts/package-testing-plugin.ps1') -Configuration $Configuration -Profile SourceAcceptance -OutputDirectory (Join-Path $outputRoot 'source-acceptance-fixture') -PairedProductionDirectory (Join-Path $outputRoot 'testing-plugin')
+    }
+    else { & (Join-Path $repo 'scripts/package-testing-plugin.ps1') -Configuration $Configuration -OutputDirectory (Join-Path $outputRoot 'testing-plugin') }
     if (-not (Test-Path (Join-Path $appOutput 'Workbench.App.exe'))) { throw 'Published executable is missing.' }
     Write-Host "Complete self-contained app directory: $appOutput"
 }

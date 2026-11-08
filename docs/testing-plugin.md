@@ -4,7 +4,7 @@
 
 能力清单在现有四项提示上增加 `remote-figma-read` 与 `openai-case-authoring`，用于说明明确发起的远程动作；它们不是受强制执行的权限边界。开发包已升至 0.2.0，增加私有 Windows 驱动和自带合成目标 helper；最低宿主 0.4.0、SDK/API 1、程序集版本 1.0.0.0 不变。同窗口受控执行页面已加入生产源码，并以实际控制器、日志和 Core/supervisor 验证可移植所有权组合；完整原生检查、实际加载页面和维护验收仍未完成，不能将开发包视为已验收发布。
 
-Windows 构建需要 .NET 10 SDK、PowerShell 7、MSVC x64 C++ 工具和 Windows SDK，见[构建说明](../README.md)。执行 `pwsh ./scripts/build.ps1` 后，完整宿主位于 `artifacts/native/app`，测试交付单独位于 `artifacts/native/testing-plugin`。CI 配置的下载名为 `workbench-win-x64`、`workbench-sdk-0.4.0` 和 `workbench-testing-plugin-0.2.0`；实际有可用产物时，选择同一运行/源码提交的产物。在“插件”导入测试交付中的 `workbench-testing-plugin-0.2.0.zip`，审查指纹并确认信任启用。安装不会自动信任或运行。更新需要安全退出并重启。
+Windows 构建需要 .NET 10 SDK、PowerShell 7、MSVC x64 C++ 工具和 Windows SDK，见[构建说明](../README.md)。默认执行 `pwsh ./scripts/build.ps1` 仍只生成生产测试交付；显式 `-IncludeSourceAcceptance` 另启用成对源码夹具交付。两种模式均在任何构建前拒绝非空 `artifacts/native` 和所选 package-build 根，不再删除旧产物或证据。完整宿主位于 `artifacts/native/app`，测试交付单独位于 `artifacts/native/testing-plugin`。CI 配置的下载名为 `workbench-win-x64`、`workbench-sdk-0.4.0` 和 `workbench-testing-plugin-0.2.0`；实际有可用产物时，选择同一运行/源码提交的产物。在“插件”导入测试交付中的 `workbench-testing-plugin-0.2.0.zip`，审查指纹并确认信任启用。安装不会自动信任或运行。更新需要安全退出并重启。
 
 CI 在 SDK 快照验证后、任何原生产物上传前，复核测试交付与业务交付；上传配额不足仍会使工作流失败，并可能没有可下载产物。Server 自动检查不替代 Windows 11 人工验收或实际下载字节审计。
 
@@ -34,7 +34,7 @@ CI 在 SDK 快照验证后、任何原生产物上传前，复核测试交付与
 
 独立源码夹具 `com.projectworkbench.testing.source-acceptance`（0.2.0，最低宿主 0.4.0）通过内部组合入口委托同一个生产 TestingPlugin、页面、控制器与生命周期。它只有终端内存 HTTP，使用固定合成值、明确的单次 arm/release 与有界 schema1 只读计数；计数仅代表夹具处理器进入/返回，不是 provider 送达或存储提交。被选 Figma 来源与 AI 回执由真实解析器和 Core 文件存储产生，AI 步骤仍为手动。生产默认入口继续使用真实客户端；初始化、编辑、刷新和导航不会自动请求。
 
-此第一阶段只验证可移植组合及实际独立入口的 managed ReferenceOnly 编译。夹具不进入普通 `app/Plugins`，不创建 fixture ZIP，也不改变生产八文件交付。十文件 fixture 包、实际已安装控件、Windows DPAPI 和原生 Stop 释放协议另行待验：Stop 撤销 SDK 命令后，不能再靠 release 命令解除 held IO。Linux 测试用同一份夹具源码、真实 Core/supervisor 和明确的合成 protector，不是 WinUI/DPAPI/真实 provider 证明。凭据沿用 `runtime userRoot + pluginId` 命名空间；生产工作区协调器为不同项目选择独立 runtime root，协议另核对捕获的 projectId。同一 userRoot/同一 pluginId 仅改 projectId 元数据仍共用既有 secret store；受信进程内夹具不宣称更强隔离。
+现已加入封闭的 `Production|SourceAcceptance` 包配置，默认仍为 Production。显式 Windows 成对模式从同一次完整传递 Rebuild 导出八文件生产包和十文件夹具包；夹具仅替换 `plugin.json`，另加 `Workbench.Testing.SourceAcceptance.dll` 和 `.deps.json`。另外七项与显式配对的生产 ZIP 逐字节一致。夹具输出为 `artifacts/native/source-acceptance-fixture/workbench-testing-source-acceptance-0.2.0.zip`，外层仍精确四个文件，始终不进入普通 `app/Plugins`。`New-TestingPluginDelivery` / `Test-TestingPluginDelivery -Profile SourceAcceptance` 必须显式传入同轮 `-ProductionDirectory`；Production 拒绝该参数。清单要求 API1、最低宿主0.4.0、固定 entry 和六项生产提示加唯一 `source-acceptance-fixture` 提示。当前本地证据仍只证明脚本结构拒绝、真实 PE 元数据审计与独立入口 managed ReferenceOnly 编译；实际 Windows 正向打包/安装、已安装控件、Windows DPAPI 和原生 Stop 释放协议另行待验：Stop 撤销 SDK 命令后，不能再靠 release 命令解除 held IO。Linux 测试用同一份夹具源码、真实 Core/supervisor 和明确的合成 protector，不是 WinUI/DPAPI/真实 provider 证明。凭据沿用 `runtime userRoot + pluginId` 命名空间；生产工作区协调器为不同项目选择独立 runtime root，协议另核对捕获的 projectId。同一 userRoot/同一 pluginId 仅改 projectId 元数据仍共用既有 secret store；受信进程内夹具不宣称更强隔离。
 
 源码验证与 Windows 验收分开记录。Linux 可执行：
 
@@ -43,19 +43,28 @@ dotnet test tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj -c Release --
 dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release --nologo -p:OwnedLabReferenceOnly=true -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
 pwsh ./scripts/package-testing-plugin.ps1 -ReferenceOnly
 pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
+pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly -Profile SourceAcceptance
+pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -StructuralGuardsOnly
 pwsh ./tests/scripts/TestingPluginProbe.Tests.ps1
 pwsh ./scripts/export-sdk.ps1 -ReferenceOnly
 pwsh ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-reference-snapshot
 ```
 
-`package-testing-plugin.ps1 -ReferenceOnly` 只编译不可用驱动，不生成 ZIP 或新的交付目录；不能接着用旧目录假装验证了新包。SDK 的 ReferenceOnly 快照也不证明 Windows PRI 或运行。生产交付输出不覆盖旧目录；单独重新打包时使用新的 `-OutputDirectory`。Windows 构建后才能执行实际包与原生检查：
+`package-testing-plugin.ps1 -ReferenceOnly` 只编译不可用驱动，不生成 ZIP 或新的交付目录；不能接着用旧目录假装验证了新包。SDK 的 ReferenceOnly 快照也不证明 Windows PRI 或运行。两个配置的交付输出及保留的构建根均不覆盖旧目录；单独重新打包时需保留旧根并使用新的干净 checkout/保留根，不要拿旧 DLL 续作新交付。`package-testing-plugin.ps1 -Profile SourceAcceptance` 使用保留的 `artifacts/testing-source-acceptance-package-build` 和可选 `-PairedProductionDirectory`（默认普通生产目录），只构建夹具图一次并从其共同输出导出两包；不能分开 Rebuild 后声称字节一致。ReferenceOnly 不生成任一交付。Windows 构建后才能执行实际包与原生检查：
 
 ```powershell
 pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
 dotnet run --project tests/Workbench.Testing.PackageProbe -c Release -- artifacts/native/testing-plugin/workbench-testing-plugin-0.2.0.zip
+# 以下检查适用于在新 checkout 以 build.ps1 -IncludeSourceAcceptance 完成的成对构建；不能接着覆盖上次输出。
+pwsh ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/source-acceptance-fixture -Profile SourceAcceptance -ProductionDirectory ./artifacts/native/testing-plugin -RequireCurrentSource
+dotnet run --project tests/Workbench.Testing.PackageProbe -c Release -- artifacts/native/source-acceptance-fixture/workbench-testing-source-acceptance-0.2.0.zip --profile SourceAcceptance --report artifacts/source-package-install-receipt.json
 pwsh ./scripts/owned-lab-probe.ps1 -DeliveryDirectory ./artifacts/native/testing-plugin
 pwsh ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240
 ```
+
+共享私有 ZIP reader 同时供完整交付验证和可移植结构测试使用；结构测试不绕过原生 helper / 当前宿主 / managed 验证，也不构成完整交付正向证明。清单/deps JSON 有2 MiB、深度32、严格 UTF-8、重复字段（不区分大小写）和尾随 JSON 拒绝；单项 payload 上限16 MiB。`TestingManagedPayloadAudit.cs` 只读取 PE/JSON，不加载程序集：核验私有名称、assembly1.0.0.0/file0.2.0.0/info0.2.0+commit、x64/Domain portable、真实方法体、非 reference assembly、公开具体 IWorkbenchPlugin entry 和公开无参构造，以及固定私有 deps 图、runtime DLL 路径和实际宿主共享/内嵌框架目录身份。外部第三方 deps 项按真实宿主图核对，不把所有第三方 runtime 资产复制进 ZIP。provenance 中的审计事实必须重算一致；新增 helper/test 源也进入源码哈希拒绝检查。
+
+包存储探针保留原单参数生产调用，并支持显式 `--profile SourceAcceptance` 与可选 `--report <new-file>`。报告必须位于四文件交付外且不得覆盖，schema1/64 KiB 上限；stdout 也输出 JSON。它用真实 PluginPackageStore、新隔离根、精确安装文件/字节、disabled/untrusted/unloaded 发现和重复拒绝，并检查原始包在宿主0.3.0拒绝/0.4.0安装，以及错误API/高于宿主 minimum 的变体拒绝；保留 owned probe 根以便审计。安装检查从不证明激活或 WinUI 运行，当前 Windows 正向结果仍待实际同源码运行。
 
 独立 owned-lab 检查使用真实自带合成窗口，要求全部 27 项；它不证明插件内受控执行页面或通用电脑控制。现有虚拟执行探针只打开 `%TEMP%/ProjectWorkbench-testing-probe/<GUID>` 的专用合成根。真实 shipping EXE 两进程 seed/verify 使用实际安装 ZIP、注册页面/命令和公开 Core 存储，不静态引用测试 entry/domain。
 
