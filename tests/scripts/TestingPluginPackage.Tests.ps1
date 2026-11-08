@@ -35,6 +35,14 @@ if ($HelperGuardsOnly) {
     Refuses { & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor } 'TestingOwnedHelperSourceInvalid'
     $build.macro = ''; $records[0].sha256 = '0' * 64
     Refuses { & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor } 'TestingOwnedHelperSourceInvalid'
+    $allSources = @(& $module { param($root) Get-TestingSourceFiles $root } $repo)
+    foreach ($path in @('scripts/OwnedLabProbeStaging.psm1','tests/scripts/OwnedLabProbeStaging.Tests.ps1')) {
+        $record = @($allSources | Where-Object path -CEQ $path)
+        $file = Get-Item -LiteralPath (Join-Path $repo $path)
+        if ($record.Count -ne 1 -or $record[0].length -ne $file.Length -or $record[0].sha256 -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'Native fixture staging source is missing or incorrect in delivery provenance.' }
+        $changed = @($allSources | ForEach-Object { @{ path = $_.path; length = $_.length; sha256 = $(if ($_.path -ceq $path) { '0' * 64 } else { $_.sha256 }) } })
+        Refuses { & $module { param($current,$recorded) Assert-TestingSourceRecords -Current $current -Recorded $recorded } $allSources $changed } 'TestingSourceHashMismatch'
+    }
     Write-Host 'Owned helper packaging guards passed; synthetic guard checks do not establish native execution.'
     return
 }

@@ -5,6 +5,7 @@ Set-StrictMode -Version Latest
 if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') { throw 'OwnedLabProbeUnavailable: actual Windows x64 is required; no native result was produced.' }
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'TestingPluginDelivery.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'OwnedLabProbeStaging.psm1') -Force
 Test-TestingPluginDelivery -Directory $DeliveryDirectory -RequireCurrentSource
 $zip = Join-Path $DeliveryDirectory 'workbench-testing-plugin-0.2.0.zip'
 $zipSha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -32,21 +33,12 @@ foreach ($record in $metadata.payload) {
 }
 $fixtures = Join-Path $output 'native-fixtures'
 & (Join-Path $PSScriptRoot 'build-owned-lab.ps1') -Configuration Release -OutputDirectory $fixtures -BuildAcceptanceFixtures
-Copy-Item -LiteralPath (Join-Path $fixtures 'fixtures') -Destination $stage -Recurse
-foreach ($name in @('PartialHeader','TruncatedInit','ExtraInit','OversizeInit','CrossSessionAction','OutOfOrderAction')) {
-    Copy-Item -LiteralPath (Join-Path $stage 'fixtures/NestedJob') -Destination (Join-Path $stage "fixtures/$name") -Recurse
+$fixtureRoot = Copy-OwnedLabProbeNativeFixtures -BuildDirectory $fixtures -StageDirectory $stage
+New-Item -ItemType Junction -Path (Join-Path $fixtureRoot 'Reparse') -Target (Join-Path $fixtureRoot 'NestedJob') | Out-Null
+foreach ($record in $metadata.payload) {
+    $file = Get-Item -LiteralPath (Join-Path $stage $record.path)
+    if ($file.Length -ne $record.length -or (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $record.sha256) { throw 'OwnedLabProbeShippingBytesChanged' }
 }
-foreach ($name in @('Missing','FakePe','WrongHash')) {
-    $directory = Join-Path $stage "fixtures/$name"; New-Item $directory -ItemType Directory -Force | Out-Null
-    Copy-Item (Join-Path $stage 'fixtures/NestedJob/descriptor.json') $directory
-    if ($name -ceq 'FakePe') { [IO.File]::WriteAllBytes((Join-Path $directory 'Workbench.OwnedLab.exe'),[byte[]]@(0x4d,0x5a,0,0)) }
-    elseif ($name -ceq 'WrongHash') {
-        Copy-Item (Join-Path $stage 'fixtures/NestedJob/Workbench.OwnedLab.exe') $directory
-        $bad = Get-Content (Join-Path $directory 'descriptor.json') -Raw | ConvertFrom-Json -AsHashtable
-        $bad.ImageSha = '0' * 64; $bad | ConvertTo-Json -Depth 4 | Set-Content (Join-Path $directory 'descriptor.json') -Encoding utf8
-    }
-}
-New-Item -ItemType Junction -Path (Join-Path $stage 'fixtures/Reparse') -Target (Join-Path $stage 'fixtures/NestedJob') | Out-Null
 $process = $null; $succeeded = $false; $identity = $null
 try {
     $dotnet = (Get-Command dotnet).Source
@@ -64,7 +56,7 @@ try {
     if ($report.schema -ne 1 -or $report.succeeded -isnot [bool] -or -not $report.succeeded -or @($report.checks).Count -ne 27) { throw 'OwnedLabProbeChecksIncomplete' }
     $leases = @()
     try {
-        foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $output 'observations') -Recurse -File -Filter owner.lock) + @(Get-Item (Join-Path $stage 'Workbench.OwnedLab.exe')) + @(Get-ChildItem -LiteralPath (Join-Path $stage 'fixtures') -Recurse -File -Filter Workbench.OwnedLab.exe | Where-Object { $_.Directory.Name -cne 'Reparse' })) {
+        foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $output 'observations') -Recurse -File -Filter owner.lock) + @(Get-Item (Join-Path $stage 'Workbench.OwnedLab.exe')) + @(Get-ChildItem -LiteralPath $fixtureRoot -Recurse -File -Filter Workbench.OwnedLab.exe | Where-Object { $_.Directory.Name -cne 'Reparse' })) {
             $leases += [IO.File]::Open($file.FullName,[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)
         }
     }

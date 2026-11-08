@@ -3,6 +3,7 @@ using Workbench.OwnedLab.WindowsProbe;
 
 if (args is ["--reference-only-check"]) { await NativeChecks.ReferenceOnlyAsync(); return; }
 if (args is ["--scenario-policy-check"]) { NativeChecks.ScenarioPolicyChecks(); return; }
+if (args is ["--fixture-staging-check"]) { NativeChecks.FixtureStagingChecks(); return; }
 if (!OperatingSystem.IsWindows() || !Environment.Is64BitProcess) throw new PlatformNotSupportedException("Actual Windows x64 native execution is required.");
 if (args.Length != 2) throw new ArgumentException("Pass the retained report directory and exact ZIP SHA256.");
 var output = Path.GetFullPath(args[0]);

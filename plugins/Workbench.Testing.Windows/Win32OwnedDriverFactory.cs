@@ -32,7 +32,7 @@ public sealed class Win32OwnedDriverFactory : IOwnedDriverFactory
     private Win32OwnedDriverFactory(OwnedScope scope, TimeProvider time, NativeFixture fixture)
     {
         _scope = scope with { DataDirectory = Path.GetFullPath(scope.DataDirectory) }; _time = time; _profile = "AcceptanceFixture"; _fixture = fixture;
-        var directory = Path.Combine(Path.GetDirectoryName(typeof(Win32OwnedDriverFactory).Assembly.Location)!, "fixtures", fixture.ToString());
+        var directory = Path.Combine(Path.GetDirectoryName(typeof(Win32OwnedDriverFactory).Assembly.Location)!, "native-fixtures", fixture.ToString());
         HelperPath = Path.Combine(directory, "Workbench.OwnedLab.exe");
         _descriptor = System.Text.Json.JsonSerializer.Deserialize<OwnedDriverDescriptor>(File.ReadAllBytes(Path.Combine(directory, "descriptor.json"))) ?? throw new InvalidDataException("Fixture descriptor missing.");
     }

@@ -9,6 +9,20 @@ namespace Workbench.OwnedLab.WindowsProbe;
 
 internal sealed class NativeChecks(string output, string zipSha)
 {
+    internal static void FixtureStagingChecks()
+    {
+        var scope = new OwnedScope("fixture-staging", "com.projectworkbench.testing", AppContext.BaseDirectory);
+        foreach (var fixture in Enum.GetValues<NativeFixture>())
+        {
+            var factory = FixtureFactory.ForAcceptanceFixture(scope, TimeProvider.System, fixture);
+            var expected = Path.Combine(AppContext.BaseDirectory, "native-fixtures", fixture.ToString(), "Workbench.OwnedLab.exe");
+            Require(factory.HelperPath == expected, "Fixture launcher must resolve its own staged fixture.");
+            Require(File.Exists(factory.HelperPath) == (fixture != NativeFixture.Missing), "Staged helper presence must match the closed fixture selector.");
+        }
+        Require(!typeof(Win32OwnedDriverFactory).Assembly.GetTypes().Any(t => t.Name == "NativeFixture" || t.Namespace == "Workbench.OwnedLab.FixtureLauncher"), "Fixture selectors must be physically absent from the shipping launcher.");
+        Console.WriteLine("All 22 separately compiled fixture selectors resolved staged descriptors/helpers; shipping launcher has no fixture selector. Data only, no native execution.");
+    }
+
     internal static void ScenarioPolicyChecks()
     {
         static OwnedNativeReceipt Observed(int exit) => new(10, 100, 20, 200, exit, exit, true, true, 0, true, true, true);
