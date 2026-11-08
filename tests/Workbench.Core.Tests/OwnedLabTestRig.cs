@@ -48,6 +48,7 @@ internal sealed class ScriptedDriver : IOwnedDriverFactory, IOwnedSession
     internal int ObservationFault = 0;
     internal OwnedRetirement Retirement = new(true, 0, 0, 0);
     internal OwnedGrant? Grant;
+    internal byte[]? FirstBmp;
     internal OwnedHelperIdentity CurrentHelper = new(new('1', 64), new('2', 64), new('3', 40), "scripted-msvc", "scripted-sdk", "AcceptanceFixture");
     private OwnedState _state = new("", "", "", "0");
     private CancellationTokenRegistration _registration;
@@ -80,6 +81,7 @@ internal sealed class ScriptedDriver : IOwnedDriverFactory, IOwnedSession
         if (ObservationFault == 1) throw new OwnedLabException("DriverFailure");
         var identity = ObservationFault == 2 ? Identity with { TargetPid = 21 } : Identity;
         var bmp = OwnedLabTestRig.Bmp(); if (ObservationFault == 3) bmp[54 + (179 - 158) * 960 + 286 * 3] = 0;
+        if (ActionCalls == 1) FirstBmp = bmp;
         return new(identity, _state, bmp);
     }
     public async ValueTask<OwnedRetirement> RetireAsync(OwnedRetirementReason reason)
@@ -120,25 +122,29 @@ internal sealed class PublicationFiles : OwnedAtomicFiles
 internal sealed class TestClock : TimeProvider
 {
     private long _ticks;
+    private int _timerCount;
     private readonly List<ClockTimer> _timers = [];
+    internal bool DeliverTimerCallbacks = true;
+    internal AsyncGate? FirstCommandDisposalGate;
     public override long TimestampFrequency => TimeSpan.TicksPerSecond;
     public override long GetTimestamp() => Interlocked.Read(ref _ticks);
     public override DateTimeOffset GetUtcNow() => new DateTimeOffset(2026, 11, 8, 0, 0, 0, TimeSpan.Zero).AddTicks(GetTimestamp());
     public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
     {
-        var timer = new ClockTimer(this, callback, state); lock (_timers) _timers.Add(timer); timer.Change(dueTime, period); return timer;
+        var disposalGate = Interlocked.Increment(ref _timerCount) == 2 ? FirstCommandDisposalGate : null;
+        var timer = new ClockTimer(this, callback, state, disposalGate); lock (_timers) _timers.Add(timer); timer.Change(dueTime, period); return timer;
     }
     internal void Advance(TimeSpan span)
     {
         Interlocked.Add(ref _ticks, span.Ticks); ClockTimer[] timers; lock (_timers) timers = _timers.ToArray();
-        foreach (var timer in timers) timer.Fire();
+        if (DeliverTimerCallbacks) foreach (var timer in timers) timer.Fire();
     }
-    private sealed class ClockTimer(TestClock clock, TimerCallback callback, object? state) : ITimer
+    private sealed class ClockTimer(TestClock clock, TimerCallback callback, object? state, AsyncGate? disposalGate) : ITimer
     {
         private long _due = long.MaxValue;
         public bool Change(TimeSpan dueTime, TimeSpan period) { _due = dueTime == Timeout.InfiniteTimeSpan ? long.MaxValue : clock.GetTimestamp() + dueTime.Ticks; return true; }
         internal void Fire() { if (clock.GetTimestamp() < _due) return; _due = long.MaxValue; callback(state); }
         public void Dispose() => _due = long.MaxValue;
-        public ValueTask DisposeAsync() { Dispose(); return ValueTask.CompletedTask; }
+        public async ValueTask DisposeAsync() { Dispose(); if (disposalGate is not null) await disposalGate.HoldAsync(); }
     }
 }

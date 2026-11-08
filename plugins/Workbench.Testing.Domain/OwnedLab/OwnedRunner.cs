@@ -36,10 +36,14 @@ internal static class OwnedRunner
                 progress(await journal.AppendAsync(runId, new(OwnedEventKind.StepStarted, StepIndex: index)).ConfigureAwait(false));
                 authority.Check();
                 OwnedObservation observation;
-                await using (var commandDeadline = authority.CommandDeadline(clock))
+                await using (var commandTimer = authority.CommandDeadline(clock, out var commandDeadline))
+                {
                     observation = await session.ExecuteAsync(input.Steps[index].Action, authority.Token).ConfigureAwait(false);
-                // A returned observation survives revocation; freeze it before any accepted store awaits.
-                observation = observation with { Bmp = observation.Bmp.ToArray() };
+                    // Freeze the returned buffer before even asynchronous timer disposal can yield.
+                    observation = observation with { Bmp = observation.Bmp.ToArray() };
+                    // Timer delivery may lag its monotonic deadline; revoke without discarding this valid return.
+                    if (clock.GetTimestamp() >= commandDeadline) authority.Request("Expired");
+                }
                 if (observation.Identity != identity) throw new OwnedLabException("ProtocolViolation");
                 OwnedWireCodec.ValidateState(observation.State);
                 try { OwnedWireCodec.ValidateBmp(observation.Bmp); }
@@ -143,12 +147,14 @@ internal sealed class OwnedRevocation
         var error = ErrorCode;
         if (error is not null || Gate.IsRevoked) throw new OwnedLabException(error ?? "Cancelled");
     }
-    internal ITimer CommandDeadline(TimeProvider clock)
+    internal ITimer CommandDeadline(TimeProvider clock, out long commandDeadline)
     {
         if (!_bound) throw new InvalidOperationException();
-        var remaining = clock.GetElapsedTime(clock.GetTimestamp(), _deadline);
+        var now = clock.GetTimestamp();
+        var remaining = clock.GetElapsedTime(now, _deadline);
         if (remaining <= TimeSpan.Zero) { Request("Expired"); Check(); }
-        return clock.CreateTimer(_ => Request("Expired"), null, remaining < TimeSpan.FromSeconds(10) ? remaining : TimeSpan.FromSeconds(10), Timeout.InfiniteTimeSpan);
+        commandDeadline = remaining <= TimeSpan.FromSeconds(10) ? _deadline : checked(now + clock.TimestampFrequency * 10);
+        return clock.CreateTimer(_ => Request("Expired"), null, clock.GetElapsedTime(now, commandDeadline), Timeout.InfiniteTimeSpan);
     }
     internal async Task FinishAsync()
     {

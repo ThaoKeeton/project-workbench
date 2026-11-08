@@ -6,6 +6,54 @@ namespace Workbench.Core.Tests;
 public sealed class OwnedRunnerTests
 {
     [Theory]
+    [InlineData(10)]
+    [InlineData(11)]
+    public async Task Delayed_timer_delivery_cannot_erase_command_expiry_or_discard_late_result(int elapsedSeconds)
+    {
+        using var rig = new OwnedLabTestRig(); var action = new AsyncGate();
+        rig.Clock.DeliverTimerCallbacks = false; rig.Driver.ActionGate = action;
+        var controller = rig.Controller(); await controller.InitializeAsync(); var running = controller.RunAsync(OwnedScenario.Positive);
+        try
+        {
+            await action.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            rig.Clock.Advance(TimeSpan.FromSeconds(elapsedSeconds));
+            Assert.False(running.IsCompleted); Assert.True(controller.Snapshot.IsBusy);
+            action.Release(); var result = await running;
+            Assert.Equal(OwnedRunState.Failed, result.State); Assert.Equal("Expired", result.ErrorCode);
+            Assert.Equal(1, rig.Driver.ActionCalls); var observation = Assert.Single(result.Events, e => e.Kind == OwnedEventKind.StepResult);
+            Assert.Equal(OwnedOutcome.Passed, observation.Outcome); Assert.Equal("Owned pilot task", observation.State!.Title);
+            Assert.Equal(OwnedLabTestRig.Bmp(), await controller.ReadFrameAsync(result.Execution.RunId, observation.Sequence));
+            Assert.Equal(OwnedOutcome.Failed, result.Events[^1].Outcome); Assert.Equal("Expired", result.Events[^1].ErrorCode);
+            Assert.False(result.Events[^1].UncertainStep); Assert.Equal(new OwnedRetirement(true, 0, 0, 0), result.Events[^1].Retirement);
+        }
+        finally { action.Release(); await controller.StopAsync(); }
+    }
+
+    [Theory]
+    [InlineData(60)]
+    [InlineData(21072)] // First calibration center: a reused buffer must not invalidate the already returned frame.
+    public async Task Returned_BMP_is_frozen_before_joining_asynchronous_command_timer_disposal(int mutationOffset)
+    {
+        using var rig = new OwnedLabTestRig(); var disposal = new AsyncGate(); rig.Clock.FirstCommandDisposalGate = disposal;
+        var controller = rig.Controller(); await controller.InitializeAsync(); var running = controller.RunAsync(OwnedScenario.Positive);
+        var expected = OwnedLabTestRig.Bmp();
+        var expectedSha = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(expected));
+        try
+        {
+            await disposal.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.False(running.IsCompleted); Assert.True(controller.Snapshot.IsBusy); Assert.Equal(1, rig.Driver.ActionCalls);
+            Assert.NotNull(rig.Driver.FirstBmp); rig.Driver.FirstBmp[mutationOffset] = 0x7a;
+            disposal.Release(); var result = await running;
+            Assert.Equal(OwnedRunState.Passed, result.State); Assert.Equal(4, rig.Driver.ActionCalls);
+            var observation = result.Events.First(e => e.Kind == OwnedEventKind.StepResult);
+            var retained = await controller.ReadFrameAsync(result.Execution.RunId, observation.Sequence);
+            Assert.Equal(expected, retained); Assert.Equal(expectedSha, observation.FrameSha);
+            Assert.Equal(expectedSha, Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(retained)));
+        }
+        finally { disposal.Release(); await controller.StopAsync(); }
+    }
+
+    [Theory]
     [InlineData(1, "DriverFailure")]
     [InlineData(2, "ProtocolViolation")]
     [InlineData(3, "CaptureFailure")]
