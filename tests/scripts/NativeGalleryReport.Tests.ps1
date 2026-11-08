@@ -3,6 +3,69 @@ param()
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../scripts/NativeGalleryReport.psm1') -Force
+function Assert-GalleryFixtureVersionResource([string]$Path, [string]$ExpectedVersion) {
+    $stream = [IO.File]::OpenRead($Path)
+    try {
+        $reader = [Reflection.PortableExecutable.PEReader]::new($stream)
+        try {
+            $resource = $reader.PEHeaders.PEHeader.ResourceTableDirectory
+            if ($resource.RelativeVirtualAddress -eq 0 -or $resource.Size -lt 16) {
+                throw 'Test-only PE lacks a Win32 version resource directory.'
+            }
+            [byte[]]$bytes = $reader.GetSectionData($resource.RelativeVirtualAddress).GetContent(0, $resource.Size)
+            $count = [BitConverter]::ToUInt16($bytes, 12) + [BitConverter]::ToUInt16($bytes, 14)
+            $hasVersionType = $false
+            for ($i = 0; $i -lt $count; $i++) {
+                if ([BitConverter]::ToUInt32($bytes, 16 + 8 * $i) -eq 16) { $hasVersionType = $true; break }
+            }
+            if (-not $hasVersionType) { throw 'Test-only PE lacks Win32 RT_VERSION.' }
+            $needle = [Text.Encoding]::Unicode.GetBytes($ExpectedVersion)
+            $hasExpectedVersion = $false
+            for ($i = 0; $i -le $bytes.Length - $needle.Length; $i++) {
+                $match = $true
+                for ($j = 0; $j -lt $needle.Length; $j++) {
+                    if ($bytes[$i + $j] -ne $needle[$j]) { $match = $false; break }
+                }
+                if ($match) { $hasExpectedVersion = $true; break }
+            }
+            if (-not $hasExpectedVersion) { throw 'Test-only Win32 RT_VERSION lacks the expected source version.' }
+            # The tiny fixture source has no version literal; this UTF-8 payload must
+            # come from SDK-generated managed assembly metadata, without loading net10
+            # code into the possibly older PowerShell runtime on Windows.
+            [byte[]]$managedBytes = $reader.GetMetadata().GetContent()
+            $managedNeedle = [Text.Encoding]::UTF8.GetBytes($ExpectedVersion)
+            $hasManagedVersion = $false
+            for ($i = 0; $i -le $managedBytes.Length - $managedNeedle.Length; $i++) {
+                $match = $true
+                for ($j = 0; $j -lt $managedNeedle.Length; $j++) {
+                    if ($managedBytes[$i + $j] -ne $managedNeedle[$j]) { $match = $false; break }
+                }
+                if ($match) { $hasManagedVersion = $true; break }
+            }
+            if (-not $hasManagedVersion) { throw 'Test-only PE lacks the expected managed version payload.' }
+        } finally { $reader.Dispose() }
+    } finally { $stream.Dispose() }
+}
+function New-GalleryVersionPe([string]$Path, [string]$Commit, [string]$Case, [string]$WorkRoot) {
+    if ($Commit -cnotmatch '^[0-9a-f]{40}$' -or $Case -cnotmatch '^[a-z-]+$') {
+        throw 'Test-only PE version arguments are invalid.'
+    }
+    $project = Join-Path $PSScriptRoot 'fixtures/NativeGalleryVersionPe/NativeGalleryVersionPe.csproj'
+    $work = Join-Path $WorkRoot "version-pe-$Case"
+    $obj = [IO.Path]::GetFullPath((Join-Path $work 'obj')).Replace('\', '/') + '/'
+    $out = [IO.Path]::GetFullPath((Join-Path $work 'out')).Replace('\', '/') + '/'
+    $dotnet = (Get-Command dotnet -CommandType Application).Source
+    $buildArguments = @('build', $project, '-c', 'Release', '--nologo',
+        "-p:GalleryFixtureCommit=$Commit", "-p:BaseIntermediateOutputPath=$obj",
+        "-p:OutputPath=$out", '-p:AppendTargetFrameworkToOutputPath=false')
+    Write-Host ('Test-only PE argv JSON: ' + (@($dotnet) + $buildArguments | ConvertTo-Json -Compress -Depth 3))
+    & $dotnet @buildArguments
+    $buildExit = $LASTEXITCODE
+    Write-Host "Test-only PE build observed exit: $buildExit"
+    if ($buildExit -ne 0) { throw "Test-only PE build failed: $Case" }
+    [IO.File]::Copy((Join-Path $out 'NativeGalleryVersionPe.dll'), $Path, $false)
+    Assert-GalleryFixtureVersionResource $Path "0.4.0+$Commit"
+}
 $root = Join-Path ([IO.Path]::GetTempPath()) ('NativeGalleryReceipt-' + [Guid]::NewGuid().ToString('N'))
 New-Item -Path $root -ItemType Directory | Out-Null
 try {
@@ -12,12 +75,9 @@ try {
     $app = Join-Path $root 'Workbench.App.exe'
     [IO.File]::WriteAllBytes($app, [Text.Encoding]::ASCII.GetBytes('synthetic-executable-for-receipt-policy'))
     $appHash = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant()
-    # Add-Type emits a real metadata-bearing test PE. It is not the shipping host DLL.
+    # The SDK emits managed metadata and RT_VERSION; this remains a test-only PE.
     $hostDll = Join-Path $root 'Workbench.App.dll'
-    $hostSource = @"
-using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+$source")] public static class GalleryReceiptTestPe {}
-"@
-    Add-Type -TypeDefinition $hostSource -OutputAssembly $hostDll -OutputType Library
+    New-GalleryVersionPe $hostDll $source 'positive' $root
     if ([Diagnostics.FileVersionInfo]::GetVersionInfo($hostDll).ProductVersion -cne "0.4.0+$source") {
         throw 'Test-only host PE does not carry the requested informational version.'
     }
@@ -80,10 +140,7 @@ using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+$source"
     $differentApp = Join-Path $differentDirectory 'Workbench.App.exe'
     [IO.File]::Copy($app, $differentApp)
     $differentDll = Join-Path $differentDirectory 'Workbench.App.dll'
-    $differentSource = @'
-using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")] public static class GalleryDifferentVersionPe {}
-'@
-    Add-Type -TypeDefinition $differentSource -OutputAssembly $differentDll -OutputType Library
+    New-GalleryVersionPe $differentDll ('b' * 40) 'wrong-version' $root
     $app = $differentApp
     $binding.hostDllSha256 = (Get-FileHash -LiteralPath $differentDll -Algorithm SHA256).Hash.ToLowerInvariant()
     Refuse-Fixture 'actual host metadata version mismatch'
@@ -244,10 +301,7 @@ using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+bbbbbbbb
     $failedApp = Join-Path $failedAppDirectory 'Workbench.App.exe'
     [IO.File]::Copy($plainApp, $failedApp)
     $failedDll = Join-Path $failedAppDirectory 'Workbench.App.dll'
-    $failedPeSource = @"
-using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+$failedSource")] public static class GalleryFailedPhaseTestPe {}
-"@
-    Add-Type -TypeDefinition $failedPeSource -OutputAssembly $failedDll -OutputType Library
+    New-GalleryVersionPe $failedDll $failedSource 'failed-phase' $root
     $failedReport = Join-Path $failedNative 'native-smoke.json'
     @{ succeeded = $false; stage = 'initialize-or-native-smoke'; userRoot = 'synthetic-isolated-root' } |
         ConvertTo-Json | Set-Content -LiteralPath $failedReport
