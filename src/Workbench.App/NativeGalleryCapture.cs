@@ -49,6 +49,24 @@ internal sealed partial class MainWindow
         double originalOffset = 0;
         HostRuntime? originalRuntime = null;
         long originalGeneration = 0;
+        bool restorationAttempted = false;
+        bool PageLive() => GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId);
+        bool FocusAttached() => focus is null || (scroller is not null
+            && ReferenceEquals(GalleryFocusScroller(displayedPage, focus), scroller));
+        bool CaptureLive(bool requireVisible = true)
+        {
+            if (!PageLive()) { status = "blocked"; reasonCode = "page-detached"; return false; }
+            if (!FocusAttached()) { status = "blocked"; reasonCode = "focus-detached"; return false; }
+            if (requireVisible && focus is not null && !GalleryFocusInViewport(scroller!, focus))
+            { status = "blocked"; reasonCode = "focus-outside-viewport"; return false; }
+            return true;
+        }
+        async Task<bool> RestoreAsync()
+        {
+            restorationAttempted = true;
+            return scroller is null || await GalleryChangeViewAsync(scroller, originalOffset,
+                () => PageLive() && FocusAttached(), () => true);
+        }
         try
         {
             AssertUiThread();
@@ -104,75 +122,87 @@ internal sealed partial class MainWindow
             {
                 status = "blocked"; reasonCode = "focus-detached"; return;
             }
+            _root.UpdateLayout();
             if (focus is not null)
             {
                 status = "blocked"; reasonCode = "focus-detached";
-                if (!focus.IsLoaded || !ReferenceEquals(focus.XamlRoot, _root.XamlRoot)) return;
-                for (DependencyObject? parent = focus; parent is not null; parent = VisualTreeHelper.GetParent(parent))
-                    if (parent is ScrollViewer viewer) { scroller = viewer; break; }
+                scroller = GalleryFocusScroller(displayedPage, focus);
                 if (scroller is null) return;
                 originalOffset = scroller.VerticalOffset;
-                focus.StartBringIntoView();
-            }
-            _root.UpdateLayout();
-            await Task.Yield();
-            await Task.Yield();
-            _root.UpdateLayout();
-            if (scroller is not null)
-            {
+                status = "blocked"; reasonCode = "focus-outside-viewport";
+                if (!GalleryTryFocusBounds(scroller, focus, out var bounds)) return;
+                var target = bounds.Y >= 0 && bounds.Bottom <= scroller.ViewportHeight ? originalOffset
+                    : Math.Clamp(originalOffset + bounds.Y - Math.Max(0, (scroller.ViewportHeight - bounds.Height) / 2),
+                        0, scroller.ScrollableHeight);
+                reasonCode = "layout-unavailable";
+                var positioned = await GalleryChangeViewAsync(scroller, target,
+                    () => PageLive() && FocusAttached(), () => GalleryFocusInViewport(scroller, focus));
                 viewportWidth = scroller.ViewportWidth;
                 viewportHeight = scroller.ViewportHeight;
                 scrollOffset = scroller.VerticalOffset;
-                var top = focus!.TransformToVisual(scroller).TransformPoint(new Windows.Foundation.Point(0, 0)).Y;
-                status = "blocked"; reasonCode = "focus-outside-viewport";
-                if (top + focus.ActualHeight <= 0 || top >= viewportHeight) return;
+                if (!CaptureLive() || !positioned) return;
             }
-            else { viewportWidth = _root.ActualWidth; viewportHeight = _root.ActualHeight; }
+            else
+            {
+                await Task.Yield();
+                if (!CaptureLive()) return;
+                await Task.Yield();
+                if (!CaptureLive()) return;
+                _root.UpdateLayout();
+                viewportWidth = _root.ActualWidth; viewportHeight = _root.ActualHeight;
+            }
             rasterizationScale = _root.XamlRoot?.RasterizationScale ?? 0;
             status = "blocked"; reasonCode = "layout-unavailable";
             if (viewportWidth <= 0 || viewportHeight <= 0 || _root.ActualWidth <= 0 || _root.ActualHeight <= 0
                 || _root.ActualWidth * rasterizationScale > NativeGalleryPolicy.MaxDimension
                 || _root.ActualHeight * rasterizationScale > NativeGalleryPolicy.MaxDimension
-                || !GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId)) return;
+                || !CaptureLive()) return;
 
             status = "failed"; reasonCode = "render-invalid";
             var bitmap = new RenderTargetBitmap();
             await bitmap.RenderAsync(_root);
+            if (!CaptureLive()) return;
             width = bitmap.PixelWidth;
             height = bitmap.PixelHeight;
             if (width is < 1 or > NativeGalleryPolicy.MaxDimension || height is < 1 or > NativeGalleryPolicy.MaxDimension
                 || (long)width * height * 4 > NativeGalleryPolicy.MaxBgraBytes) return;
             var buffer = await bitmap.GetPixelsAsync();
+            if (!CaptureLive()) return;
             var pixels = new byte[buffer.Length];
             using (var reader = DataReader.FromBuffer(buffer)) reader.ReadBytes(pixels);
-            if (!GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId)
-                || !NativeGalleryPolicy.IsValidFrame(pixels, width, height)) return;
+            if (!NativeGalleryPolicy.IsValidFrame(pixels, width, height)) return;
 
             using var stream = new InMemoryRandomAccessStream();
             var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
+            if (!CaptureLive()) return;
             // RenderTargetBitmap supplies premultiplied BGRA8. Tell the codec the
             // input alpha convention; PNG retains the actual content transparency.
             encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)width, (uint)height, 96, 96, pixels);
             await encoder.FlushAsync();
-            if (stream.Size is < 1 or > NativeGalleryPolicy.MaxPngBytes
-                || !GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId)) return;
+            if (!CaptureLive() || stream.Size is < 1 or > NativeGalleryPolicy.MaxPngBytes) return;
             stream.Seek(0);
             var decoder = await BitmapDecoder.CreateAsync(stream);
-            if (decoder.PixelWidth != width || decoder.PixelHeight != height) return;
+            if (!CaptureLive() || decoder.PixelWidth != width || decoder.PixelHeight != height) return;
             var bytes = new byte[(int)stream.Size];
             using (var reader = new DataReader(stream.GetInputStreamAt(0)))
             {
                 await reader.LoadAsync((uint)bytes.Length);
+                if (!CaptureLive()) return;
                 reader.ReadBytes(bytes);
             }
             if (bytes.Length < 24
                 || !bytes.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })
                 || ShaFile(executable) != exeHash) return;
+            // Finish the owned scroll work before publishing bytes. A rejected or
+            // unsettled restore must not leave a final-name PNG behind.
+            status = "blocked"; reasonCode = "layout-unavailable";
+            var restored = await RestoreAsync();
+            if (!CaptureLive(requireVisible: false) || !restored) return;
             Directory.CreateDirectory(directory);
             var candidateHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             // No await or live-failure return follows CreateNew: a desktop transition
             // during rendering/encoding cannot leave a rejected final-name PNG.
-            if (!GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId)) return;
+            if (!CaptureLive(requireVisible: false)) return;
             using (var output = new FileStream(pngPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 output.Write(bytes);
             pngBytes = bytes.Length;
@@ -185,9 +215,9 @@ internal sealed partial class MainWindow
         }
         finally
         {
-            if (scroller is not null)
+            if (scroller is not null && !restorationAttempted)
             {
-                try { scroller.ChangeView(null, originalOffset, null, true); await Task.Yield(); } catch (Exception) { }
+                try { await RestoreAsync(); } catch (Exception) { }
             }
             // A receipt is immutable. If creation fails, the collector treats any image as an orphan.
             try
