@@ -163,15 +163,18 @@ internal sealed partial class MainWindow
                 await reader.LoadAsync((uint)bytes.Length);
                 reader.ReadBytes(bytes);
             }
-            if (!GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId) || bytes.Length < 24
+            if (bytes.Length < 24
                 || !bytes.AsSpan(0, 8).SequenceEqual(new byte[] { 137, 80, 78, 71, 13, 10, 26, 10 })
                 || ShaFile(executable) != exeHash) return;
             Directory.CreateDirectory(directory);
-            using (var output = new FileStream(pngPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-                await output.WriteAsync(bytes);
+            var candidateHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            // No await or live-failure return follows CreateNew: a desktop transition
+            // during rendering/encoding cannot leave a rejected final-name PNG.
             if (!GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId)) return;
+            using (var output = new FileStream(pngPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                output.Write(bytes);
             pngBytes = bytes.Length;
-            pngSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
+            pngSha256 = candidateHash;
             status = "captured"; reasonCode = "none";
         }
         catch (Exception)
