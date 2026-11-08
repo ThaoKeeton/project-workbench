@@ -2,7 +2,7 @@
 
 `com.projectworkbench.testing` 是独立安装的受信任进程内插件，最低宿主 0.4.0、API 1、Testing services 1。它在工作台同一个 WinUI 窗口提供中文“测试设计”页面，不嵌入独立应用、XAML 或 WebView。ALC 和能力清单不是安全沙箱。
 
-能力清单在现有四项提示上增加 `remote-figma-read` 与 `openai-case-authoring`，用于说明明确发起的远程动作；它们不是受强制执行的权限边界。开发包已升至 0.2.0，增加私有 Windows 驱动和自带合成目标 helper；最低宿主 0.4.0、SDK/API 1、程序集版本 1.0.0.0 不变。完整原生检查、同窗口受控执行页面及维护验收仍未完成，不能将开发包视为已验收发布。
+能力清单在现有四项提示上增加 `remote-figma-read` 与 `openai-case-authoring`，用于说明明确发起的远程动作；它们不是受强制执行的权限边界。开发包已升至 0.2.0，增加私有 Windows 驱动和自带合成目标 helper；最低宿主 0.4.0、SDK/API 1、程序集版本 1.0.0.0 不变。同窗口受控执行页面已加入生产源码，并以实际控制器、日志和 Core/supervisor 验证可移植所有权组合；完整原生检查、实际加载页面和维护验收仍未完成，不能将开发包视为已验收发布。
 
 Windows 构建需要 .NET 10 SDK、PowerShell 7、MSVC x64 C++ 工具和 Windows SDK，见[构建说明](../README.md)。执行 `pwsh ./scripts/build.ps1` 后，完整宿主位于 `artifacts/native/app`，测试交付单独位于 `artifacts/native/testing-plugin`。CI 配置的下载名为 `workbench-win-x64`、`workbench-sdk-0.4.0` 和 `workbench-testing-plugin-0.2.0`；实际有可用产物时，选择同一运行/源码提交的产物。在“插件”导入测试交付中的 `workbench-testing-plugin-0.2.0.zip`，审查指纹并确认信任启用。安装不会自动信任或运行。更新需要安全退出并重启。
 
@@ -23,11 +23,12 @@ CI 在 SDK 快照验证后、任何原生产物上传前，复核测试交付与
 - “运行选中用例（虚拟）”一次点击完成排队/显式启动；Cancel 独立可用，不排在 Run 的通用忙锁后。仅允许 `virtual.task-form.v1` 的 typed SetText/Click/AssertText。手动/未映射步骤不自动通过。示例分别演示正向、空标题拒绝和标注的故意断言失败。
 - 选择已提交执行及事件，查看实际 journal 状态、步骤结果、错误、冻结版本、head/session/父执行和完整 NativePlainTextState。旁边 Image 解码真实持久化证据：320×180、24bpp、未压缩自下向上 BMP，172854 字节，始终标示 **SIMULATED**；它不是桌面截图。有限字形可能显示 `?`，原始 Unicode 观察文本另行完整显示。
 - “取消并等待结束”区分 CancelRequested 与实际结束的 Cancelled，并等待实际工作/清理；不承诺撤销或 exactly once。“从第一步重试（新执行）”使用父执行冻结用例创建新的关联 run/session，不按断点继续。
+- 下方“受控 Windows 试验 · 仅操作自带的合成任务窗口”提供三个固定场景的 Run/Cancel/Retry、独立私有历史、事件、原始观察文本和持久 BMP。它调用真实 OwnedPilotController 与固定生产 Win32 工厂；窗口帧明确属于自带合成目标，上方 virtual 历史/帧仍为 SIMULATED。等待上一轮虚拟终态资源释放时，已接纳的 owned 调用已有可取消身份，尚未伪造 Queued；此时 Cancel/历史可用，取消后仍加入原退休工作且不会再启动 owned。重试使用当前驱动与父输入从第 1 步新建执行；RecoveryNeeded 保留原始数据并拒绝新增执行。固定场景不刷新来源草稿或映射 AI 步骤。Linux 只证明源码/可移植组合，未实际操作这些 WinUI 控件。
 - “取消远程操作”使用异步取消回调，不阻塞 UI dispatcher；仍等待忽略取消的真实 IO、回调和 UI 后续工作。忙状态持续到实际结束。离开项目和 Stop 在等待已接收动作前先请求远程取消；同项目的页面 Unloaded 不取消远程动作。
 
 每个 entry 只注册一个 before-leave hook。所有实际 UI、命令、picker、读取、导出、解码及 dispatcher 回调在同步前缀前登记实际所有权。离开先临时封住新用户动作、请求远程取消并等待真实取消回调和已接受动作，再在服务仍开放时取消/刷新控制器，最后等待准备产生的实际通知/dispatcher 工作。取消回调失败也执行原有草稿刷新与实际工作屏障。其他参与者准备失败时同一页保持可修正。Unloaded 退订页面/更新代际；不会停止项目控制器、取消远程动作或丢弃已接受 picker。Stop 永久封住入口并先请求远程取消，再加入实际工作；context Close 后不发起新保存。原生 picker 的原始异步操作一直持有到真实结束，不把取消 await 包装当作 picker 已退出。
 
-记录位于当前项目 `.workbench-project/testing`，包含捕获的 projectId、严格 schema1、托管 GUID ID 与哈希。损坏/未知字段/孤儿数据保留并拒绝，不清空重建；没有任意恢复按钮、自动删旧数据或把显示名/定位符拼成存储路径。来源、用例、执行与证据的具体边界见 [测试服务](testing-services.md)。
+虚拟/来源记录位于当前项目 `.workbench-project/testing`，包含捕获的 projectId、严格 schema1、托管 GUID ID 与哈希。损坏/未知字段/孤儿数据保留并拒绝，不清空重建；没有任意恢复按钮、自动删旧数据或把显示名/定位符拼成存储路径。来源、用例、执行与证据的具体边界见 [测试服务](testing-services.md)。受控执行另存于捕获的插件 DataDirectory 下 `owned-lab-v1`，不写入 Core 虚拟证据。实际插件和可移植测试共用固定生命周期组合：永久关闭页面生产者、退订及实际解码完成后才由 pilot.Stop 释放私有日志锁；同项目页面卸载仅分离 UI。临时离开仅允许当前精确租约投影重开，不跳过嵌套/永久/实际活动屏障；页面和命令均保留活动释放后的最新渲染。
 
 实际有用命令 ID：`import-example-requirements`、`import-example-figma`、`generate-all`、`export-local-csv`、`queue-mapped`、`start-queued`、`cancel-run`、`retry-selected`、`refresh`。现有无参数 PluginCommand ABI 未改动。普通页面 Run 仍为一次点击；排队/启动命令供明确本地工作流使用。
 

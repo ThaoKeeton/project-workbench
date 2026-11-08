@@ -217,7 +217,7 @@ public sealed class OwnedPilotController
                 catch (Exception) { lock (_sync) _error ??= "DriverFailure"; }
         }
     }
-    private async Task DrainNotificationsAsync()
+    internal async Task DrainNotificationsAsync()
     {
         while (true) { Task? task; lock (_sync) task = _notification; if (task is null) return; await task.ConfigureAwait(false); }
     }

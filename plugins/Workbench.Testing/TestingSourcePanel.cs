@@ -77,20 +77,20 @@ internal sealed class TestingSourcePanel : StackPanel
                 criteria.TextChanging += (_, _) => _capture(CaptureControls);
                 remove.Click += (_, _) => _capture(() => { CaptureControls(); _plugin.SourceDraft.RemoveNode(rowIndex); LoadForm(); });
             }
-            Render(editable: true, cancellationAdmission: _plugin.Owner.AdmitsUsers);
+            Render(editable: true, _plugin.Lifecycle.ReadAdmission());
         }
         finally { _hydrating = false; }
     }
-    internal void Render(bool editable, bool cancellationAdmission)
+    internal void Render(bool editable, NativeTestingAdmission admission)
     {
         _file.IsEnabled = _version.IsEnabled = editable;
         foreach (var row in _rows)
         { row.Id.IsEnabled = row.Criteria.IsEnabled = editable; row.Remove.IsEnabled = editable && _rows.Count > 1; }
         _add.IsEnabled = editable && _rows.Count < 16;
-        var canStart = _plugin.CanStart(_plugin.Controller.Snapshot);
+        var canStart = _plugin.CanStart(_plugin.Controller.Snapshot, admission);
         _figma.IsEnabled = editable && canStart && _plugin.SourceSecretsSupported;
         _ai.IsEnabled = editable && canStart && _plugin.SourceSecretsSupported && _plugin.SourceDraft.Reopen().SelectedSourceIds.Count is >= 1 and <= 8;
-        _cancel.IsEnabled = cancellationAdmission && _plugin.SourceBusy;
+        _cancel.IsEnabled = admission.UserActions && _plugin.SourceBusy;
         _status.Text = _plugin.SourceDraft.Status + (_plugin.SourceSecretsSupported ? "" : "\nSecretStorageUnsupported：当前宿主不支持受保护凭据，远程操作不可用。");
     }
     private static TextBox Input(string header, string name, bool multiline = true) => Named(new TextBox

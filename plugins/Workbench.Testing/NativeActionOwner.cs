@@ -11,15 +11,25 @@ internal sealed class NativeActionOwner
     private int _seals;
     private bool _terminal;
     internal bool AdmitsUsers { get { lock (_sync) return !_terminal && _seals == 0; } }
+    internal bool CanAdmitForRender(IDisposable? temporarySeal = null)
+    {
+        lock (_sync) return !_terminal && _seals == (temporarySeal is SealLease lease && lease.IsFor(this) ? 1 : 0);
+    }
     internal IDisposable Seal() { lock (_sync) _seals++; return new SealLease(this); }
     internal void Terminal() { lock (_sync) _terminal = true; }
     private sealed class SealLease(NativeActionOwner owner) : IDisposable
     {
         private NativeActionOwner? _owner = owner;
+        internal bool IsFor(NativeActionOwner candidate) => ReferenceEquals(_owner, candidate);
         public void Dispose()
         {
-            var current = Interlocked.Exchange(ref _owner, null);
-            if (current is not null) lock (current._sync) current._seals--;
+            var current = Volatile.Read(ref _owner);
+            if (current is null) return;
+            lock (current._sync)
+            {
+                if (_owner is null) return;
+                _owner = null; current._seals--;
+            }
         }
     }
     internal Task UserAsync(Func<Task> action) => UserAsync(async () => { await action(); return true; });

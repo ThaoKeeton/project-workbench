@@ -1,6 +1,8 @@
 using Microsoft.UI.Xaml;
 using Workbench.Sdk;
 using Workbench.Testing.Domain;
+using Workbench.Testing.Domain.OwnedLab;
+using Workbench.Testing.Windows;
 using Workbench.WinUI.Sdk;
 
 namespace Workbench.Testing;
@@ -10,8 +12,16 @@ public sealed class TestingPlugin : IWorkbenchPlugin
     private readonly NativeActionOwner _owner = new();
     private readonly object _pagesSync = new();
     private readonly HashSet<TestingPage> _pages = [];
-    private readonly SemaphoreSlim _preparation = new(1, 1);
+    private bool _pagesClosed;
+    internal bool PageProducersClosed { get { lock (_pagesSync) return _pagesClosed; } }
     private readonly NativeRemoteOperation _remote = new();
+    private readonly NativeRemoteOperation _ownedOperation = new();
+    private OwnedPilotController? _pilot;
+    private NativeOwnedPilot? _ownedPilot;
+    private NativeTestingLifecycle? _lifecycle;
+    internal OwnedPilotController Pilot => _pilot ?? throw new OwnedLabException("AdmissionClosed");
+    internal NativeOwnedPilot Owned => _ownedPilot ?? throw new OwnedLabException("AdmissionClosed");
+    internal NativeTestingLifecycle Lifecycle => _lifecycle ??= new(_owner, _activity, _remote, _ownedOperation, _controller, _pilot, NotifyPagesAsync, RetirePagesAsync);
     private NativeActivityCoordinator? _activity;
     private NativeActivityCoordinator Activity => _activity ?? throw new PluginTestingException("TestingContextClosed");
     internal bool ActivityBusy => _activity?.IsBusy == true;
@@ -26,16 +36,18 @@ public sealed class TestingPlugin : IWorkbenchPlugin
     internal NativeActionOwner Owner => _owner;
     internal CancellationToken Lifetime => _context.Lifetime;
     private string? _ownedRunId;
-    internal bool CanStart(TestingControllerSnapshot snapshot) => !ActivityBusy && NativeRunAdmission.CanStart(snapshot, Volatile.Read(ref _ownedRunId));
-    internal Task RunAsync(Func<IReadOnlyList<string>> capture) => Activity.VirtualAsync(async () =>
-    { var run = await _controller.RunAsync(capture()).ConfigureAwait(false); await RecordOwnedAsync(run).ConfigureAwait(false); return run; }, NotifyPagesAsync);
-    internal Task RetryAsync(Func<string> capture, CancellationToken token = default) => Activity.VirtualAsync(async () =>
-    { var run = await _controller.RetryAsync(capture(), token).ConfigureAwait(false); await RecordOwnedAsync(run).ConfigureAwait(false); return run; }, NotifyPagesAsync);
-    internal Task QueueMappedAsync(CancellationToken token) => Activity.VirtualAsync(async () =>
-    { var run = await _controller.QueueRunAsync(MappedIds(), token).ConfigureAwait(false); await RecordOwnedAsync(run).ConfigureAwait(false); return run; }, NotifyPagesAsync);
-    internal Task StartQueuedAsync(CancellationToken token) => Activity.VirtualAsync(() => _controller.StartQueuedRunAsync(token), NotifyPagesAsync);
+    internal bool CanStart(TestingControllerSnapshot snapshot, NativeTestingAdmission? admission = null) => (admission ?? Lifecycle.ReadAdmission()).ActivityStarts && NativeRunAdmission.CanStart(snapshot, Volatile.Read(ref _ownedRunId));
+    internal Task RunAsync(Func<IReadOnlyList<string>> capture) => Lifecycle.RetainActivityAsync(() => Activity.VirtualAsync(async () =>
+    { var run = await _controller.RunAsync(capture()).ConfigureAwait(false); await RecordOwnedAsync(run).ConfigureAwait(false); return run; }, NotifyPagesAsync));
+    internal Task RetryAsync(Func<string> capture, CancellationToken token = default) => Lifecycle.RetainActivityAsync(() => Activity.VirtualAsync(async () =>
+    { var run = await _controller.RetryAsync(capture(), token).ConfigureAwait(false); await RecordOwnedAsync(run).ConfigureAwait(false); return run; }, NotifyPagesAsync));
+    internal Task QueueMappedAsync(CancellationToken token) => Lifecycle.RetainActivityAsync(() => Activity.VirtualAsync(async () =>
+    { var run = await _controller.QueueRunAsync(MappedIds(), token).ConfigureAwait(false); await RecordOwnedAsync(run).ConfigureAwait(false); return run; }, NotifyPagesAsync));
+    internal Task StartQueuedAsync(CancellationToken token) => Lifecycle.RetainActivityAsync(() => Activity.VirtualAsync(() => _controller.StartQueuedRunAsync(token), NotifyPagesAsync));
     internal Task GenerateAsync(Func<IReadOnlyList<string>> capture, CancellationToken token = default)
-        => Activity.SourceAsync(() => capture().ToArray(), ids => _controller.GenerateAsync(ids, token), NotifyPagesAsync);
+        => Lifecycle.RetainActivityAsync(() => Activity.SourceAsync(() => capture().ToArray(), ids => _controller.GenerateAsync(ids, token), NotifyPagesAsync));
+    internal Task RunOwnedAsync(Func<OwnedScenario> capture) => Lifecycle.RetainActivityAsync(() => Owned.RunAsync(capture, NotifyPagesAsync));
+    internal Task RetryOwnedAsync(Func<string> capture) => Lifecycle.RetainActivityAsync(() => Owned.RetryAsync(capture, NotifyPagesAsync));
     private async Task RecordOwnedAsync(TestRunSnapshot run)
     {
         Volatile.Write(ref _ownedRunId, run.Plan.Id);
@@ -44,14 +56,21 @@ public sealed class TestingPlugin : IWorkbenchPlugin
 
     public async Task InitializeAsync(IPluginContext context, CancellationToken cancellationToken)
     {
+        try
+        {
         _context = context as IPluginTestingContext ?? throw new PluginTestingException("TestingContextClosed");
         _secrets = _context.Secrets;
         _secrets.Register(new("figma-token", "Figma 访问令牌", "仅在原生页面明确读取时使用；需 file_content:read 和目标文件访问权限。"));
         _secrets.Register(new("openai-api-key", "OpenAI API 密钥", "仅在原生页面明确发送所选来源时使用；可能产生费用。"));
         _controller = new(_context);
         _activity = new(_controller, _remote);
-        _lifetimeRegistration = _context.Lifetime.Register(() => { _owner.Terminal(); _activity.Terminal(); _remote.Terminal(); });
+        var scope = new OwnedScope(_context.Project.Identity.Id, _context.PluginId, _context.DataDirectory);
+        _pilot = new(scope, new Win32OwnedDriverFactory(scope, TimeProvider.System), TimeProvider.System);
+        _ownedPilot = new(_pilot, _activity, _ownedOperation);
+        var lifecycle = Lifecycle;
+        _lifetimeRegistration = _context.Lifetime.Register(() => { ClosePages(); lifecycle.SealLifetime(); });
         await _controller.InitializeAsync(cancellationToken).ConfigureAwait(false);
+        await _pilot.InitializeAsync(cancellationToken).ConfigureAwait(false);
         _context.RegisterBeforeProjectLeave(PrepareAsync);
         context.RegisterView(new WinUiView("testing", "测试设计", CreatePage));
         Register("import-example-requirements", "导入打包的需求示例（含故意失败）", token => ImportBundledAsync(TestSourceKind.Requirements, token));
@@ -69,6 +88,15 @@ public sealed class TestingPlugin : IWorkbenchPlugin
             await _controller.RefreshAsync(token);
             foreach (var page in Pages()) await page.NotifyAsync(retryEvidence: true).ConfigureAwait(false);
         });
+        }
+        catch (Exception)
+        {
+            ClosePages();
+            try { await Lifecycle.StopAsync().ConfigureAwait(false); }
+            catch (Exception) { /* Preserve the actual initialization failure after all partial cleanup. */ }
+            _lifetimeRegistration.Dispose();
+            throw;
+        }
     }
     private string[] MappedIds() => (_controller.Snapshot.Draft?.Content.Cases ?? []).Where(c => c.Steps.All(s => s.Action is not null)).Select(c => c.Id).ToArray();
     private void Register(string id, string title, Func<CancellationToken, Task> action) => _context.RegisterCommand(new(id, title,
@@ -79,14 +107,14 @@ public sealed class TestingPlugin : IWorkbenchPlugin
             return new PluginCommandResult(true, "本地操作已完成；执行状态以已提交日志为准。SIMULATED。");
         })));
 
-    internal Task ImportBundledAsync(TestSourceKind kind, CancellationToken token) => Activity.SourceAsync(() => kind, sourceKind =>
+    internal Task ImportBundledAsync(TestSourceKind kind, CancellationToken token) => Lifecycle.RetainActivityAsync(() => Activity.SourceAsync(() => kind, sourceKind =>
     {
         var name = sourceKind == TestSourceKind.Requirements ? "requirements.synthetic.json" : "figma.synthetic.json";
         var path = Path.Combine(Path.GetDirectoryName(typeof(TestingPlugin).Assembly.Location)!, "Fixtures", name);
         return ImportFileCoreAsync(sourceKind, path, token);
-    }, NotifyPagesAsync);
+    }, NotifyPagesAsync));
     internal Task ImportFileAsync(TestSourceKind kind, string path, CancellationToken token)
-        => Activity.SourceAsync(() => (Kind: kind, Path: path), input => ImportFileCoreAsync(input.Kind, input.Path, token), NotifyPagesAsync);
+        => Lifecycle.RetainActivityAsync(() => Activity.SourceAsync(() => (Kind: kind, Path: path), input => ImportFileCoreAsync(input.Kind, input.Path, token), NotifyPagesAsync));
     private async Task<TestSourceSnapshot> ImportFileCoreAsync(TestSourceKind kind, string path, CancellationToken token)
     {
         var bytes = await NativeTestingFiles.ReadAsync(path, token).ConfigureAwait(false);
@@ -106,7 +134,7 @@ public sealed class TestingPlugin : IWorkbenchPlugin
     {
         try
         {
-            await Activity.RemoteSourceAsync(capture, async (input, token) =>
+            await Lifecycle.RetainActivityAsync(() => Activity.RemoteSourceAsync(capture, async (input, token) =>
             {
                 SourceDraft.Begin(label);
                 await NotifyPagesAsync().ConfigureAwait(false);
@@ -117,7 +145,7 @@ public sealed class TestingPlugin : IWorkbenchPlugin
             {
                 if (failure is not null and not NativeActivityAdmissionException) SourceDraft.Fail(failure);
                 await NotifyPagesAsync().ConfigureAwait(false);
-            }, NotifyPagesAsync).ConfigureAwait(false);
+            }, NotifyPagesAsync)).ConfigureAwait(false);
         }
         catch (NativeActivityAdmissionException) { throw; }
         catch (Exception) { /* The retained remote settlement owns safe failure; no late status/UI postfix follows activity release. */ }
@@ -128,61 +156,40 @@ public sealed class TestingPlugin : IWorkbenchPlugin
         catch (Exception) { /* Remote settlement owns the failure message; a late cancel continuation must not overwrite a later action. */ }
         await NotifyPagesAsync().ConfigureAwait(false);
     }
-    private async Task NotifyPagesAsync()
-    { foreach (var page in Pages()) await page.NotifyAsync().ConfigureAwait(false); }
+    private Task NotifyPagesAsync() => NotifyPagesAsync(null);
+    private async Task NotifyPagesAsync(NativeReopening? reopening)
+    { foreach (var page in Pages()) await page.NotifyAsync(reopening).ConfigureAwait(false); }
     private FrameworkElement CreatePage()
     {
         _context.Lifetime.ThrowIfCancellationRequested();
         return new TestingPage(this);
     }
-    internal void Attach(TestingPage page) { lock (_pagesSync) _pages.Add(page); }
+    internal bool Attach(TestingPage page)
+    {
+        lock (_pagesSync)
+        {
+            if (_pagesClosed) return false;
+            _pages.Add(page);
+            return true;
+        }
+    }
+    private void ClosePages() { lock (_pagesSync) _pagesClosed = true; }
     internal void Detach(TestingPage page) { lock (_pagesSync) _pages.Remove(page); }
     private TestingPage[] Pages() { lock (_pagesSync) return _pages.ToArray(); }
-    private async Task PrepareAsync(CancellationToken token)
+    private Task PrepareAsync(CancellationToken token) => Lifecycle.PrepareLeaveAsync(token);
+    private async Task RetirePagesAsync()
     {
-        await _preparation.WaitAsync(token).ConfigureAwait(false);
-        using var seal = _owner.Seal();
-        using var activitySeal = Activity.Seal();
-        using var remoteSeal = _remote.Seal();
-        try
-        {
-            Exception? cancellationFailure = null;
-            try { await _remote.RequestCancellationAsync().ConfigureAwait(false); }
-            catch (Exception error) { SourceDraft.Fail(error); cancellationFailure = error; }
-            await _owner.DrainAsync().ConfigureAwait(false);
-            await Activity.DrainAsync().ConfigureAwait(false);
-            await _controller.PrepareLeaveAsync(token).ConfigureAwait(false);
-            // Changed is a synchronous bridge; its real dispatcher continuations are independently retained here.
-            await _owner.DrainAsync().ConfigureAwait(false);
-            if (cancellationFailure is not null) throw new PluginTestingException("TestingFailed");
-        }
-        finally
-        {
-            try
-            {
-                foreach (var page in Pages()) await page.NotifyAsync(reopening: true).ConfigureAwait(false);
-                await _owner.DrainAsync().ConfigureAwait(false);
-            }
-            finally { remoteSeal.Dispose(); activitySeal.Dispose(); seal.Dispose(); _preparation.Release(); }
-        }
+        var pages = Pages();
+        foreach (var page in pages) page.Detach();
+        await Task.WhenAll(pages.Select(page => page.RetireAsync())).ConfigureAwait(false);
     }
     public async Task StopAsync(CancellationToken cancellationToken)
     {
-        _owner.Terminal();
-        _activity?.Terminal();
-        _remote.Terminal();
-        Exception? cancellationFailure = null;
-        try { await _remote.RequestCancellationAsync().ConfigureAwait(false); }
-        catch (Exception error) { SourceDraft.Fail(error); cancellationFailure = error; }
-        await _owner.DrainAsync().ConfigureAwait(false);
-        if (_activity is not null) await _activity.DrainAsync().ConfigureAwait(false);
-        try { if (_controller is not null) await _controller.StopAsync(cancellationToken).ConfigureAwait(false); }
+        ClosePages();
+        try { await Lifecycle.StopAsync(cancellationToken).ConfigureAwait(false); }
         finally
         {
-            foreach (var page in Pages()) await page.RetireAsync().ConfigureAwait(false);
-            await _owner.DrainAsync().ConfigureAwait(false);
             _lifetimeRegistration.Dispose();
         }
-        if (cancellationFailure is not null) throw new PluginTestingException("TestingFailed");
     }
 }

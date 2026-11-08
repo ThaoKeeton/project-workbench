@@ -2,6 +2,10 @@
 
 证据分层记录。Linux Core 行为测试、跨目标 C# 参考编译、Windows 发布、真实 WinUI 自动冒烟和 Windows 人工验收各有不同范围，不互相替代。
 
+受控执行页面已分阶段加入生产 TestingPage 源码，使用真实 OwnedPilotController/私有 journal 和固定生产 Win32 工厂。新增可移植测试链接实际 admission/bridge/lifecycle/evidence 实现，组合真实 Core/supervisor 与明确标识的 scripted owned transport，并保留源码、原始 RED/GREEN、参考编译和长度/哈希审计。它们不实例化 Windows/XAML/PRI/dispatcher/BitmapImage，不证明实际 UIA/GDI/job 或宿主根租约重新取得。页面晚到 Loaded/已捕获 Changed 的永久关闭路径已在源码中封闭并经完整参考编译；真实 WinUI 到达顺序仍待 Windows 验收。
+
+当前 all27 standalone、已安装面板/隔离/取消、现有 native/runtime/workspace/virtual/business51 与 12 PID+出生实例、SDK/最终交付、下载字节、干净生产两宿主 StepStarted 崩溃、升级/回滚和单独编译的 SourceAcceptance/实际合成 DPAPI 均未在此 Linux 阶段关闭。历史 9/27 后 CLR abort 仍 UNKNOWN。当前 CI 启动受账户付款/支出注解阻挡，未重试或改动账户；Windows11 人工验收继续延期。
+
 0.3 项目工作区新增 `scripts/project-workspace-probe.ps1`：源码构建后在两个实际 shipping EXE 进程中依次运行 `--workspace-probe seed|verify`，根只允许 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/`。原生报告由实际 Closed 事件写入；启动器独立核对 PID/phase/root、OS exit 0、实际根租约重新取得及完整检查列表，再允许第二进程。检查使用真实项目对话框/选择器、文本框、主题与凭据控件和文件，包含旧准备挂起、候选停止挂起、回滚新 manager 绑定、草稿、归档和重开。固定 NativeFixture 位于 `artifacts/native/fixtures/runtime`，不进入用户主程序或业务伴随包；普通下载没有此源码测试依赖。新增源码的 Linux 聚焦行为/参考编译不构成 Windows 原生通过，需本轮控制器运行完整 CI 并下载核验 `project-workspace-probes`。原有 native14、management17+theme1、platform7、business12进程51项继续保留。Windows 11 人工、真实独立 GUI/更高版本迁移/provider 验收仍延期，当前不要求用户测试。
 
 Task4 round1 增加实际 WM_SYSCOMMAND/SC_CLOSE：真实切换在旧 hook 挂起时关闭、已接纳原生 action 挂起且后排目标待运行时关闭、Initialize 前关闭后再调用初始化。前两项核对真实 factory 启动阶段和目标插件实例文件不增加、修正/原生重试关闭、实际 Closed 与租约释放；action 用例还保留一次真实主题写入故障，防止提前封闭准入绕过失败偏好。seed 报告现在必须包含原9项加这3项共12项，verify 仍3项；辅助 startup JSON 只记录实际启动观察，不是成功判据。新增 native RED/GREEN 在 Linux 均未执行，不能把参考编译或 portable callback 测试当作原生调用方通过。最终仍需 Closed、OS exit0、重获租约的共同证据。

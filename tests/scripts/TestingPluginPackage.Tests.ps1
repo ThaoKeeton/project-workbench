@@ -37,7 +37,10 @@ if ($HelperGuardsOnly) {
     Refuses { & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor } 'TestingOwnedHelperSourceInvalid'
     $allSources = @(& $module { param($root) Get-TestingSourceFiles $root } $repo)
     foreach ($path in @('scripts/OwnedLabProbeStaging.psm1','tests/scripts/OwnedLabProbeStaging.Tests.ps1','scripts/OwnedLabProbeOutput.psm1','tests/scripts/OwnedLabProbeOutput.Tests.ps1',
-        'plugins/Workbench.Testing/NativeActivityCoordinator.cs','tests/Workbench.Core.Tests/TestingNativeActivityTests.cs','tests/Workbench.Core.Tests/TestingControllerAdmissionTests.cs','tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj')) {
+        'plugins/Workbench.Testing/NativeActivityCoordinator.cs','tests/Workbench.Core.Tests/TestingNativeActivityTests.cs','tests/Workbench.Core.Tests/TestingControllerAdmissionTests.cs','tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj',
+        'plugins/Workbench.Testing/NativeOwnedPilot.cs','plugins/Workbench.Testing/NativeOwnedEvidence.cs','plugins/Workbench.Testing/NativeTestingLifecycle.cs','plugins/Workbench.Testing/TestingOwnedPilotPanel.cs',
+        'tests/Workbench.Core.Tests/TestingNativeOwnedPilotTests.cs','tests/Workbench.Core.Tests/TestingNativeOwnedEvidenceTests.cs','tests/Workbench.Core.Tests/TestingNativeLifecycleTests.cs',
+        'tests/Workbench.Core.Tests/OwnedAdmissionTests.cs','tests/Workbench.Core.Tests/OwnedJournalTests.cs','tests/Workbench.Core.Tests/OwnedFixedPlansTests.cs')) {
         $record = @($allSources | Where-Object path -CEQ $path)
         $file = Get-Item -LiteralPath (Join-Path $repo $path)
         if ($record.Count -ne 1 -or $record[0].length -ne $file.Length -or $record[0].sha256 -cne (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()) { throw "Native activity/staging source is missing or incorrect in delivery provenance: $path" }

@@ -4,6 +4,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media.Imaging;
 using Workbench.Sdk;
 using Workbench.Testing.Domain;
+using Workbench.Testing.Domain.OwnedLab;
 
 namespace Workbench.Testing;
 
@@ -34,8 +35,11 @@ internal sealed partial class TestingPage : UserControl
     private readonly List<Button> _authorActions = [];
     private readonly List<Button> _activityActions = [];
     private readonly TestingSourcePanel _sourcePanel;
+    private readonly TestingOwnedPilotPanel _ownedPanel;
     private Button _retryDraft = null!, _preserveDraft = null!, _run = null!, _cancel = null!, _retryRun = null!;
-    private bool _rendering, _active, _busy;
+    private bool _rendering, _busy;
+    private volatile bool _active;
+    private readonly object _subscriptionsSync = new();
     private long _generation;
     private string? _caseId, _stepId, _setId, _runId;
     private readonly NativeEvidenceCache _evidenceCache = new();
@@ -47,7 +51,7 @@ internal sealed partial class TestingPage : UserControl
         Content = new ScrollViewer { Content = _panel, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
             HorizontalContentAlignment = HorizontalAlignment.Stretch };
         _panel.Children.Add(Text("测试设计", 28));
-        _panel.Children.Add(Text("本地 JSON 与明确发起的远程 Figma / OpenAI 创作。虚拟目标 virtual.task-form.v1 · 所有执行与帧 SIMULATED。手动步骤不自动通过；AI 生成不会启动自动化。"));
+        _panel.Children.Add(Text("本地 JSON 与明确发起的远程 Figma / OpenAI 创作。下方虚拟目标 virtual.task-form.v1 的执行与帧均为 SIMULATED。手动步骤不自动通过；AI 生成不会启动自动化。"));
         var imports = Row();
         imports.Children.Add(Action("导入需求 JSON", "导入本地需求 JSON", () => PickImportAsync(TestSourceKind.Requirements), activity: true));
         imports.Children.Add(Action("导入 Figma 快照 JSON", "导入本地 Figma JSON", () => PickImportAsync(TestSourceKind.Figma), activity: true));
@@ -85,6 +89,8 @@ internal sealed partial class TestingPage : UserControl
         _panel.Children.Add(_runs); _panel.Children.Add(_runDetails); _panel.Children.Add(_events); _panel.Children.Add(_observed);
         _panel.Children.Add(Text("SIMULATED — 内存虚拟表单的被动 BMP，非真实桌面截图", 18));
         _panel.Children.Add(_frame); _panel.Children.Add(_frameStatus); _panel.Children.Add(_message);
+        _ownedPanel = new(plugin);
+        _panel.Children.Add(_ownedPanel);
         _setName.TextChanging += (_, _) => Capture(() => Controller.CaptureSetName(_setName.Text));
         _title.TextChanging += (_, _) => CaptureMetadata(); _prerequisites.TextChanging += (_, _) => CaptureMetadata();
         _instruction.TextChanging += (_, _) => CaptureStep(); _expected.TextChanging += (_, _) => CaptureStep();
@@ -112,14 +118,25 @@ internal sealed partial class TestingPage : UserControl
         _sources.SelectionChanged += (_, _) => Capture(() =>
         {
             _sourcePanel.CaptureControls();
-            _sourcePanel.Render(_sources.IsEnabled, _plugin.Owner.AdmitsUsers && !Controller.Snapshot.IsStopped);
+            _sourcePanel.Render(_sources.IsEnabled, _plugin.Lifecycle.ReadAdmission());
         });
         Loaded += (_, _) =>
         {
-            _active = true; _generation++; _plugin.Attach(this); Controller.Changed += Changed;
-            _ = NotifyAsync();
+            if (_active) return;
+            if (_plugin.Attach(this) && AttachControllers()) _ = NotifyAsync();
         };
         Unloaded += (_, _) => Retire();
+    }
+    // No control delegate executes under the plugin's page lock. A cutoff snapshot includes us before this guarded subscription prefix.
+    private bool AttachControllers()
+    {
+        lock (_subscriptionsSync)
+        {
+            if (_plugin.PageProducersClosed) { _plugin.Detach(this); return false; }
+            _active = true; Interlocked.Increment(ref _generation); _ownedPanel.Activate();
+            Controller.Changed += Changed; _plugin.Pilot.Changed += OwnedChanged;
+            return true;
+        }
     }
     private void CaptureMetadata() => Capture(() =>
     { if (_caseId is not null) Controller.CaptureCaseMetadata(_caseId, _title.Text, _prerequisites.Text); });

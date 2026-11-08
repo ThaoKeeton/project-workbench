@@ -17,15 +17,26 @@ internal sealed class NativeActivityCoordinator(TestingController controller, Na
     private bool _busy, _terminal;
     private int _seals;
     internal bool IsBusy { get { lock (_sync) return _busy; } }
+    internal bool CanAdmit => CanAdmitForRender();
+    internal bool CanAdmitForRender(IDisposable? temporarySeal = null)
+    {
+        lock (_sync) return !_terminal && _active is null && _seals == (temporarySeal is Lease lease && lease.IsFor(this) ? 1 : 0);
+    }
     internal IDisposable Seal() { lock (_sync) _seals++; return new Lease(this); }
     internal void Terminal() { lock (_sync) _terminal = true; }
     private sealed class Lease(NativeActivityCoordinator owner) : IDisposable
     {
         private NativeActivityCoordinator? _owner = owner;
+        internal bool IsFor(NativeActivityCoordinator candidate) => ReferenceEquals(_owner, candidate);
         public void Dispose()
         {
-            var current = Interlocked.Exchange(ref _owner, null);
-            if (current is not null) lock (current._sync) current._seals--;
+            var current = Volatile.Read(ref _owner);
+            if (current is null) return;
+            lock (current._sync)
+            {
+                if (_owner is null) return;
+                _owner = null; current._seals--;
+            }
         }
     }
     internal async Task DrainAsync()
@@ -48,20 +59,28 @@ internal sealed class NativeActivityCoordinator(TestingController controller, Na
         }, settled);
     internal Task<TResult> RemoteSourceAsync<TInput, TResult>(Func<TInput> capture, Func<TInput, CancellationToken, Task<TResult>> action,
         Func<Exception?, Task> remoteSettled, Func<Task> finalNotify)
+        => CancellableSourceAsync(remote, capture, null, action, remoteSettled, finalNotify);
+    internal Task<TResult> OwnedAsync<TInput, TResult>(NativeRemoteOperation operation, Func<TInput> capture, Func<Task> admitted,
+        Func<TInput, CancellationToken, Task<TResult>> action, Func<Exception?, Task> operationSettled, Func<Task> finalNotify)
+        => CancellableSourceAsync(operation, capture, admitted, action, operationSettled, finalNotify);
+    private Task<TResult> CancellableSourceAsync<TInput, TResult>(NativeRemoteOperation operation, Func<TInput> capture, Func<Task>? admitted,
+        Func<TInput, CancellationToken, Task<TResult>> action, Func<Exception?, Task> operationSettled, Func<Task> finalNotify)
         => Admit(() =>
         {
             var entered = false;
             try
             {
                 // Install the one existing CTS before caller capture or the first handoff await.
-                return remote.RunAsync(async token =>
+                return operation.RunAsync(async token =>
                 {
                     entered = true;
                     var input = capture();
-                    if (!await controller.TryJoinPriorTerminalRunAsync().ConfigureAwait(false)) throw new NativeActivityAdmissionException(NativeActivityRefusal.Busy);
+                    var handoff = controller.TryJoinPriorTerminalRunAsync();
+                    if (admitted is not null) await NotifySafelyAsync(admitted).ConfigureAwait(false);
+                    if (!await handoff.ConfigureAwait(false)) throw new NativeActivityAdmissionException(NativeActivityRefusal.Busy);
                     token.ThrowIfCancellationRequested();
                     return await action(input, token).ConfigureAwait(false);
-                }, failure => NotifySafelyAsync(() => remoteSettled(failure)));
+                }, failure => NotifySafelyAsync(() => operationSettled(failure)));
             }
             catch (PluginTestingException error) when (!entered && error.ErrorCode is "StoreBusy" or "TestingContextClosed")
             {
