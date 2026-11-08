@@ -1,5 +1,5 @@
 [CmdletBinding()]
-param()
+param([switch]$SeedIdentityOnly, [string]$SeedIdentityRoot = '')
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 Import-Module (Join-Path $PSScriptRoot '../../scripts/NativeGalleryReport.psm1') -Force
@@ -68,6 +68,246 @@ function New-GalleryVersionPe([string]$Path, [string]$Commit, [string]$Case, [st
     if ($buildExit -ne 0) { throw "Test-only PE build failed: $Case" }
     [IO.File]::Copy((Join-Path $out 'NativeGalleryVersionPe.dll'), $Path, $false)
     Assert-GalleryFixtureVersionResource $Path "0.4.0+$Commit"
+}
+function Test-GalleryDurableSeedIdentity([string]$FixtureRoot) {
+    # Break caught: rereading mutable installed code after later business removal,
+    # or trusting a sidecar without the exact independently frozen seed bytes.
+    New-Item -Path $FixtureRoot -ItemType Directory | Out-Null
+    $repo = Join-Path $FixtureRoot 'repo'
+    New-Item -Path $repo -ItemType Directory | Out-Null
+    & git -C $repo init -q
+    [IO.File]::WriteAllText((Join-Path $repo 'marker'), 'synthetic durable seed identity filesystem regression')
+    & git -C $repo add marker
+    & git -C $repo -c user.name=GalleryFixture -c user.email=gallery@example.invalid commit -qm fixture
+    if ($LASTEXITCODE -ne 0) { throw 'Seed identity git fixture failed.' }
+    $source = (& git -C $repo rev-parse HEAD).Trim()
+    $native = Join-Path $repo 'artifacts/native'
+    $appFolder = Join-Path $native 'app'
+    New-Item -Path $appFolder -ItemType Directory -Force | Out-Null
+    $app = Join-Path $appFolder 'Workbench.App.exe'
+    [IO.File]::WriteAllText($app, 'test-only executable identity; no process or UI is simulated')
+    $dll = Join-Path $appFolder 'Workbench.App.dll'
+    New-GalleryVersionPe $dll $source 'durable-seed' $FixtureRoot
+    $exeHash = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant()
+    $png = [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8AAQv8BD/kD/YURmXYAAAAASUVORK5CYII=')
+    $pngHash = [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($png)).ToLowerInvariant()
+    $birth = [DateTime]::UtcNow.AddMinutes(-5).ToFileTimeUtc()
+    $exit = [DateTime]::UtcNow.AddMinutes(5).ToFileTimeUtc()
+    $business = Join-Path $native 'business-probes'
+    New-Item -Path $business -ItemType Directory -Force | Out-Null
+    $cases = @()
+    foreach ($acceptance in @($false, $true)) {
+        $phase = if ($acceptance) { 'acceptance-seed' } else { 'seed' }
+        $userRoot = Join-Path (Join-Path ([IO.Path]::GetTempPath()) 'ProjectWorkbench-business-probe') ([Guid]::NewGuid().ToString('N'))
+        $installed = Join-Path $userRoot 'Plugins'
+        $zipRoot = Join-Path $native ('fixtures/' + $(if ($acceptance) { 'business-acceptance' } else { 'business' }))
+        New-Item -Path $zipRoot -ItemType Directory -Force | Out-Null
+        $ids = @('com.projectworkbench.dingtalk-insights', $(if ($acceptance) { 'com.upcam.task-digest.acceptance' } else { 'com.upcam.task-digest' }))
+        $zips = @{}; $packages = @{}; $provenance = @()
+        foreach ($id in $ids) {
+            $folder = Join-Path $installed $id
+            New-Item -Path $folder -ItemType Directory -Force | Out-Null
+            $manifest = Join-Path $folder 'plugin.json'; $entry = Join-Path $folder 'Seed.dll'
+            [IO.File]::WriteAllText($manifest, ('{"id":"' + $id + '","entryAssembly":"Seed.dll"}'))
+            [IO.File]::Copy($dll, $entry)
+            $zip = Join-Path $zipRoot ($id + '.zip')
+            [IO.Compression.ZipFile]::CreateFromDirectory($folder, $zip)
+            $zips[$id] = $zip
+            $zipHash = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
+            $packages[$id] = @{ manifest = (Get-FileHash -LiteralPath $manifest -Algorithm SHA256).Hash.ToLowerInvariant();
+                entry = (Get-FileHash -LiteralPath $entry -Algorithm SHA256).Hash.ToLowerInvariant() }
+            $provenance += @{ pluginId = $id; sha256 = $zipHash }
+        }
+        $report = Join-Path $business ($phase + '.json')
+        # A validated earlier image must retain the independent original failure.
+        $code = if ($acceptance) { 0 } else { -9 }
+        @{ succeeded = $acceptance; processId = 77; processCreationFileTimeUtc = $birth;
+            processExitFileTimeUtc = $exit; hasExited = $true; exitCode = $code;
+            userRoot = $userRoot; provenance = $provenance } | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $report
+        $gallery = Join-Path $business ('gallery/business-' + $phase)
+        New-Item -Path $gallery -ItemType Directory -Force | Out-Null
+        $shots = @(@('dingtalk-workspace', $ids[0], 'workspace'), @('upcam-preview', $ids[1], 'digest'))
+        if ($acceptance) { $shots = @(,@('upcam-acceptance-history', $ids[1], 'digest')) }
+        foreach ($shot in $shots) {
+            $id = $shot[1]
+            @{ schemaVersion = 1; captureKind = 'WinUiContentRender'; scope = 'actual-window-content-only';
+                titleBarIncluded = $false; popupsIncluded = $false; status = 'captured'; reasonCode = 'none';
+                shotId = $shot[0]; pageKey = 'view'; pluginId = $id; viewId = $shot[2]; probeKind = 'business';
+                phase = 'business-' + $phase; projectId = $null; selectedPageKey = 'view'; selectedPluginId = $id; selectedViewId = $shot[2];
+                processId = 77; processCreationFileTimeUtc = $birth; hwnd = 999L; captureUtc = [DateTimeOffset]::UtcNow;
+                executableSha256 = $exeHash; hostInformationalVersion = "0.4.0+$source"; sourceCommit = $source;
+                packageManifestSha256 = $packages[$id].manifest; packageEntrySha256 = $packages[$id].entry;
+                osDescription = 'Windows (synthetic receipt fixture; no runtime claim)'; architecture = 'X64'; sessionId = 1;
+                desktopVisible = $true; windowVisible = $true; width = 2; height = 1; rasterizationScale = 1.0; theme = 'Light';
+                viewportWidth = 2.0; viewportHeight = 1.0; scrollOffset = 0.0; witnessCode = 'asserted'; witnessCount = 1;
+                pngPath = $shot[0] + '.png'; pngBytes = $png.Length; pngSha256 = $pngHash } |
+                ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $gallery ($shot[0] + '.json'))
+            [IO.File]::WriteAllBytes((Join-Path $gallery ($shot[0] + '.png')), $png)
+        }
+        $args = @{ OriginalReportPath = $report; Phase = 'business-' + $phase; ExecutablePath = $app; SourceCommit = $source;
+            ProcessId = 77; ProcessCreationFileTimeUtc = $birth; ProcessExitFileTimeUtc = $exit; ExitCode = $code; HasExited = $true;
+            InstalledRoot = $installed; PackageIds = $ids; SourceZipRoot = $zipRoot; SourceZipPaths = $zips }
+        $binding = Write-NativeGalleryBinding @args
+        $cases += @{ report = $report; binding = $binding; args = $args; installed = $installed; ids = $ids; zips = $zips;
+            snapshot = [IO.Path]::ChangeExtension($report, 'gallery-packages'); gallery = $gallery }
+        Write-Host "SEED_BOUND phase=business-$phase installed=$installed binding=$binding hostDllSha256=$((Get-FileHash -LiteralPath $dll).Hash)"
+    }
+    $output = Join-Path $native 'genuine-gallery'
+    $writeCase = $cases[0]
+    function Refuse-SeedWriter([string]$Name, [string]$Reason, [hashtable]$Arguments, [switch]$SnapshotCollision) {
+        $folder = Join-Path $FixtureRoot ('writer-refusal-' + [Guid]::NewGuid().ToString('N'))
+        New-Item -Path $folder -ItemType Directory | Out-Null
+        $copy = Join-Path $folder 'seed.json'
+        [IO.File]::Copy($writeCase.report, $copy)
+        $hash = (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash
+        $Arguments = $Arguments.Clone(); $Arguments.OriginalReportPath = $copy
+        $sentinel = $null
+        if ($SnapshotCollision) {
+            $collisionRoot = [IO.Path]::ChangeExtension($copy, 'gallery-packages')
+            New-Item -Path $collisionRoot -ItemType Directory | Out-Null
+            $sentinel = Join-Path $collisionRoot 'preserve.txt'
+            [IO.File]::WriteAllText($sentinel, 'preserve preexisting destination')
+        }
+        $caught = $null
+        try { Write-NativeGalleryBinding @Arguments | Out-Null } catch { $caught = $_.Exception.Message }
+        if ($caught -cne $Reason -or (Test-Path -LiteralPath ([IO.Path]::ChangeExtension($copy, 'gallery-binding.json'))) -or
+            (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash -cne $hash -or
+            ($null -ne $sentinel -and [IO.File]::ReadAllText($sentinel) -cne 'preserve preexisting destination')) {
+            throw "Seed writer '$Name' expected $Reason with original files retained, observed $caught"
+        }
+        Write-Host "SEED_WRITER_REFUSED $Name reason=$caught originalReportPreserved=true"
+    }
+    Refuse-SeedWriter 'snapshot publication collision' 'GalleryPackageSnapshotAlreadyExists' $writeCase.args -SnapshotCollision
+    $badArgs = $writeCase.args.Clone(); $badArgs.HasExited = $false
+    Refuse-SeedWriter 'unconfirmed process exit' 'GalleryPackageSnapshotIdentityMismatch' $badArgs
+    $badArgs = $writeCase.args.Clone(); $badArgs.PackageIds = @($writeCase.ids[0], $writeCase.ids[0])
+    Refuse-SeedWriter 'duplicate package request' 'GalleryPackageIdInvalid' $badArgs
+    $badArgs = $writeCase.args.Clone(); $badArgs.PackageIds = @($writeCase.ids) + @('com.extra.plugin')
+    Refuse-SeedWriter 'too many package requests' 'GalleryPackageIdInvalid' $badArgs
+    $sourceManifest = Join-Path $writeCase.installed ($writeCase.ids[0] + '/plugin.json')
+    $sourceEntry = Join-Path $writeCase.installed ($writeCase.ids[0] + '/Seed.dll')
+    $manifestBytes = [IO.File]::ReadAllBytes($sourceManifest)
+    foreach ($badName in @('../Seed.dll', '..\Seed.dll', 'Seed.dll:ads')) {
+        try {
+            [IO.File]::WriteAllText($sourceManifest, ('{"id":"' + $writeCase.ids[0] + '","entryAssembly":"' + $badName.Replace('\','\\') + '"}'))
+            Refuse-SeedWriter "unsafe entry $badName" 'GalleryPackageManifestInvalid' $writeCase.args
+        } finally { [IO.File]::WriteAllBytes($sourceManifest, $manifestBytes) }
+    }
+    try {
+        [IO.File]::WriteAllBytes($sourceManifest, [byte[]]::new(65537))
+        Refuse-SeedWriter 'oversized manifest' 'GalleryJsonOversized' $writeCase.args
+    } finally { [IO.File]::WriteAllBytes($sourceManifest, $manifestBytes) }
+    $entryBytes = [IO.File]::ReadAllBytes($sourceEntry)
+    try {
+        $oversized = [IO.File]::OpenWrite($sourceEntry); $oversized.SetLength(16777217); $oversized.Dispose()
+        Refuse-SeedWriter 'oversized entry' 'GalleryPackageSnapshotSizeInvalid' $writeCase.args
+    } finally { [IO.File]::WriteAllBytes($sourceEntry, $entryBytes) }
+    $heldSource = Join-Path $FixtureRoot 'held-source-manifest.json'; [IO.File]::Move($sourceManifest, $heldSource)
+    try {
+        New-Item -Path $sourceManifest -ItemType SymbolicLink -Target $heldSource | Out-Null
+        Refuse-SeedWriter 'reparse installed identity' 'GalleryReparsePath' $writeCase.args
+    } finally { Remove-Item -LiteralPath $sourceManifest; [IO.File]::Move($heldSource, $sourceManifest) }
+    $outsideZip = Join-Path $FixtureRoot 'outside.zip'; [IO.File]::WriteAllText($outsideZip, 'test-only outside ZIP path')
+    $badArgs = $writeCase.args.Clone(); $badArgs.SourceZipPaths = $writeCase.zips.Clone(); $badArgs.SourceZipPaths[$writeCase.ids[0]] = $outsideZip
+    Refuse-SeedWriter 'source ZIP traversal' 'GallerySourceZipPathInvalid' $badArgs
+    $before = Export-NativeGallery -RepositoryRoot $repo
+    if ($before.acceptedImages -ne 3) { throw 'Seed collector did not accept all three package-bound synthetic receipts.' }
+    Remove-Item -LiteralPath $output -Recurse -Force
+    foreach ($case in $cases) {
+        foreach ($id in $case.ids) { Remove-Item -LiteralPath (Join-Path $case.installed $id) -Recurse -Force }
+        Write-Host "LATER_REMOVAL installed=$($case.installed) remainingPackageDirectories=$(@(Get-ChildItem -LiteralPath $case.installed -Directory).Count)"
+    }
+    try { $after = Export-NativeGallery -RepositoryRoot $repo }
+    catch {
+        Write-Host ('CAUSAL_FAILURE message=' + $_.Exception.Message)
+        Write-Host ('CAUSAL_STACK ' + $_.ScriptStackTrace)
+        Write-Host ('MUTABLE_READ_SCOPE ' + ($cases.installed -join ';'))
+        throw
+    }
+    if ($after.acceptedImages -ne 3 -or
+        @($after.rows | Where-Object { $_.shotId -in @('dingtalk-workspace','upcam-preview') -and
+            $_.status -eq 'failed' -and $_.captureStatus -eq 'captured' -and $_.originalProbeSucceeded -eq $false -and $_.processExitCode -eq -9 }).Count -ne 2 -or
+        @($after.rows | Where-Object { $_.shotId -eq 'upcam-acceptance-history' -and $_.status -eq 'captured' }).Count -ne 1) {
+        throw 'Immutable seed collector lost exact images or changed the original probe verdict.'
+    }
+    Remove-Item -LiteralPath $output -Recurse -Force
+    $case = $cases[0]
+    $identity = Join-Path $case.snapshot 'identity.json'
+    $entry = Join-Path $case.snapshot ($case.ids[0] + '/Seed.dll')
+    $manifest = Join-Path $case.snapshot ($case.ids[0] + '/plugin.json')
+    function Refuse-SeedCollector([string]$Name, [string]$Reason) {
+        $caught = $null
+        try { Export-NativeGallery -RepositoryRoot $repo | Out-Null } catch { $caught = $_.Exception.Message }
+        if ($null -eq $caught -or $caught -cne $Reason) { throw "Seed guard '$Name' expected $Reason, observed $caught" }
+        if (Test-Path -LiteralPath (Join-Path $output 'index.json')) { throw "Seed refusal '$Name' published an index." }
+        Write-Host "SEED_REFUSED $Name reason=$caught"
+    }
+    foreach ($file in @($entry, $manifest, $identity)) {
+        $bytes = [IO.File]::ReadAllBytes($file)
+        try { [IO.File]::WriteAllBytes($file, [byte[]]@(1, 2, 3)); Refuse-SeedCollector "altered $([IO.Path]::GetFileName($file))" 'GalleryPackageSnapshotHashMismatch' }
+        finally { [IO.File]::WriteAllBytes($file, $bytes) }
+        $held = $file + '.held'; [IO.File]::Move($file, $held)
+        try { Refuse-SeedCollector "missing $([IO.Path]::GetFileName($file))" 'GalleryPackageSnapshotFilesInvalid' }
+        finally { [IO.File]::Move($held, $file) }
+    }
+    $identityBytes = [IO.File]::ReadAllBytes($identity); $bindingBytes = [IO.File]::ReadAllBytes($case.binding)
+    foreach ($mutation in @('phase','processId','processCreationFileTimeUtc','sourceCommit','originalReportSha256','installedRoot','entryAssembly','duplicate-package','sourceZipSha256')) {
+        $data = Get-Content -LiteralPath $identity -Raw | ConvertFrom-Json -AsHashtable
+        switch ($mutation) {
+            'phase' { $data.phase = 'business-acceptance-seed' }
+            'processId' { $data.processId = @(77) }
+            'processCreationFileTimeUtc' { $data.processCreationFileTimeUtc++ }
+            'sourceCommit' { $data.sourceCommit = 'b' * 40 }
+            'originalReportSha256' { $data.originalReportSha256 = '0' * 64 }
+            'installedRoot' { $data.installedRoot = Join-Path $FixtureRoot 'other/Plugins' }
+            'entryAssembly' { $data.packages[$case.ids[0]].entryAssembly = '../Seed.dll' }
+            'duplicate-package' { $data.packages['COM.PROJECTWORKBENCH.DINGTALK-INSIGHTS'] = $data.packages[$case.ids[0]] }
+            'sourceZipSha256' { $data.packages[$case.ids[0]].sourceZipSha256 = '0' * 64 }
+        }
+        try {
+            $data | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $identity
+            $b = Get-Content -LiteralPath $case.binding -Raw | ConvertFrom-Json -AsHashtable
+            $b.packageSnapshotSha256 = (Get-FileHash -LiteralPath $identity -Algorithm SHA256).Hash.ToLowerInvariant()
+            $b | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $case.binding
+            Refuse-SeedCollector "self-consistent sidecar $mutation" 'GalleryPackageSnapshotIdentityMismatch'
+        } finally { [IO.File]::WriteAllBytes($identity, $identityBytes); [IO.File]::WriteAllBytes($case.binding, $bindingBytes) }
+    }
+    $zip = $case.zips[$case.ids[0]]; $bytes = [IO.File]::ReadAllBytes($zip)
+    try { [IO.File]::WriteAllText($zip, 'changed publisher ZIP'); Refuse-SeedCollector 'changed publisher ZIP' 'GallerySourceZipMismatch' }
+    finally { [IO.File]::WriteAllBytes($zip, $bytes) }
+    $orphan = Join-Path $case.snapshot 'orphan.bin'
+    try { [IO.File]::WriteAllText($orphan, 'orphan'); Refuse-SeedCollector 'orphan snapshot file' 'GalleryPackageSnapshotFilesInvalid' }
+    finally { Remove-Item -LiteralPath $orphan }
+    $linked = Join-Path $FixtureRoot 'held-snapshot-entry.dll'; [IO.File]::Move($entry, $linked)
+    try {
+        New-Item -Path $entry -ItemType SymbolicLink -Target $linked | Out-Null
+        Refuse-SeedCollector 'reparse snapshot entry' 'GalleryReparsePath'
+    } finally { Remove-Item -LiteralPath $entry; [IO.File]::Move($linked, $entry) }
+    $b = Get-Content -LiteralPath $case.binding -Raw | ConvertFrom-Json -AsHashtable
+    $b.Remove('packageSnapshotSha256') | Out-Null
+    try { $b | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath $case.binding; Refuse-SeedCollector 'missing immutable binding' 'GalleryPackageSnapshotIdentityMismatch' }
+    finally { [IO.File]::WriteAllBytes($case.binding, $bindingBytes) }
+    # Re-creation must refuse before reading the now absent current packages.
+    $caught = $null
+    $repeatArgs = $case.args
+    try { Write-NativeGalleryBinding @repeatArgs | Out-Null } catch { $caught = $_.Exception.Message }
+    if ($null -eq $caught) { throw 'Seed binding overwrite was allowed.' }
+    if ((Get-FileHash -LiteralPath $case.binding -Algorithm SHA256).Hash.ToLowerInvariant() -cne
+        [Convert]::ToHexString([Security.Cryptography.SHA256]::HashData($bindingBytes)).ToLowerInvariant()) { throw 'Binding overwrite attempt changed original bytes.' }
+    $final = Export-NativeGallery -RepositoryRoot $repo
+    if ($final.acceptedImages -ne 3) { throw 'Seed collector did not recover after all refusal fixtures.' }
+    foreach ($c in $cases) {
+        foreach ($raw in Get-ChildItem -LiteralPath $c.gallery -Filter '*.png') {
+            if ((Get-FileHash -LiteralPath $raw.FullName -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pngHash) { throw 'Original seed PNG changed.' }
+        }
+        Remove-Item -LiteralPath (Split-Path $c.installed -Parent) -Recurse -Force
+    }
+    Write-Host 'Durable seed identity collector fixtures passed: immutable bytes survive business/acceptance removal; strict refusals and original failure retained.'
+}
+if ($SeedIdentityOnly) {
+    if ([string]::IsNullOrWhiteSpace($SeedIdentityRoot)) { throw 'SeedIdentityOnly requires a fresh explicit fixture root.' }
+    Test-GalleryDurableSeedIdentity $SeedIdentityRoot
+    return
 }
 $root = Join-Path ([IO.Path]::GetTempPath()) ('NativeGalleryReceipt-' + [Guid]::NewGuid().ToString('N'))
 New-Item -Path $root -ItemType Directory | Out-Null
@@ -413,6 +653,7 @@ try {
         -ExpectedShotId host-plugins -ExpectedPageKey plugins -ExpectedPhase testing-seed -ExpectedProbeKind testing `
         -ExpectedPluginId $null -ExpectedViewId $null | Out-Null } catch { $refused = $true }
     if (-not $refused) { throw 'Mutated testing runner verdict was accepted without its original hash.' }
+    Test-GalleryDurableSeedIdentity (Join-Path $root 'durable-seed')
     Write-Host 'Native gallery receipt guard fixtures passed.'
 }
 finally { Remove-Item -LiteralPath $root -Recurse -Force }

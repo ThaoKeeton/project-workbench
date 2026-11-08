@@ -4,6 +4,10 @@
 
 当前 gallery 源码只在既有隔离合成探针的断言之后，被动渲染实际显示的 `MainWindow.Content`（宿主导航、页面和插件视图）。它不含 OS 标题栏、独立对话框、桌面或其他窗口。每张候选图由真实 WinUI RenderTargetBitmap、WinRT PNG 编码/解码产生；收集器核对启动器独立观察的 PID/出生与退出 FILETIME、当前 EXE/源码/安装插件哈希、原探针报告、PNG 字节/尺寸/非空像素及固定页面清单。无桌面、失效页面、失败原探针和不存在的 Docs 独立导航页在索引中明确列出；Docs 的可用替代是项目上下文编辑器。Testing 虚拟 SIMULATED BMP 即使出现在真实宿主 PNG 中，仍不成为实际设备截图。Linux 参考编译和此文档均不宣称已产生 WinUI 图像；需要同源码 Windows 2025 运行并由人检查下载图像是否裁剪、黑屏或缺失交互表面。Windows 11 的键盘/IME/DPI/选择器/无障碍与真实 provider 仍单独待验。
 
+业务 seed/acceptance-seed 的启动器在确认该进程退出时，将当时实际安装的两个插件各自的 `plugin.json` 与入口 DLL 保存到报告旁固定的 `*.gallery-packages/`，另附绑定 phase、PID/出生/退出、源码、宿主 EXE/DLL、原报告及 publisher ZIP 哈希的 `identity.json`。仅这四个有大小上限的身份文件被复制，不含设置、数据、密钥或完整插件树，也不会被加载；文件以 CreateNew 写入并整目录发布。收集器核验全部快照文件、独立启动器绑定、原报告、实际宿主与原 publisher ZIP，拒绝缺失、改写、重复、额外文件及 reparse/path escape。后续更新/移除不再令有效 seed 图像依赖当前可变安装目录；任何快照/发布失败均保留原始证据与原探针失败结果。现有 business 原始证据路径同时保留这些有界身份文件，无需新增 artifact。
+
+PNG 编码使用 RenderTargetBitmap 的 premultiplied BGRA8 输入约定，保留实际内容透明度；[UWP GetPixelsAsync 文档](https://learn.microsoft.com/en-us/uwp/api/windows.ui.xaml.media.imaging.rendertargetbitmap.getpixelsasync)明确该 alpha 约定，[WinUI 文档](https://learn.microsoft.com/en-us/windows/windows-app-sdk/api/winrt/microsoft.ui.xaml.media.imaging.rendertargetbitmap.getpixelsasync)说明 BGRA8 返回值。OS/窗口 backdrop 不属于此内容渲染，透明区域不会被人工填背景。现有 Task.Yield 只让出 dispatcher，不保证 compositor 已完成一帧；旧 Light 图像的缺失导航是否还涉及 compositor/材质，仍需新 Windows 运行和逐图检查。alpha 修正不构成完整窗口/导航视觉验收。探针直接启用贡献后，会在选择真实菜单目标前刷新当前贡献，再通过原导航路径创建一次实际视图；普通 UI 导航行为不变。
+
 受控执行页面已分阶段加入生产 TestingPage 源码，使用真实 OwnedPilotController/私有 journal 和固定生产 Win32 工厂。新增可移植测试链接实际 admission/bridge/lifecycle/evidence 实现，组合真实 Core/supervisor 与明确标识的 scripted owned transport，并保留源码、原始 RED/GREEN、参考编译和长度/哈希审计。它们不实例化 Windows/XAML/PRI/dispatcher/BitmapImage，不证明实际 UIA/GDI/job 或宿主根租约重新取得。页面晚到 Loaded/已捕获 Changed 的永久关闭路径已在源码中封闭并经完整参考编译；真实 WinUI 到达顺序仍待 Windows 验收。
 
 当前 all27 standalone、已安装面板/隔离/取消、现有 native/runtime/workspace/virtual/business51 与 12 PID+出生实例、SDK/最终交付、下载字节、干净生产两宿主 StepStarted 崩溃、升级/回滚和单独编译的 SourceAcceptance/实际合成 DPAPI 均未在此 Linux 阶段关闭。历史 9/27 后 CLR abort 仍 UNKNOWN。当前 CI 启动受账户付款/支出注解阻挡，未重试或改动账户；Windows11 人工验收继续延期。

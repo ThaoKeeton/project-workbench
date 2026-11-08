@@ -356,9 +356,11 @@ internal sealed partial class MainWindow
     internal async Task<FrameworkElement> SmokeNavigateAsync(string page, string? pluginId = null, string? viewId = null)
     {
         AssertUiThread();
-        Navigate(new(page, pluginId, viewId));
-        // Keep the real selected sidebar item aligned with the existing attached page.
-        // SelectionChanged is suppressed here so it cannot invoke the factory twice.
+        // Probes can enable real contributions directly, without a package-page
+        // action rebuilding the menu. Refresh those same registrations first.
+        RefreshNavigation();
+        // Select under the ordinary refresh guard before the single navigation /
+        // factory invocation. A missing or ambiguous real target still fails.
         _refreshing = true;
         try
         {
@@ -367,6 +369,7 @@ internal sealed partial class MainWindow
                 : _navigation.MenuItems.OfType<NavigationViewItem>().Single(item => Equals(item.Tag, target));
         }
         finally { _refreshing = false; }
+        Navigate(new(page, pluginId, viewId));
         var element = _content.Content as FrameworkElement ?? throw new InvalidOperationException("Navigation did not supply a native page.");
         var loaded = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnLoaded(object sender, RoutedEventArgs args) => loaded.TrySetResult();

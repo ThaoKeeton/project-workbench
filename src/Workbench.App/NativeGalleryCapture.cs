@@ -150,7 +150,9 @@ internal sealed partial class MainWindow
 
             using var stream = new InMemoryRandomAccessStream();
             var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Straight, (uint)width, (uint)height, 96, 96, pixels);
+            // RenderTargetBitmap supplies premultiplied BGRA8. Tell the codec the
+            // input alpha convention; PNG retains the actual content transparency.
+            encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)width, (uint)height, 96, 96, pixels);
             await encoder.FlushAsync();
             if (stream.Size is < 1 or > NativeGalleryPolicy.MaxPngBytes
                 || !GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId)) return;

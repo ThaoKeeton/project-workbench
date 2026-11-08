@@ -88,6 +88,137 @@ function Assert-GalleryText([AllowNull()][object]$Actual,[AllowNull()][object]$E
     if($null -eq $Expected){if($null -ne $Actual){throw 'GalleryIdentityMismatch'}}
     elseif($Actual -isnot [string] -or $Actual -cne $Expected){throw 'GalleryIdentityMismatch'}
 }
+function Test-GalleryZipName([AllowNull()][object]$Name){
+    return ($Name -is [string] -and $Name -cmatch '^([A-Za-z0-9][A-Za-z0-9_.-]{0,123}/)?[A-Za-z0-9][A-Za-z0-9_.-]{0,123}\.zip$')
+}
+function Assert-GalleryFolder([string]$Path){
+    $full=[IO.Path]::GetFullPath($Path)
+    for($part=$full;$part;$part=[IO.Path]::GetDirectoryName($part)){
+        if((Test-Path -LiteralPath $part) -and
+           ((Get-Item -LiteralPath $part -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'GalleryReparsePath'}
+    }
+    return $full
+}
+function Copy-GalleryIdentityFile([string]$Source,[string]$Destination,[long]$Limit,[string]$Hash){
+    $safe=Assert-GalleryPath $Source
+    if((Get-Item -LiteralPath $safe).Length -lt 1 -or (Get-Item -LiteralPath $safe).Length -gt $Limit){throw 'GalleryPackageSnapshotSizeInvalid'}
+    $inputStream=[IO.FileStream]::new($safe,[IO.FileMode]::Open,[IO.FileAccess]::Read,[IO.FileShare]::Read)
+    try{
+        $outputStream=[IO.FileStream]::new($Destination,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try{
+            $total=0L;$buffer=[byte[]]::new(65536)
+            while(($count=$inputStream.Read($buffer,0,$buffer.Length)) -gt 0){
+                $total+=$count
+                if($total -gt $Limit){throw 'GalleryPackageSnapshotSizeInvalid'}
+                $outputStream.Write($buffer,0,$count)
+            }
+            $outputStream.Flush($true)
+        }finally{$outputStream.Dispose()}
+    }finally{$inputStream.Dispose()}
+    if($total -lt 1 -or (Get-GalleryHash $Destination) -cne $Hash){throw 'GalleryPackageSnapshotHashMismatch'}
+    return $total
+}
+function Get-GallerySeedPackageIds([string]$Phase){
+    if($Phase -ceq 'business-seed'){return @('com.projectworkbench.dingtalk-insights','com.upcam.task-digest')}
+    if($Phase -ceq 'business-acceptance-seed'){return @('com.projectworkbench.dingtalk-insights','com.upcam.task-digest.acceptance')}
+    throw 'GalleryPackageSnapshotIdentityMismatch'
+}
+function Write-GalleryPackageSnapshot([string]$OriginalReportPath,[string]$InstalledRoot,[Collections.IDictionary]$Binding){
+    $ids=@(Get-GallerySeedPackageIds $Binding['phase'])
+    if(-not $Binding['hasExited'] -or -not (Test-GalleryInt $Binding['processId'] 1 ([int]::MaxValue)) -or
+       -not (Test-GalleryInt $Binding['processCreationFileTimeUtc'] 1 ([long]::MaxValue)) -or
+       -not (Test-GalleryInt $Binding['processExitFileTimeUtc'] 1 ([long]::MaxValue)) -or
+       $Binding['processExitFileTimeUtc'] -le $Binding['processCreationFileTimeUtc'] -or
+       -not (Test-GalleryHash $Binding['originalReportSha256']) -or $Binding['packages'].Count -ne 2){throw 'GalleryPackageSnapshotIdentityMismatch'}
+    $report=Read-GalleryJson $OriginalReportPath 4194304
+    if($report['userRoot'] -isnot [string] -or
+       [IO.Path]::GetFullPath($InstalledRoot) -cne [IO.Path]::GetFullPath((Join-Path $report['userRoot'] 'Plugins'))){throw 'GalleryPackageSnapshotIdentityMismatch'}
+    $destination=Assert-GalleryFolder ([IO.Path]::ChangeExtension($OriginalReportPath,'gallery-packages'))
+    if(Test-Path -LiteralPath $destination){throw 'GalleryPackageSnapshotAlreadyExists'}
+    $stage=Assert-GalleryFolder ($destination+'.staging-'+[Guid]::NewGuid().ToString('N'))
+    if(Test-Path -LiteralPath $stage){throw 'GalleryPackageSnapshotAlreadyExists'}
+    [IO.Directory]::CreateDirectory($stage) | Out-Null
+    $packages=@{}
+    foreach($id in $ids){
+        if(-not $Binding['packages'].Contains($id)){throw 'GalleryPackageSnapshotIdentityMismatch'}
+        $p=$Binding['packages'][$id]
+        if(-not (Test-GalleryZipName $p['sourceZipName']) -or -not (Test-GalleryHash $p['sourceZipSha256'])){throw 'GalleryPackageSnapshotIdentityMismatch'}
+        $folder=Join-Path $stage $id
+        [IO.Directory]::CreateDirectory($folder) | Out-Null
+        $installed=Join-Path $InstalledRoot $id
+        $packages[$id]=$p.Clone()
+        $packages[$id]['manifestBytes']=Copy-GalleryIdentityFile (Join-Path $installed 'plugin.json') (Join-Path $folder 'plugin.json') 65536 $p['manifestSha256']
+        $packages[$id]['entryBytes']=Copy-GalleryIdentityFile (Join-Path $installed $p['entryAssembly']) (Join-Path $folder $p['entryAssembly']) 16777216 $p['entrySha256']
+    }
+    $identity=[ordered]@{schemaVersion=1;installedRoot=[IO.Path]::GetFullPath($InstalledRoot);packages=$packages}
+    foreach($field in @('phase','processId','processCreationFileTimeUtc','processExitFileTimeUtc','sourceCommit',
+        'executableSha256','hostDllSha256','originalReportFile','originalReportSha256')){$identity[$field]=$Binding[$field]}
+    $bytes=[Text.Encoding]::UTF8.GetBytes(($identity | ConvertTo-Json -Depth 12))
+    if($bytes.Length -gt 65536){throw 'GalleryPackageSnapshotSizeInvalid'}
+    $identityPath=Join-Path $stage 'identity.json'
+    $stream=[IO.FileStream]::new($identityPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+    $hash=Get-GalleryHash $identityPath
+    # Fixed sibling evidence only; never loaded or used as an installation. Failure
+    # retains installed files, native receipts and any partial staging evidence.
+    [IO.Directory]::Move($stage,$destination)
+    return $hash
+}
+function Test-GalleryPackageSnapshot([string]$OriginalReportPath,[string]$InstalledRoot,[Collections.IDictionary]$Binding){
+    $ids=@(Get-GallerySeedPackageIds $Binding['phase'])
+    $root=Assert-GalleryFolder ([IO.Path]::ChangeExtension($OriginalReportPath,'gallery-packages'))
+    if(-not (Test-Path -LiteralPath $root -PathType Container)){throw 'GalleryPackageSnapshotFilesInvalid'}
+    $children=@(Get-ChildItem -LiteralPath $root -Force)
+    foreach($child in $children){
+        if(($child.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'GalleryReparsePath'}
+        if(($child -is [IO.FileInfo] -and $child.Name -cne 'identity.json') -or
+           ($child -is [IO.DirectoryInfo] -and $child.Name -cnotin $ids)){throw 'GalleryPackageSnapshotFilesInvalid'}
+    }
+    $identity=Join-Path $root 'identity.json'
+    if($children.Count -ne 3 -or -not (Test-Path -LiteralPath $identity -PathType Leaf)){throw 'GalleryPackageSnapshotFilesInvalid'}
+    if(-not (Test-GalleryHash $Binding['packageSnapshotSha256'])){throw 'GalleryPackageSnapshotIdentityMismatch'}
+    if((Get-GalleryHash $identity) -cne $Binding['packageSnapshotSha256']){throw 'GalleryPackageSnapshotHashMismatch'}
+    $data=Read-GalleryJson $identity
+    if(-not (Test-GalleryInt $data['schemaVersion'] 1 1) -or $data['installedRoot'] -isnot [string] -or
+       $data['installedRoot'] -cne [IO.Path]::GetFullPath($InstalledRoot) -or
+       $data['packages'] -isnot [Collections.IDictionary] -or $data['packages'].Count -ne 2 -or
+       $Binding['packages'] -isnot [Collections.IDictionary] -or $Binding['packages'].Count -ne 2){throw 'GalleryPackageSnapshotIdentityMismatch'}
+    foreach($field in @('phase','sourceCommit','executableSha256','hostDllSha256','originalReportFile','originalReportSha256')){
+        if($data[$field] -isnot [string] -or $data[$field] -cne $Binding[$field]){throw 'GalleryPackageSnapshotIdentityMismatch'}
+    }
+    foreach($field in @('processId','processCreationFileTimeUtc','processExitFileTimeUtc')){
+        if(-not (Test-GalleryInt $data[$field] 1 ([long]::MaxValue)) -or $data[$field] -ne $Binding[$field]){throw 'GalleryPackageSnapshotIdentityMismatch'}
+    }
+    foreach($id in $ids){
+        if(-not $data['packages'].Contains($id) -or -not $Binding['packages'].Contains($id)){throw 'GalleryPackageSnapshotIdentityMismatch'}
+        $p=$data['packages'][$id];$b=$Binding['packages'][$id]
+        if($p -isnot [Collections.IDictionary] -or $b -isnot [Collections.IDictionary] -or
+           $p['entryAssembly'] -isnot [string] -or $p['entryAssembly'] -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,123}\.dll$' -or
+           -not (Test-GalleryHash $p['manifestSha256']) -or -not (Test-GalleryHash $p['entrySha256']) -or
+           -not (Test-GalleryHash $p['sourceZipSha256']) -or -not (Test-GalleryZipName $p['sourceZipName'])){throw 'GalleryPackageSnapshotIdentityMismatch'}
+        foreach($field in @('entryAssembly','manifestSha256','entrySha256','sourceZipName','sourceZipSha256')){
+            if($p[$field] -isnot [string] -or $p[$field] -cne $b[$field]){throw 'GalleryPackageSnapshotIdentityMismatch'}
+        }
+        $folder=Assert-GalleryFolder (Join-Path $root $id)
+        if(-not (Test-Path -LiteralPath $folder -PathType Container)){throw 'GalleryPackageSnapshotFilesInvalid'}
+        $files=@(Get-ChildItem -LiteralPath $folder -Force)
+        foreach($file in $files){
+            if(($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'GalleryReparsePath'}
+            if($file -isnot [IO.FileInfo] -or $file.Name -cnotin @('plugin.json',$p['entryAssembly'])){throw 'GalleryPackageSnapshotFilesInvalid'}
+        }
+        if($files.Count -ne 2){throw 'GalleryPackageSnapshotFilesInvalid'}
+        foreach($spec in @(@('plugin.json','manifestBytes','manifestSha256',65536),@($p['entryAssembly'],'entryBytes','entrySha256',16777216))){
+            $file=Join-Path $folder $spec[0]
+            if(-not (Test-GalleryInt $p[$spec[1]] 1 $spec[3]) -or
+               (Get-Item -LiteralPath $file).Length -ne $p[$spec[1]] -or
+               (Get-GalleryHash $file) -cne $p[$spec[2]]){throw 'GalleryPackageSnapshotHashMismatch'}
+        }
+        $manifest=Read-GalleryJson (Join-Path $folder 'plugin.json')
+        if($manifest['id'] -isnot [string] -or $manifest['id'] -cne $id -or
+           $manifest['entryAssembly'] -isnot [string] -or $manifest['entryAssembly'] -cne $p['entryAssembly']){throw 'GalleryPackageSnapshotIdentityMismatch'}
+    }
+    return $root
+}
 function Write-NativeGalleryBinding {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$OriginalReportPath,[Parameter(Mandatory)][string]$Phase,
@@ -98,6 +229,13 @@ function Write-NativeGalleryBinding {
     if($Phase -cnotmatch '^(native-smoke|workspace-(seed|verify)|testing-(seed|verify)|business-(seed|acceptance-seed))$' -or
         $SourceCommit -cnotmatch '^[0-9a-f]{40}$'){throw 'GalleryBindingArgumentsInvalid'}
     $path=[IO.Path]::ChangeExtension($OriginalReportPath,'gallery-binding.json')
+    if(Test-Path -LiteralPath $path){throw 'GalleryBindingAlreadyExists'}
+    if($Phase -clike 'business-*'){
+        $ids=@(Get-GallerySeedPackageIds $Phase)
+        if($PackageIds.Count -ne 2 -or $SourceZipPaths.Count -ne 2 -or
+           @($PackageIds | Select-Object -Unique).Count -ne 2 -or
+           @($PackageIds | Where-Object { $_ -cnotin $ids }).Count -ne 0){throw 'GalleryPackageIdInvalid'}
+    }
     $dll=Join-Path (Split-Path $ExecutablePath -Parent) 'Workbench.App.dll'
     $reportHash=$null;$nativeSucceeded=$false
     if(Test-Path -LiteralPath $OriginalReportPath -PathType Leaf){
@@ -129,13 +267,13 @@ function Write-NativeGalleryBinding {
         $folder=Join-Path $InstalledRoot $id;$manifest=Join-Path $folder 'plugin.json'
         if(-not (Test-Path -LiteralPath $manifest -PathType Leaf)){continue}
         $data=Read-GalleryJson $manifest;$entry=$data['entryAssembly']
-        if($data['id'] -cne $id -or $entry -isnot [string] -or $entry -cnotmatch '^[A-Za-z0-9_.-]+\.dll$'){throw 'GalleryPackageManifestInvalid'}
+        if($data['id'] -cne $id -or $entry -isnot [string] -or $entry -cnotmatch '^[A-Za-z0-9][A-Za-z0-9_.-]{0,123}\.dll$'){throw 'GalleryPackageManifestInvalid'}
         $packages[$id]=@{manifestSha256=(Get-GalleryHash $manifest);entrySha256=(Get-GalleryHash (Join-Path $folder $entry));entryAssembly=$entry}
         if($SourceZipPaths.ContainsKey($id)){
             $zip=$SourceZipPaths[$id]
             if($SourceZipRoot -eq ''){throw 'GallerySourceZipRootMissing'}
             $relative=[IO.Path]::GetRelativePath($SourceZipRoot,$zip).Replace('\','/')
-            if($relative -cnotmatch '^([A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+\.zip$'){throw 'GallerySourceZipPathInvalid'}
+            if(-not (Test-GalleryZipName $relative)){throw 'GallerySourceZipPathInvalid'}
             $packages[$id]['sourceZipName']=$relative
             $packages[$id]['sourceZipSha256']=Get-GalleryHash $zip
         }
@@ -148,9 +286,12 @@ function Write-NativeGalleryBinding {
         nativeReportSucceeded=$nativeSucceeded;runnerReportFile=$runnerReportFile;
         runnerReportSha256=$runnerReportHash;runnerReportSucceeded=$runnerSucceeded;
         originalProbeSucceeded=$succeeded;packages=$packages}
+    if($Phase -clike 'business-*'){
+        $record['packageSnapshotSha256']=Write-GalleryPackageSnapshot $OriginalReportPath $InstalledRoot $record
+    }
     $bytes=[Text.Encoding]::UTF8.GetBytes(($record | ConvertTo-Json -Depth 12))
     $stream=[IO.FileStream]::new($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-    try{$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}
+    try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
     return $path
 }
 function Test-NativeGalleryReceipt {
@@ -160,7 +301,8 @@ function Test-NativeGalleryReceipt {
         [Parameter(Mandatory)][string]$ExpectedSourceCommit,[Parameter(Mandatory)][string]$ExpectedShotId,
         [Parameter(Mandatory)][string]$ExpectedPageKey,[Parameter(Mandatory)][string]$ExpectedPhase,
         [Parameter(Mandatory)][string]$ExpectedProbeKind,[AllowNull()][object]$ExpectedPluginId,
-        [AllowNull()][object]$ExpectedViewId,[string]$ExpectedPackageRoot='',[string]$ExpectedZipRoot='')
+        [AllowNull()][object]$ExpectedViewId,[string]$ExpectedPackageRoot='',[string]$ExpectedZipRoot='',
+        [switch]$RequirePackageSnapshot)
     $r=Read-GalleryJson $ReceiptPath;$b=Read-GalleryJson $BindingPath;$original=Read-GalleryJson $OriginalReportPath 4194304
     if($ExpectedShotId -cnotmatch '^[a-z][a-z0-9-]{0,63}$' -or
         -not (Test-GalleryInt $r['schemaVersion'] 1 1) -or -not (Test-GalleryInt $b['schemaVersion'] 1 1) -or
@@ -282,6 +424,10 @@ function Test-NativeGalleryReceipt {
     if($capture.Offset.TotalMinutes -ne 0 -or $captureFileTime -lt $b['processCreationFileTimeUtc'] -or
        $captureFileTime -gt $b['processExitFileTimeUtc']){throw 'GalleryCaptureTimeInvalid'}
     $manifestReceiptHash=$null;$entryReceiptHash=$null;$sourceZipHash=$null
+    if($RequirePackageSnapshot){
+        if($ExpectedProbeKind -cne 'business' -or $ExpectedZipRoot -eq ''){throw 'GalleryPackageSnapshotIdentityMismatch'}
+        $ExpectedPackageRoot=Test-GalleryPackageSnapshot $OriginalReportPath $ExpectedPackageRoot $b
+    }
     if($ExpectedPluginId){
         if($ExpectedPackageRoot -eq '' -or $b['packages'] -isnot [Collections.IDictionary] -or
            -not $b['packages'].Contains($ExpectedPluginId)){throw 'GalleryPackageBindingMissing'}
@@ -292,7 +438,7 @@ function Test-NativeGalleryReceipt {
            $p['manifestSha256'] -cne (Get-GalleryHash (Join-Path $folder 'plugin.json')) -or
            $p['entrySha256'] -cne (Get-GalleryHash (Join-Path $folder $p['entryAssembly']))){throw 'GalleryPackageHashMismatch'}
         if($ExpectedZipRoot -ne ''){
-            if($p['sourceZipName'] -isnot [string] -or $p['sourceZipName'] -cnotmatch '^([A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]+\.zip$' -or
+            if(-not (Test-GalleryZipName $p['sourceZipName']) -or
                -not (Test-GalleryHash $p['sourceZipSha256']) -or
                $p['sourceZipSha256'] -cne (Get-GalleryHash (Join-Path $ExpectedZipRoot $p['sourceZipName']))){throw 'GallerySourceZipMismatch'}
             if($ExpectedProbeKind -eq 'testing' -and $original['packageSha256'] -cne $p['sourceZipSha256']){throw 'GallerySourceZipMismatch'}
@@ -449,7 +595,7 @@ function Export-NativeGallery {
             $result=Test-NativeGalleryReceipt -ReceiptPath $receipt -BindingPath $binding -OriginalReportPath $group.report `
                 -ExecutablePath $exe -ExpectedSourceCommit $source -ExpectedShotId $id -ExpectedPageKey $shot[1] `
                 -ExpectedPhase $group.phase -ExpectedProbeKind $group.probe -ExpectedPluginId $shot[2] -ExpectedViewId $shot[3] `
-                -ExpectedPackageRoot $packageRoot -ExpectedZipRoot $group.zipRoot
+                -ExpectedPackageRoot $packageRoot -ExpectedZipRoot $group.zipRoot -RequirePackageSnapshot:($group.probe -ceq 'business')
             if($result.status -ne 'captured' -and (Test-Path -LiteralPath (Join-Path $group.dir ($id+'.png')))){
                 throw 'GalleryUnexpectedImage'
             }
