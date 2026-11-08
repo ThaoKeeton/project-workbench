@@ -95,7 +95,7 @@ $audit = [WorkbenchTestingManagedAudit]::Audit($payload,$HostDirectory,$SourceCo
 if ($audit.schemaVersion -ne 1 -or $audit.assemblies.Count -ne 4 -or $audit.deps.Count -ne 2 -or $audit.hostBindings.Count -lt 1) { throw 'Actual managed closure facts missing.' }; $script:Cases++
 $production = @{}; foreach ($key in $payload.Keys) { if ($key -cnotlike '*SourceAcceptance*') { $production[$key] = $payload[$key] } }
 [WorkbenchTestingManagedAudit]::Audit($production,$HostDirectory,$SourceCommit,'Production') | Out-Null; $script:Cases++
-foreach ($mutation in @('missing-private','renamed-private','foreign-private','wrong-target','wrong-rid','wrong-root','missing-library','renamed-runtime','missing-edge','missing-reachable-edge','wrong-edge','foreign-library','foreign-runtime','private-runtime-version','duplicate-deps','missing-host','conflicting-host','linked-host','dangling-linked-host')) {
+foreach ($mutation in @('foreign-managed-runtimeTarget','missing-private','renamed-private','foreign-private','wrong-target','wrong-rid','wrong-root','missing-library','renamed-runtime','missing-edge','missing-reachable-edge','wrong-edge','foreign-library','foreign-runtime','private-runtime-version','duplicate-deps','missing-host','conflicting-host','linked-host','dangling-linked-host')) {
     $changed = @{}; foreach ($key in $payload.Keys) { $changed[$key] = $payload[$key].Clone() }
     $pairedHostDirectory = $HostDirectory
     switch ($mutation) {
@@ -111,6 +111,12 @@ foreach ($mutation in @('missing-private','renamed-private','foreign-private','w
             $target = '.NETCoreApp,Version=v10.0'
             $root = 'Workbench.Testing.SourceAcceptance/0.2.0'
             switch ($mutation) {
+                'foreign-managed-runtimeTarget' {
+                    $deps.targets[$target]['Workbench.Sdk/0.4.0'].runtimeTargets = @{
+                        'runtimes/win-x64/lib/net10.0/Workbench.Core.dll' = @{ rid = 'win-x64'; assetType = 'runtime'; assemblyVersion = '1.0.0.0'; fileVersion = '0.4.0.0' }
+                    }
+                    Write-Host 'I1 exact mutation: Workbench.Core managed runtimeTarget; expected TestingManagedDepsInvalid.'
+                }
                 'wrong-target' { $deps.runtimeTarget.name = '.NETCoreApp,Version=v9.0' }
                 'wrong-rid' { $deps.runtimeTarget.name += '/win-x64' }
                 'wrong-root' { $deps.targets[$target]['Other/0.2.0'] = $deps.targets[$target][$root]; $deps.targets[$target].Remove($root) }
@@ -137,5 +143,82 @@ foreach ($mutation in @('missing-private','renamed-private','foreign-private','w
         default { 'TestingManagedDepsInvalid' }
     }
     Refuses { [WorkbenchTestingManagedAudit]::Audit($changed,$pairedHostDirectory,$SourceCommit,'SourceAcceptance') } $expected
+}
+# I1 coverage uses the genuine payload PEs. Host declarations added for these cases live
+# only in fresh owned peer copies; the preserved graph and metadata host are never edited.
+$runtimeTargetCases = @(
+    @{ name = 'approved-shared-managed'; mirror = $true; accepted = $true },
+    @{ name = 'shared-managed-undeclared'; mirror = $false },
+    @{ name = 'foreign-managed-undeclared'; mirror = $false },
+    @{ name = 'rid-path-mismatch'; mirror = $true },
+    @{ name = 'rid-wrong-type'; mirror = $true },
+    @{ name = 'missing-rid'; mirror = $true },
+    @{ name = 'unknown-asset-type'; mirror = $true },
+    @{ name = 'missing-asset-type'; mirror = $true },
+    @{ name = 'native-type-managed-path'; mirror = $true },
+    @{ name = 'unknown-metadata'; mirror = $true },
+    @{ name = 'metadata-array'; mirror = $true },
+    @{ name = 'targets-array'; mirror = $false },
+    @{ name = 'path-traversal'; mirror = $true },
+    @{ name = 'assembly-version-conflicts-with-pe'; mirror = $true },
+    @{ name = 'file-version-wrong-type'; mirror = $true }
+)
+$ownedRuntimeTargets = Join-Path ([IO.Path]::GetTempPath()) ('testing-managed-runtime-targets-' + [Guid]::NewGuid().ToString('N'))
+Write-Host "I1 owned host-peer evidence: $ownedRuntimeTargets"
+# A published RID host may omit the unselected native RID declarations. Those unused
+# native assets remain valid dependency metadata and are never copied into the payload.
+$nativePeerDirectory = Join-Path $ownedRuntimeTargets 'genuine-native-rid-subset-host'
+New-Item $nativePeerDirectory -ItemType Directory -Force | Out-Null
+foreach ($name in @('Workbench.Core') + @($audit.hostBindings | ForEach-Object name)) {
+    Copy-Item -LiteralPath (Join-Path $HostDirectory "$name.dll") -Destination (Join-Path $nativePeerDirectory "$name.dll")
+}
+$nativeHostDeps = Get-Content -LiteralPath (Join-Path $HostDirectory 'Workbench.App.deps.json') -Raw | ConvertFrom-Json -AsHashtable
+foreach ($hostTarget in $nativeHostDeps.targets.Values) {
+    foreach ($hostNode in $hostTarget.Values) { $hostNode.Remove('runtimeTargets') }
+}
+$nativeHostDeps | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath (Join-Path $nativePeerDirectory 'Workbench.App.deps.json') -Encoding utf8
+[WorkbenchTestingManagedAudit]::Audit($payload,$nativePeerDirectory,$SourceCommit,'SourceAcceptance') | Out-Null
+$script:Cases++; Write-Host 'I1 genuine native RID graph accepted without unselected host runtimeTargets declarations.'
+foreach ($case in $runtimeTargetCases) {
+    $assetPath = 'runtimes/win-x64/lib/net10.0/Workbench.Sdk.dll'
+    $assetMetadata = @{ rid = 'win-x64'; assetType = 'runtime'; assemblyVersion = '1.0.0.0'; fileVersion = '0.4.0.0' }
+    switch ($case.name) {
+        'foreign-managed-undeclared' { $assetPath = 'runtimes/win-x64/lib/net10.0/Foreign.Private.dll' }
+        'rid-path-mismatch' { $assetMetadata.rid = 'win-arm64' }
+        'rid-wrong-type' { $assetMetadata.rid = 7 }
+        'missing-rid' { $assetMetadata.Remove('rid') }
+        'unknown-asset-type' { $assetMetadata.assetType = 'managed' }
+        'missing-asset-type' { $assetMetadata.Remove('assetType') }
+        'native-type-managed-path' { $assetMetadata.assetType = 'native'; $assetMetadata.Remove('assemblyVersion') }
+        'unknown-metadata' { $assetMetadata.extra = 'unexpected' }
+        'metadata-array' { $assetMetadata = @('unexpected') }
+        'path-traversal' { $assetPath = 'runtimes/win-x64/lib/../Workbench.Sdk.dll' }
+        'assembly-version-conflicts-with-pe' { $assetMetadata.assemblyVersion = '2.0.0.0' }
+        'file-version-wrong-type' { $assetMetadata.fileVersion = 7 }
+    }
+    $runtimeTargets = @{ $assetPath = $assetMetadata }
+    if ($case.name -ceq 'targets-array') { $runtimeTargets = @('unexpected') }
+    $changed = @{}; foreach ($key in $payload.Keys) { $changed[$key] = $payload[$key] }
+    $deps = [Text.Encoding]::UTF8.GetString($payload['Workbench.Testing.SourceAcceptance.deps.json']) | ConvertFrom-Json -AsHashtable
+    $deps.targets['.NETCoreApp,Version=v10.0']['Workbench.Sdk/0.4.0'].runtimeTargets = $runtimeTargets
+    $changed['Workbench.Testing.SourceAcceptance.deps.json'] = [Text.Encoding]::UTF8.GetBytes(($deps | ConvertTo-Json -Depth 32 -Compress))
+    $peerDirectory = $HostDirectory
+    if ($case.mirror) {
+        $peerDirectory = Join-Path $ownedRuntimeTargets $case.name
+        New-Item $peerDirectory -ItemType Directory -Force | Out-Null
+        foreach ($name in @('Workbench.Core') + @($audit.hostBindings | ForEach-Object name)) {
+            Copy-Item -LiteralPath (Join-Path $HostDirectory "$name.dll") -Destination (Join-Path $peerDirectory "$name.dll")
+        }
+        $hostDeps = Get-Content -LiteralPath (Join-Path $HostDirectory 'Workbench.App.deps.json') -Raw | ConvertFrom-Json -AsHashtable
+        $hostDeps.targets['.NETCoreApp,Version=v10.0']['Workbench.Sdk/0.4.0'].runtimeTargets = $runtimeTargets
+        $hostDeps | ConvertTo-Json -Depth 32 | Set-Content -LiteralPath (Join-Path $peerDirectory 'Workbench.App.deps.json') -Encoding utf8
+    }
+    if ($case.ContainsKey('accepted') -and $case.accepted) {
+        [WorkbenchTestingManagedAudit]::Audit($changed,$peerDirectory,$SourceCommit,'SourceAcceptance') | Out-Null
+        $script:Cases++; Write-Host "I1 approved shared managed runtimeTarget accepted: $($case.name)"
+    } else {
+        Write-Host "I1 runtimeTarget guard: $($case.name)"
+        Refuses { [WorkbenchTestingManagedAudit]::Audit($changed,$peerDirectory,$SourceCommit,'SourceAcceptance') } 'TestingManagedDepsInvalid'
+    }
 }
 Write-Host "Managed metadata/closure guards passed: $script:Cases cases on genuine compiled PEs; this is not native package/activation evidence."

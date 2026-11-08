@@ -186,6 +186,30 @@ public static class WorkbenchTestingManagedAudit
         throw Fail("TestingManagedHostBindingInvalid");
     }
     private static bool Shared(string name) => name == "Workbench.Sdk" || name == "Workbench.WinUI.Sdk" || name == "Microsoft.WinUI" || name == "WinRT.Runtime" || name == "Microsoft.Windows.SDK.NET" || name == "Microsoft.InteractiveExperiences.Projection" || name.StartsWith("Microsoft.Windows.", StringComparison.Ordinal) && name.EndsWith(".Projection", StringComparison.Ordinal) || name.StartsWith("Microsoft.WindowsAppRuntime.", StringComparison.Ordinal);
+    private static void ExternalAsset(string library, string group, JsonProperty asset, JsonElement hostTargets, Dictionary<string, Identity> bindings, bool managed)
+    {
+        string assetName = Path.GetFileNameWithoutExtension(asset.Name.Replace('\\', '/'));
+        if (asset.Value.ValueKind != JsonValueKind.Object || assetName.StartsWith("Workbench.", StringComparison.OrdinalIgnoreCase) && !Shared(assetName) || asset.Name.Split('/').Any(p => p == ".." || p == ".") || asset.Name.StartsWith("/", StringComparison.Ordinal) || asset.Name.Contains('\\')) throw Fail("TestingManagedDepsInvalid");
+        // Managed declarations must match the actual host. Unselected native RIDs can
+        // be omitted from its published deps and are never copied into the plugin.
+        if (managed && !hostTargets.EnumerateObject().Any(ht => ht.Value.TryGetProperty(library, out var hn) && hn.TryGetProperty(group, out var hr) && hr.TryGetProperty(asset.Name, out var ha) && JsonElement.DeepEquals(ha, asset.Value))) throw Fail("TestingManagedDepsInvalid");
+        // Only managed references consumed by private IL need an assembly identity binding.
+        if (managed && bindings.TryGetValue(assetName, out var host) && asset.Value.TryGetProperty("assemblyVersion", out var av) && av.GetString() != host.Version.ToString()) throw Fail("TestingManagedDepsInvalid");
+    }
+    private static bool ManagedRuntimeTarget(JsonProperty asset)
+    {
+        if (asset.Value.ValueKind != JsonValueKind.Object) throw Fail("TestingManagedDepsInvalid");
+        string rid = Str(asset.Value, "rid"), kind = Str(asset.Value, "assetType");
+        if (string.IsNullOrEmpty(rid) || rid.Any(c => !(c >= 'a' && c <= 'z' || c >= '0' && c <= '9' || c == '-' || c == '.')) || kind != "runtime" && kind != "native") throw Fail("TestingManagedDepsInvalid");
+        var parts = asset.Name.Split('/'); bool managed = kind == "runtime";
+        if (parts.Length < (managed ? 5 : 4) || parts[0] != "runtimes" || parts[1] != rid || parts[2] != (managed ? "lib" : "native") || parts.Any(p => p.Length == 0 || p == "." || p == "..") || managed && !asset.Name.EndsWith(".dll", StringComparison.Ordinal)) throw Fail("TestingManagedDepsInvalid");
+        foreach (var property in asset.Value.EnumerateObject())
+        {
+            if (property.Name == "rid" || property.Name == "assetType") continue;
+            if (property.Name != "fileVersion" && (!managed || property.Name != "assemblyVersion") || property.Value.ValueKind != JsonValueKind.String || !Version.TryParse(property.Value.GetString(), out _)) throw Fail("TestingManagedDepsInvalid");
+        }
+        return managed;
+    }
     public static string Audit(IDictionary payload, string hostDirectory, string commit, string profile)
     {
         bool source = profile == "SourceAcceptance"; if (!source && profile != "Production") throw Fail("TestingManagedPayloadInvalid");
@@ -245,15 +269,9 @@ public static class WorkbenchTestingManagedAudit
                     {
                         if (!hostLibraries.TryGetProperty(lib.Name, out var hostLib) || Str(hostLib, "type") != Str(lib.Value, "type")) throw Fail("TestingManagedDepsInvalid");
                         if (node.TryGetProperty("runtime", out var runtime)) foreach (var asset in runtime.EnumerateObject())
-                        {
-                            string assetName = Path.GetFileNameWithoutExtension(asset.Name.Replace('\\', '/'));
-                            if (assetName.StartsWith("Workbench.", StringComparison.OrdinalIgnoreCase) && !Shared(assetName) || asset.Name.Split('/').Any(p => p == ".." || p == ".") || asset.Name.StartsWith("/", StringComparison.Ordinal) || asset.Name.Contains('\\')) throw Fail("TestingManagedDepsInvalid");
-                            // Every external managed asset must be declared identically in an actual host target.
-                            // Native/RID-specific third-party assets are not copied into the plugin.
-                            if (!hostTargets.EnumerateObject().Any(ht => ht.Value.TryGetProperty(lib.Name, out var hn) && hn.TryGetProperty("runtime", out var hr) && hr.TryGetProperty(asset.Name, out var ha) && JsonElement.DeepEquals(ha, asset.Value))) throw Fail("TestingManagedDepsInvalid");
-                            // Only references consumed by private IL need an assembly identity binding.
-                            if (bindings.TryGetValue(assetName, out var host) && asset.Value.TryGetProperty("assemblyVersion", out var av) && av.GetString() != host.Version.ToString()) throw Fail("TestingManagedDepsInvalid");
-                        }
+                            ExternalAsset(lib.Name, "runtime", asset, hostTargets, bindings, true);
+                        if (node.TryGetProperty("runtimeTargets", out var runtimeTargets)) foreach (var asset in runtimeTargets.EnumerateObject())
+                            ExternalAsset(lib.Name, "runtimeTargets", asset, hostTargets, bindings, ManagedRuntimeTarget(asset));
                     }
                 }
                 depsFacts.Add(new { path = file, root = root + "/0.2.0", target = Target, sha256 = Convert.ToHexString(SHA256.HashData(data)).ToLowerInvariant() });
