@@ -23,6 +23,7 @@ jobs:
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
           ./tests/scripts/TestingPluginProbe.Tests.ps1
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
+          ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -40,11 +41,14 @@ jobs:
           if ($LASTEXITCODE -ne 0) { throw 'Owned reference probe compilation failed.' }
           dotnet tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0/Workbench.OwnedLab.WindowsProbe.dll --reference-only-check
           if ($LASTEXITCODE -ne 0) { throw 'Owned reference descriptor/queue refusal failed.' }
+          dotnet tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0/Workbench.OwnedLab.WindowsProbe.dll --scenario-policy-check
+          if ($LASTEXITCODE -ne 0) { throw 'Owned scenario retirement policy checks failed.' }
           ./scripts/package-testing-plugin.ps1 -ReferenceOnly -OutputDirectory ./artifacts/reference-must-not-create-delivery
           if (Test-Path ./artifacts/reference-must-not-create-delivery) { throw 'Reference compilation produced a production delivery.' }
           $PSNativeCommandUseErrorActionPreference = $false
           dotnet build plugins/Workbench.Testing.Windows -c Release --nologo --no-restore -t:Rebuild -p:OwnedLabReferenceOnly=false *> ./artifacts/tests/owned-missing-helper.log
           if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath ./artifacts/tests/owned-missing-helper.log -Pattern 'UnavailableHelper:' -Quiet)) { throw 'Missing production helper was accepted or failed for an unrelated reason.' }
+          $global:LASTEXITCODE = 0
           Write-Host 'Reference-only unavailable descriptor and missing production helper refusals passed; no native execution or ZIP.'
       - uses: actions/upload-artifact@v7.0.2
         if: always()
@@ -68,6 +72,7 @@ jobs:
           ./tests/scripts/WorkspaceProbePhase.Tests.ps1
           ./tests/scripts/TestingPluginProbe.Tests.ps1
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
+          ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1

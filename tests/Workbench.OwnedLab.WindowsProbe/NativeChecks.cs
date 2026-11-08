@@ -9,6 +9,21 @@ namespace Workbench.OwnedLab.WindowsProbe;
 
 internal sealed class NativeChecks(string output, string zipSha)
 {
+    internal static void ScenarioPolicyChecks()
+    {
+        static OwnedNativeReceipt Observed(int exit) => new(10, 100, 20, 200, exit, exit, true, true, 0, true, true, true);
+        var clean = new OwnedRetirement(true, 0, 0, 0); var aborted = new OwnedRetirement(true, 0x20000001, 0x20000001, 0);
+        ValidateScenarioRetirement(OwnedScenario.Positive, OwnedRunState.Passed, null, 4, clean, Observed(0));
+        ValidateScenarioRetirement(OwnedScenario.EmptyTitle, OwnedRunState.Passed, null, 4, clean, Observed(0));
+        ValidateScenarioRetirement(OwnedScenario.AssertionFailure, OwnedRunState.Failed, "AssertionFailed", 3, aborted, Observed(0x20000001));
+        static void Reject(Action action) { try { action(); } catch (InvalidDataException) { return; } throw new InvalidDataException("Scenario policy accepted invalid result."); }
+        Reject(() => ValidateScenarioRetirement(OwnedScenario.Positive, OwnedRunState.Passed, null, 4, aborted, Observed(0x20000001)));
+        Reject(() => ValidateScenarioRetirement(OwnedScenario.AssertionFailure, OwnedRunState.Passed, null, 3, clean, Observed(0)));
+        Reject(() => ValidateScenarioRetirement(OwnedScenario.AssertionFailure, OwnedRunState.Failed, "DriverFailure", 3, aborted, Observed(0x20000001)));
+        Reject(() => ValidateScenarioRetirement(OwnedScenario.AssertionFailure, OwnedRunState.Failed, "AssertionFailed", 4, aborted, Observed(0x20000001)));
+        Reject(() => ValidateScenarioRetirement(OwnedScenario.AssertionFailure, OwnedRunState.Failed, "AssertionFailed", 3, clean, Observed(0x20000001)));
+        Console.WriteLine("Scenario retirement policy checks passed; data-only checks, no native execution.");
+    }
     internal static async Task ReferenceOnlyAsync()
     {
         var descriptor = OwnedDriverDescriptor.Current;
@@ -35,6 +50,7 @@ internal sealed class NativeChecks(string output, string zipSha)
     {
         await HelperIdentityAsync();
         foreach (var scenario in new[] { OwnedScenario.Positive, OwnedScenario.EmptyTitle, OwnedScenario.AssertionFailure }) await ScenarioAsync(scenario);
+        await InvalidClosedZeroExitAsync();
         foreach (var fixture in new[] { NativeFixture.UiaBlock, NativeFixture.GdiBlock, NativeFixture.Hang, NativeFixture.Crash,
             NativeFixture.EarlyExit, NativeFixture.DpiFailure, NativeFixture.BadFrame, NativeFixture.ChangedIdentity, NativeFixture.StaleReady,
             NativeFixture.PartialHeader, NativeFixture.TruncatedInit, NativeFixture.ExtraInit, NativeFixture.OversizeInit, NativeFixture.CrossSessionAction, NativeFixture.OutOfOrderAction }) await FailureAsync(fixture, false, false);
@@ -86,7 +102,7 @@ internal sealed class NativeChecks(string output, string zipSha)
         using (File.Open(Path.Combine(scope.DataDirectory, "owned-lab-v1", "owner.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
         using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
         var retirement = factory.Retirements.Single(); CheckReceipt(retirement, requireTarget: true);
-        Require(run.Events[^1].Retirement is { BrokerExitCode: 0, TargetExitCode: 0, ActiveProcesses: 0 }, "Successful normal Close joins job/IO/exits");
+        ValidateScenarioRetirement(scenario, run.State, run.ErrorCode, results: run.Events.Count(e => e.Kind == OwnedEventKind.StepResult), run.Events[^1].Retirement!, retirement);
         var results = run.Events.Where(e => e.Kind == OwnedEventKind.StepResult).Select(e => new { e.Sequence, e.Outcome, e.State, e.Identity, e.FrameSha, frameLength = 172854, calibration = true }).ToArray();
         Record(new { check = "PositiveAndNegativeFrames", scenario = scenario.ToString(), succeeded = true, run.Execution.RunId, run.Execution.SessionId, run.Execution.InputSha, run.ExecutionSha, run.Execution.Helper, run.State, retirement, allIoJoined = retirement.AllIoJoined, callbacksJoined = retirement.CallbacksJoined, leaseAvailable = true, zipSha, results });
     }
@@ -96,6 +112,18 @@ internal sealed class NativeChecks(string output, string zipSha)
         Require(receipt.ActiveProcesses == 0 && receipt.BrokerExited && receipt.AllIoJoined && receipt.CallbacksJoined, "NativeFailureMatrix actual job0/process/IO/callback retirement");
         Require(receipt.BrokerPid > 0 && receipt.BrokerCreationFileTime > 0, "Actual broker creation identity");
         if (requireTarget) Require(receipt.TargetPid > 0 && receipt.TargetCreationFileTime > 0 && receipt.TargetExited, "Reported actual target exit");
+    }
+
+    private static void ValidateScenarioRetirement(OwnedScenario scenario, OwnedRunState state, string? errorCode, int results, OwnedRetirement receipt, OwnedNativeReceipt observed)
+    {
+        CheckReceipt(observed, requireTarget: true);
+        Require(receipt is { WasLaunched: true, BrokerExitCode: not null, TargetExitCode: not null, ActiveProcesses: 0 }
+            && receipt.BrokerExitCode == observed.BrokerExitCode && receipt.TargetExitCode == observed.TargetExitCode, "Scenario must retain the exact observed joined process exits.");
+        if (scenario == OwnedScenario.AssertionFailure)
+            Require(state == OwnedRunState.Failed && errorCode == "AssertionFailed" && results == 3, "Deliberate assertion failure keeps three results and actual failure-policy retirement.");
+        else
+            Require(scenario is OwnedScenario.Positive or OwnedScenario.EmptyTitle && state == OwnedRunState.Passed && errorCode is null && results == 4
+                && receipt is { BrokerExitCode: 0, TargetExitCode: 0 }, "Passing scenario requires normal Close and actual clean exits.");
     }
 
     private async Task FailureAsync(NativeFixture fixture, bool cancel, bool throwingCallback)
@@ -157,5 +185,51 @@ internal sealed class NativeChecks(string output, string zipSha)
         Require(run.State == OwnedRunState.Cancelled && run.Events.All(e => e.Kind != OwnedEventKind.Started) && receipt.BrokerPid > 0 && receipt.BrokerExited && !receipt.WasResumed && receipt.TargetPid is null && receipt.ActiveProcesses == 0 && receipt.AllIoJoined && receipt.CallbacksJoined, "Actual suspended creation must retire after synchronous seal without ResumeThread");
         using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
         Record(new { check = "NativeFailureMatrix", fixture = "SealedResume", succeeded = true, run.Execution.RunId, run.Execution.SessionId, run.Execution.InputSha, run.ExecutionSha, run.Execution.Helper, run.State, receipt, leaseAvailable = true, zipSha });
+    }
+
+    private async Task InvalidClosedZeroExitAsync()
+    {
+        var scope = Scope("InvalidClosedZeroExit");
+        var factory = FixtureFactory.ForAcceptanceFixture(scope, TimeProvider.System, NativeFixture.InvalidClosedZeroExit);
+        var tracking = new TrackingFactory(factory);
+        var controller = new OwnedPilotController(scope, tracking, TimeProvider.System);
+        OwnedRunSnapshot run;
+        try
+        {
+            await controller.InitializeAsync(); run = await controller.RunAsync(OwnedScenario.Positive);
+            Require(run.State == OwnedRunState.Failed && run.ErrorCode == "ProtocolViolation", "Malformed Closed with actual zero exits must never become Passed.");
+            var steps = run.Events.Where(e => e.Kind == OwnedEventKind.StepResult).ToArray();
+            Require(steps.Length == 4 && steps.All(e => e.Outcome == OwnedOutcome.Passed), "Close failure must retain all four valid results.");
+            foreach (var step in steps) Require((await controller.ReadFrameAsync(run.Execution.RunId, step.Sequence)).Length == 172854, "Close failure lost an actual frame.");
+            Require(run.Events[^1].Retirement == new OwnedRetirement(true, 0, 0, 0), "Close failure must preserve actual zero/zero/job0 receipt.");
+        }
+        finally { await controller.StopAsync(); }
+        var session = tracking.Session ?? throw new InvalidDataException("Actual fixture session was not returned.");
+        static async Task<OwnedRetirementException> Failure(IOwnedSession actual)
+        {
+            try { await actual.RetireAsync(OwnedRetirementReason.Completed); }
+            catch (OwnedRetirementException error) { return error; }
+            throw new InvalidDataException("Repeated retirement erased the known Closed failure.");
+        }
+        var first = await Failure(session); var second = await Failure(session);
+        Require(ReferenceEquals(first, second) && first.ErrorCode == "ProtocolViolation" && first.Retirement == run.Events[^1].Retirement, "Retirement failure/actual receipt must be stable across repeated calls.");
+        await session.DisposeAsync(); await session.DisposeAsync();
+        var receipt = factory.Retirements.Single();
+        Require(receipt.BrokerExitCode == 0 && receipt.TargetExitCode == 0 && receipt.BrokerExited && receipt.TargetExited && receipt.ActiveProcesses == 0 && receipt.AllIoJoined && receipt.CallbacksJoined, "Invalid Closed fixture requires actual clean process exits and all retirement joins.");
+        using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        using (File.Open(Path.Combine(scope.DataDirectory, "owned-lab-v1", "owner.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        Record(new { check = "NativeFailureMatrix", fixture = "InvalidClosedZeroExit", succeeded = true, run.Execution.RunId, run.Execution.SessionId, run.Execution.InputSha, run.ExecutionSha, run.Execution.Helper, run.State, run.ErrorCode, receipt, repeatedRetirementFailureStable = true, disposalIdempotent = true, retirementReportCount = factory.Retirements.Count, leaseAvailable = true, zipSha });
+    }
+
+    private sealed class TrackingFactory(IOwnedDriverFactory inner) : IOwnedDriverFactory
+    {
+        internal IOwnedSession? Session;
+        public async ValueTask<IOwnedPreparation> PrepareAsync(CancellationToken cancellationToken) => new TrackingPreparation(this, await inner.PrepareAsync(cancellationToken));
+        private sealed class TrackingPreparation(TrackingFactory owner, IOwnedPreparation inner) : IOwnedPreparation
+        {
+            public OwnedHelperIdentity Helper => inner.Helper;
+            public async ValueTask<IOwnedSession> LaunchAsync(OwnedGrant grant, CancellationToken revocation) => owner.Session = await inner.LaunchAsync(grant, revocation);
+            public ValueTask DisposeAsync() => inner.DisposeAsync();
+        }
     }
 }

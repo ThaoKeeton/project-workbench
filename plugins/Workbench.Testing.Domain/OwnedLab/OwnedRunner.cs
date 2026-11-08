@@ -72,8 +72,23 @@ internal static class OwnedRunner
             try
             {
                 retirement = await session.RetireAsync(Reason(errorCode)).ConfigureAwait(false);
-                if (!retirement.WasLaunched || retirement.ActiveProcesses != 0 || retirement.BrokerExitCode is null) { journal.Freeze(); retirement = null; }
-                else if (errorCode is null && retirement is not { BrokerExitCode: 0, TargetExitCode: 0 }) errorCode = "DriverFailure";
+                if (!ValidSessionRetirement(retirement)) { journal.Freeze(); retirement = null; }
+                else
+                {
+                    errorCode ??= authority.ErrorCode;
+                    if (errorCode is null && retirement is not { BrokerExitCode: 0, TargetExitCode: 0 }) errorCode = "DriverFailure";
+                }
+            }
+            catch (OwnedRetirementException failure)
+            {
+                if (ValidSessionRetirement(failure.Retirement))
+                {
+                    retirement = failure.Retirement;
+                    // An owner cancellation/expiry observed while Close joined precedes its IO error.
+                    errorCode ??= authority.ErrorCode ?? failure.ErrorCode;
+                    authority.Request(errorCode);
+                }
+                else { journal.Freeze(); retirement = null; }
             }
             catch (Exception) { journal.Freeze(); }
             try { await session.DisposeAsync().ConfigureAwait(false); }
@@ -106,6 +121,8 @@ internal static class OwnedRunner
     { OwnedLabException owned => owned.ErrorCode, OperationCanceledException => authority.ErrorCode ?? "Cancelled", _ => "DriverFailure" };
     private static OwnedRetirementReason Reason(string? code) => code switch
     { null => OwnedRetirementReason.Completed, "Cancelled" => OwnedRetirementReason.Cancelled, "AdmissionClosed" => OwnedRetirementReason.Revoked, "Expired" => OwnedRetirementReason.Expired, _ => OwnedRetirementReason.Failed };
+    private static bool ValidSessionRetirement(OwnedRetirement? receipt) => receipt is
+        { WasLaunched: true, BrokerExitCode: not null, TargetExitCode: not null, ActiveProcesses: 0 };
 }
 
 internal sealed class OwnedRevocation

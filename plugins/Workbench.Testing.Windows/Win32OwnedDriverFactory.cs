@@ -106,5 +106,5 @@ public sealed class Win32OwnedDriverFactory : IOwnedDriverFactory
     }
 }
 #if OWNED_LAB_ACCEPTANCE_FIXTURE
-internal enum NativeFixture { Missing, FakePe, WrongHash, Reparse, UiaBlock, GdiBlock, Hang, Crash, EarlyExit, DpiFailure, BadFrame, ChangedIdentity, StaleReady, NestedJob, SealedResume, PartialHeader, TruncatedInit, ExtraInit, OversizeInit, CrossSessionAction, OutOfOrderAction }
+internal enum NativeFixture { Missing, FakePe, WrongHash, Reparse, UiaBlock, GdiBlock, Hang, Crash, EarlyExit, DpiFailure, BadFrame, ChangedIdentity, StaleReady, NestedJob, SealedResume, PartialHeader, TruncatedInit, ExtraInit, OversizeInit, CrossSessionAction, OutOfOrderAction, InvalidClosedZeroExit }
 #endif

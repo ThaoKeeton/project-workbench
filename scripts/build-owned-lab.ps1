@@ -3,6 +3,25 @@ param([ValidateSet('Debug','Release')][string]$Configuration = 'Release',
       [Parameter(Mandatory)][string]$OutputDirectory, [switch]$BuildAcceptanceFixtures)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+function New-OwnedLabToolchainStartInfo {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$CommandInterpreter, [Parameter(Mandatory)][string]$DeveloperScript,
+          [Parameter(Mandatory)][string]$WorkingDirectory)
+    $bootstrap = Join-Path $WorkingDirectory 'owned-lab-vsdev.cmd'
+    $batch = "@echo off`r`ncall `"%PWB_OWNED_VSDEVCMD%`" -no_logo -arch=x64 -host_arch=x64 >nul`r`nif errorlevel 1 exit /b %errorlevel%`r`nset`r`n"
+    [IO.File]::WriteAllText($bootstrap, $batch, [Text.Encoding]::ASCII)
+    $info = [Diagnostics.ProcessStartInfo]::new()
+    $info.FileName = $CommandInterpreter
+    # cmd.exe uses its own command parser. Keep the raw command constant; paths cross only in
+    # child environment variables, so PowerShell's native argument re-quoting cannot alter them.
+    $info.Arguments = '/d /q /c call "%PWB_OWNED_TOOLCHAIN_BOOTSTRAP%"'
+    $info.WorkingDirectory = $WorkingDirectory
+    $info.UseShellExecute = $false; $info.CreateNoWindow = $true
+    $info.RedirectStandardOutput = $true; $info.RedirectStandardError = $true
+    $info.Environment['PWB_OWNED_TOOLCHAIN_BOOTSTRAP'] = $bootstrap
+    $info.Environment['PWB_OWNED_VSDEVCMD'] = $DeveloperScript
+    return $info
+}
 if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitecture -ne 'X64') { throw 'OwnedLabNativeBuildUnavailable: actual Windows MSVC x64 and Windows SDK are required.' }
 $repo = Split-Path $PSScriptRoot -Parent
 $output = [IO.Path]::GetFullPath($OutputDirectory)
@@ -17,8 +36,18 @@ if (-not (Test-Path $vswhere -PathType Leaf)) { throw 'OwnedLabMsvcUnavailable' 
 $installation = (& $vswhere -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath | Select-Object -First 1)
 if (-not $installation) { throw 'OwnedLabMsvcUnavailable' }
 $developer = Join-Path $installation 'Common7/Tools/VsDevCmd.bat'
-$environmentLines = & $env:ComSpec /d /s /c "`"`"$developer`" -no_logo -arch=x64 -host_arch=x64 >nul && set`""
-if ($LASTEXITCODE -ne 0) { throw 'OwnedLabToolchainEnvironmentFailed' }
+if (-not (Test-Path -LiteralPath $developer -PathType Leaf)) { throw 'OwnedLabMsvcUnavailable' }
+$loader = [Diagnostics.Process]::new()
+$loader.StartInfo = New-OwnedLabToolchainStartInfo -CommandInterpreter $env:ComSpec -DeveloperScript $developer -WorkingDirectory $output
+try {
+    if (-not $loader.Start()) { throw 'OwnedLabToolchainEnvironmentFailed' }
+    $stdout = $loader.StandardOutput.ReadToEndAsync(); $stderr = $loader.StandardError.ReadToEndAsync()
+    $loader.WaitForExit()
+    $environmentText = $stdout.GetAwaiter().GetResult(); $null = $stderr.GetAwaiter().GetResult()
+    if ($loader.ExitCode -ne 0) { throw 'OwnedLabToolchainEnvironmentFailed' }
+    $environmentLines = $environmentText -split '\r?\n'
+}
+finally { $loader.Dispose() }
 foreach ($line in $environmentLines) { if ($line -match '^([^=]+)=(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2], 'Process') } }
 $compiler = (Get-Command cl.exe -ErrorAction Stop).Source
 $resource = (Get-Command rc.exe -ErrorAction Stop).Source
@@ -27,6 +56,7 @@ $dumpbin = (Get-Command dumpbin.exe -ErrorAction Stop).Source
 if ($compiler -notmatch '\\Hostx64\\x64\\cl.exe$' -or -not $env:WindowsSDKVersion -or -not $env:WindowsSdkDir) { throw 'OwnedLabActualX64ToolchainRequired' }
 $msvc = [Diagnostics.FileVersionInfo]::GetVersionInfo($compiler).ProductVersion
 $sdk = $env:WindowsSDKVersion.TrimEnd('\')
+Write-Host "Owned toolchain loaded: MSVC $msvc; SDK $sdk; compiler $compiler"
 $commit = (& git -C $repo rev-parse HEAD).Trim()
 if ($LASTEXITCODE -ne 0 -or $commit -cnotmatch '^[0-9a-f]{40}$') { throw 'OwnedLabSourceIdentityUnavailable' }
 $native = Join-Path $repo 'native/Workbench.OwnedLab'
@@ -80,8 +110,8 @@ internal static class OwnedNativeBuild
 }
 "@ | Set-Content (Join-Path $output 'OwnedNativeBuild.g.cs') -Encoding utf8
 if ($BuildAcceptanceFixtures) {
-    foreach ($name in @('UiaBlock','GdiBlock','Hang','Crash','EarlyExit','DpiFailure','BadFrame','ChangedIdentity','StaleReady','NestedJob','SealedResume')) {
-        $macro = switch ($name) { 'UiaBlock' {'OWNED_FIXTURE_UIA_BLOCK'} 'GdiBlock' {'OWNED_FIXTURE_GDI_BLOCK'} 'EarlyExit' {'OWNED_FIXTURE_EARLY_EXIT'} 'DpiFailure' {'OWNED_FIXTURE_DPI_FAILURE'} 'BadFrame' {'OWNED_FIXTURE_BAD_FRAME'} 'ChangedIdentity' {'OWNED_FIXTURE_CHANGED_IDENTITY'} 'StaleReady' {'OWNED_FIXTURE_STALE_READY'} default {''} }
+    foreach ($name in @('UiaBlock','GdiBlock','Hang','Crash','EarlyExit','DpiFailure','BadFrame','ChangedIdentity','StaleReady','NestedJob','SealedResume','InvalidClosedZeroExit')) {
+        $macro = switch ($name) { 'UiaBlock' {'OWNED_FIXTURE_UIA_BLOCK'} 'GdiBlock' {'OWNED_FIXTURE_GDI_BLOCK'} 'EarlyExit' {'OWNED_FIXTURE_EARLY_EXIT'} 'DpiFailure' {'OWNED_FIXTURE_DPI_FAILURE'} 'BadFrame' {'OWNED_FIXTURE_BAD_FRAME'} 'ChangedIdentity' {'OWNED_FIXTURE_CHANGED_IDENTITY'} 'StaleReady' {'OWNED_FIXTURE_STALE_READY'} 'InvalidClosedZeroExit' {'OWNED_FIXTURE_INVALID_CLOSED_ZERO_EXIT'} default {''} }
         $replacement = if ($name -cin @('Hang','Crash')) { Join-Path $repo "tests/Workbench.OwnedLab.NativeFixtures/${name}Broker.cpp" } else { '' }
         Build-Image -Directory (Join-Path $output "fixtures/$name") -Profile AcceptanceFixture -Macro $macro -ReplacementBroker $replacement | Out-Null
     }

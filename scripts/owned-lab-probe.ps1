@@ -61,7 +61,7 @@ try {
     Write-Host $console
     if ($process.ExitCode -ne 0) { throw 'OwnedLabProbeProcessFailed' }
     $report = Get-Content (Join-Path $output 'observations/report.json') -Raw | ConvertFrom-Json -AsHashtable
-    if ($report.schema -ne 1 -or $report.succeeded -isnot [bool] -or -not $report.succeeded -or @($report.checks).Count -ne 26) { throw 'OwnedLabProbeChecksIncomplete' }
+    if ($report.schema -ne 1 -or $report.succeeded -isnot [bool] -or -not $report.succeeded -or @($report.checks).Count -ne 27) { throw 'OwnedLabProbeChecksIncomplete' }
     $leases = @()
     try {
         foreach ($file in @(Get-ChildItem -LiteralPath (Join-Path $output 'observations') -Recurse -File -Filter owner.lock) + @(Get-Item (Join-Path $stage 'Workbench.OwnedLab.exe')) + @(Get-ChildItem -LiteralPath (Join-Path $stage 'fixtures') -Recurse -File -Filter Workbench.OwnedLab.exe | Where-Object { $_.Directory.Name -cne 'Reparse' })) {

@@ -5,6 +5,103 @@ namespace Workbench.Core.Tests;
 
 public sealed class OwnedRunnerTests
 {
+    [Fact]
+    public async Task Typed_close_failure_keeps_zero_exit_proof_and_four_results_but_never_passes()
+    {
+        using var rig = new OwnedLabTestRig(); var retirement = new AsyncGate();
+        rig.Driver.RetirementGate = retirement;
+        var receipt = new OwnedRetirement(true, 0, 0, 0);
+        rig.Driver.RetirementFailure = new OwnedRetirementException("ProtocolViolation", receipt);
+        var controller = rig.Controller(); await controller.InitializeAsync(); var actual = controller.RunAsync(OwnedScenario.Positive);
+        try
+        {
+            await retirement.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.True(controller.Snapshot.IsBusy); Assert.False(actual.IsCompleted);
+            retirement.Release(); var result = await actual;
+            Assert.Equal(OwnedRunState.Failed, result.State); Assert.Equal("ProtocolViolation", result.ErrorCode);
+            var steps = result.Events.Where(e => e.Kind == OwnedEventKind.StepResult).ToArray();
+            Assert.Equal(4, steps.Length); Assert.All(steps, step => Assert.Equal(OwnedOutcome.Passed, step.Outcome));
+            Assert.Equal(receipt, result.Events[^1].Retirement); Assert.Equal(OwnedOutcome.Failed, result.Events[^1].Outcome);
+            Assert.False(result.Events[^1].UncertainStep);
+            Assert.Equal(1, rig.Driver.RetireCount); Assert.Equal(1, rig.Driver.SessionDisposals); Assert.Equal(1, rig.Driver.PreparationDisposals);
+            foreach (var step in steps) Assert.Equal(OwnedLabTestRig.Bmp(), await controller.ReadFrameAsync(result.Execution.RunId, step.Sequence));
+            await controller.StopAsync(); await controller.StopAsync();
+            Assert.Equal(1, rig.Driver.RetireCount); Assert.Equal(1, rig.Driver.SessionDisposals); Assert.Equal(1, rig.Driver.PreparationDisposals);
+        }
+        finally { retirement.Release(); await controller.StopAsync(); }
+    }
+
+    [Fact]
+    public async Task Typed_retirement_failure_preserves_prior_assertion_and_observed_termination_exits()
+    {
+        using var rig = new OwnedLabTestRig(); var receipt = new OwnedRetirement(true, 0x20000001, 0x20000001, 0);
+        rig.Driver.RetirementFailure = new OwnedRetirementException("ProtocolViolation", receipt);
+        var controller = rig.Controller(); await controller.InitializeAsync();
+        try
+        {
+            var result = await controller.RunAsync(OwnedScenario.AssertionFailure);
+            Assert.Equal(OwnedRunState.Failed, result.State); Assert.Equal("AssertionFailed", result.ErrorCode);
+            Assert.Equal(3, result.Events.Count(e => e.Kind == OwnedEventKind.StepResult)); Assert.Equal(receipt, result.Events[^1].Retirement);
+        }
+        finally { await controller.StopAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Typed_close_failure_preserves_owner_cancellation_or_expiry_observed_during_join(bool expire)
+    {
+        using var rig = new OwnedLabTestRig(); var retirement = new AsyncGate(); rig.Driver.RetirementGate = retirement;
+        rig.Driver.RetirementFailure = new OwnedRetirementException("ProtocolViolation", new(true, 0, 0, 0));
+        var controller = rig.Controller(); await controller.InitializeAsync(); var actual = controller.RunAsync(OwnedScenario.Positive);
+        Task? drain = null;
+        try
+        {
+            await retirement.Entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            if (expire) rig.Clock.Advance(TimeSpan.FromSeconds(60)); else drain = controller.CancelAndDrainAsync();
+            Assert.False(actual.IsCompleted); Assert.True(controller.Snapshot.IsBusy);
+            retirement.Release(); var result = await actual; if (drain is not null) await drain;
+            Assert.Equal(expire ? OwnedRunState.Failed : OwnedRunState.Cancelled, result.State);
+            Assert.Equal(expire ? "Expired" : "Cancelled", result.ErrorCode);
+            Assert.Equal(new OwnedRetirement(true, 0, 0, 0), result.Events[^1].Retirement);
+            Assert.Equal(4, result.Events.Count(e => e.Kind == OwnedEventKind.StepResult));
+        }
+        finally { retirement.Release(); await controller.StopAsync(); }
+    }
+
+    [Theory]
+    [InlineData(0)] [InlineData(1)] [InlineData(2)] [InlineData(3)] [InlineData(4)]
+    public async Task Invalid_typed_retirement_receipt_retains_recovery_and_joins_cleanup(int mode)
+    {
+        using var rig = new OwnedLabTestRig();
+        OwnedRetirement? receipt = mode switch { 0 => null, 1 => new(false, null, null, 0), 2 => new(true, 0, 0, 1), 3 => new(true, null, 0, 0), _ => new(true, 0, null, 0) };
+        rig.Driver.RetirementFailure = new OwnedRetirementException("ProtocolViolation", receipt!);
+        var controller = rig.Controller(); await controller.InitializeAsync();
+        try
+        {
+            var result = await controller.RunAsync(OwnedScenario.Positive);
+            Assert.Equal(OwnedRunState.RecoveryNeeded, result.State); Assert.DoesNotContain(result.Events, e => e.Kind == OwnedEventKind.Terminal);
+            Assert.Equal(1, rig.Driver.SessionDisposals); Assert.Equal(1, rig.Driver.PreparationDisposals);
+        }
+        finally { await controller.StopAsync(); }
+    }
+
+    [Theory]
+    [InlineData(false)] [InlineData(true)]
+    public async Task Typed_retirement_proof_does_not_hide_unrelated_cleanup_failure(bool preparation)
+    {
+        using var rig = new OwnedLabTestRig();
+        rig.Driver.RetirementFailure = new OwnedRetirementException("ProtocolViolation", new(true, 0, 0, 0));
+        rig.Driver.ThrowSessionDisposal = !preparation; rig.Driver.ThrowPreparationDisposal = preparation;
+        var controller = rig.Controller(); await controller.InitializeAsync();
+        try
+        {
+            var result = await controller.RunAsync(OwnedScenario.Positive);
+            Assert.Equal(OwnedRunState.RecoveryNeeded, result.State); Assert.DoesNotContain(result.Events, e => e.Kind == OwnedEventKind.Terminal);
+            Assert.Equal(1, rig.Driver.SessionDisposals); Assert.Equal(1, rig.Driver.PreparationDisposals);
+        }
+        finally { await controller.StopAsync(); }
+    }
+
     [Theory]
     [InlineData(10)]
     [InlineData(11)]

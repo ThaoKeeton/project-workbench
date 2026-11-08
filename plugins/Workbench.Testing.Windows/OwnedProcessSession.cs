@@ -32,6 +32,7 @@ internal sealed class OwnedProcessSession : IOwnedSession
     private ITimer? _deadline;
     private Task? _operation;
     private Task<OwnedRetirement>? _retirement;
+    private OwnedRetirementException? _retirementFailure;
     private Task? _disposal;
     private volatile bool _aborted;
     private volatile bool _brokerInJob;
@@ -237,6 +238,14 @@ internal sealed class OwnedProcessSession : IOwnedSession
             || !header.AsSpan(20, 32).SequenceEqual(Encoding.ASCII.GetBytes(_grant.Execution.SessionId)) || responseKind != expected && responseKind != OwnedWireKind.Error) throw new OwnedLabException("ProtocolViolation");
         var response = new byte[OwnedWireCodec.HeaderLength + (int)length]; header.CopyTo(response, 0);
         await ExactAsync(response.AsMemory(OwnedWireCodec.HeaderLength)).ConfigureAwait(false);
+#if OWNED_LAB_ACCEPTANCE_FIXTURE
+        if (_fixture == NativeFixture.InvalidClosedZeroExit && kind == OwnedWireKind.Close)
+        {
+            // The separate fault launcher lets its retained broker actually exit before shared
+            // decoding rejects malformed Closed. Abort therefore cannot change either zero exit.
+            await Task.Run(() => Native.Check(Native.WaitForSingleObject(_broker!, Native.Infinite) == 0)).ConfigureAwait(false);
+        }
+#endif
         var packet = OwnedWireCodec.Decode(response, _grant.Execution.SessionId, sequence);
         if (packet.Kind == OwnedWireKind.Error) throw new OwnedLabException(OwnedWireCodec.ReadError(packet, kind));
         return packet;
@@ -317,16 +326,25 @@ internal sealed class OwnedProcessSession : IOwnedSession
     private async Task<OwnedRetirement> RetireCoreAsync(Task admission, Task? operation, OwnedRetirementReason reason)
     {
         await admission.ConfigureAwait(false);
+        string? closeError = null;
         if (reason != OwnedRetirementReason.Completed) Abort();
         if (operation is not null) try { await operation.ConfigureAwait(false); } catch (Exception) { }
         if (reason == OwnedRetirementReason.Completed && !_aborted && _identity is not null)
         {
             var timer = _time.CreateTimer(static state => ((OwnedProcessSession)state!).Abort(), this, TimeSpan.FromSeconds(10), Timeout.InfiniteTimeSpan);
             try { await VerifyIdentityAsync().ConfigureAwait(false); await ExchangeAsync(OwnedWireKind.Close, []).ConfigureAwait(false); }
-            catch (Exception) { Abort(); }
+            catch (Exception error)
+            {
+                closeError = error is OwnedLabException owned ? owned.ErrorCode : error is OperationCanceledException ? "Cancelled" : "DriverFailure";
+                Abort();
+            }
             finally { await timer.DisposeAsync().ConfigureAwait(false); }
         }
-        else Abort();
+        else
+        {
+            if (reason == OwnedRetirementReason.Completed) closeError = _revocation.IsCancellationRequested ? "Cancelled" : "DriverFailure";
+            Abort();
+        }
         // OS retirement may exceed the command budget. Failed OS observations retain ownership
         // and repeat the observation; a failed query is never fabricated into zero/exit.
         async Task JoinProcess(Native.KernelHandle process)
@@ -356,12 +374,22 @@ internal sealed class OwnedProcessSession : IOwnedSession
         var receipt = new OwnedRetirement(_broker is not null, brokerExit, targetExit, active);
         _record(new(_brokerPid, _brokerBirth, _targetReported ? _identity?.TargetPid : null, _targetReported ? _identity?.TargetCreationFileTime : null, brokerExit, targetExit,
             _broker is not null && Native.WaitForSingleObject(_broker, 0) == 0, _target is { IsInvalid: false } && Native.WaitForSingleObject(_target, 0) == 0, active, allIoJoined, _callbacksJoined, _wasResumed));
+        if (closeError is not null)
+        {
+            // Exact actual receipt has been recorded only after process/job/IO/callback joins.
+            _retirementFailure = new(closeError, receipt);
+            throw _retirementFailure;
+        }
         return receipt;
     }
     public ValueTask DisposeAsync() { lock (_sync) return new(_disposal ??= DisposeCoreAsync()); }
     private async Task DisposeCoreAsync()
     {
         try { await RetireAsync(OwnedRetirementReason.Failed).ConfigureAwait(false); }
+        catch (OwnedRetirementException known) when (ReferenceEquals(known, _retirementFailure))
+        {
+            // Retire remains repeatably faulted; disposal only releases this fully retired session.
+        }
         finally
         {
             // A failed proof still joins actual work; it must never strand handles/leases behind a timeout.

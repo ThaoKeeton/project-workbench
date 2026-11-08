@@ -28,7 +28,16 @@ int RunBroker() {
             if (sequence==UINT32_MAX) Fail(); request=ReadPacket(input);
             if (request.sequence!=++sequence || request.session!=session || request.kind<SetTitle || request.kind>Close) Fail(); budget(); Reader body{request.body};
             std::wstring title; if (request.kind==SetTitle) { title=body.Text(1024); ValidateTitle(title); } body.End(); target->Verify();
-            if (request.kind==Close) { target->CloseAndJoin(budget()); Writer closed; closed.U32(0); WritePacket(output,{Closed,request.sequence,session,closed.bytes}); return 0; }
+            if (request.kind==Close) {
+                target->CloseAndJoin(budget());
+                Writer closed;
+#ifdef OWNED_FIXTURE_INVALID_CLOSED_ZERO_EXIT
+                closed.U32(1); // Invalid wire receipt; the actual target and broker still exit zero.
+#else
+                closed.U32(0);
+#endif
+                WritePacket(output,{Closed,request.sequence,session,closed.bytes}); return 0;
+            }
             if (request.kind==SetTitle) automation.Set(*target,title); else if (request.kind==ClickSave) automation.Save(*target);
             // Invoke can enqueue target work: bounded raw UIA polling observes its actual state.
             if (request.kind==ClickSave) { const auto end=GetTickCount64()+budget(); for (;;) { state=automation.Read(*target); if ((!Blank(state.title) && state.toast==L"Saved") || (Blank(state.title) && state.validation==L"Title required")) break; if (GetTickCount64()>=end) Fail(5); Sleep(10); } }

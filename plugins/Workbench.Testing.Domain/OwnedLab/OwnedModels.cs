@@ -58,3 +58,9 @@ public sealed class OwnedLaunchException(string errorCode, OwnedRetirement retir
 {
     public OwnedRetirement Retirement { get; } = retirement;
 }
+
+/// <summary>A session failure reported only after actual owned process, job, IO and callback retirement.</summary>
+public sealed class OwnedRetirementException(string errorCode, OwnedRetirement retirement) : OwnedLabException(errorCode)
+{
+    public OwnedRetirement Retirement { get; } = retirement;
+}

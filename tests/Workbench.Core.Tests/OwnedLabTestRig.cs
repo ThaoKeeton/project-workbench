@@ -44,6 +44,8 @@ internal sealed class ScriptedDriver : IOwnedDriverFactory, IOwnedSession
     internal int PrepareCount, LaunchCount, ResumeCount, ActionCalls, RetireCount, PreparationDisposals, SessionDisposals;
     internal AsyncGate? PreparationGate, LaunchGate = null, ActionGate, RetirementGate, CallbackGate;
     internal bool ThrowPreparation, ThrowRetirement = false, UnknownLaunchFailure = false;
+    internal Exception? RetirementFailure;
+    internal bool ThrowSessionDisposal, ThrowPreparationDisposal;
     internal int InvalidLaunchReceipt = 0;
     internal int ObservationFault = 0;
     internal OwnedRetirement Retirement = new(true, 0, 0, 0);
@@ -87,18 +89,20 @@ internal sealed class ScriptedDriver : IOwnedDriverFactory, IOwnedSession
     public async ValueTask<OwnedRetirement> RetireAsync(OwnedRetirementReason reason)
     {
         RetireCount++; if (RetirementGate is not null) await RetirementGate.HoldAsync();
+        if (RetirementFailure is not null) throw RetirementFailure;
         if (ThrowRetirement) throw new IOException("retirement proof unavailable"); return Retirement;
     }
     ValueTask IAsyncDisposable.DisposeAsync()
     {
         SessionDisposals++; _registration.Dispose();
+        if (ThrowSessionDisposal) throw new IOException("unrelated session cleanup failure");
         return ValueTask.CompletedTask;
     }
     private sealed class Prepared(ScriptedDriver owner) : IOwnedPreparation
     {
         public OwnedHelperIdentity Helper => owner.Helper;
         public ValueTask<IOwnedSession> LaunchAsync(OwnedGrant grant, CancellationToken revocation) => owner.LaunchAsync(grant, revocation);
-        public ValueTask DisposeAsync() { owner.PreparationDisposals++; owner._registration.Dispose(); return ValueTask.CompletedTask; }
+        public ValueTask DisposeAsync() { owner.PreparationDisposals++; owner._registration.Dispose(); if (owner.ThrowPreparationDisposal) throw new IOException("unrelated preparation cleanup failure"); return ValueTask.CompletedTask; }
     }
 }
 
