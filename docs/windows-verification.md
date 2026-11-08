@@ -46,7 +46,7 @@ Task4 round1 增加实际 WM_SYSCOMMAND/SC_CLOSE：真实切换在旧 hook 挂�
 
 ## 干净 Windows 环境
 
-使用受支持的 Windows 11 24H2+ x64、PowerShell 7、仓库 `global.json` 所需的 .NET 10 SDK。IDE 可选；若使用，需 Visual Studio 2026 18.0+。SDK 的 NuGet 依赖提供 Windows 原生构建工具。API 目标 19041 只是调用 API 下限，不承诺 Windows 10 已获支持或验收。
+使用受支持的 Windows 11 24H2+ x64、PowerShell 7、仓库 `global.json` 所需的 .NET 10 SDK，以及可由 `vswhere` 发现的 MSVC x64 C++ 工具和 Windows SDK。IDE 可选；若使用，需 Visual Studio 2026 18.0+；CLI 可使用带上述组件的 Build Tools。Windows App SDK 的 NuGet 构建依赖不替代自带 C++ helper 所需的实际 `cl`、`rc`、`link`。API 目标 19041 只是调用 API 下限，不承诺 Windows 10 已获支持或验收。
 
 ```powershell
 dotnet --info
@@ -129,7 +129,7 @@ SDK artifact `workbench-sdk-0.2.0` 另行导出 manifest、两个 0.2.0 nupkg �
 Linux 参考命令（只编译 C#，不运行应用）：
 
 ```sh
-dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release \
+dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release -p:OwnedLabReferenceOnly=true \
   -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
 pwsh ./scripts/export-sdk.ps1 -ReferenceOnly
 pwsh ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-reference-snapshot

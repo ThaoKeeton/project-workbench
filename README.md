@@ -84,4 +84,4 @@ GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbenc
 - [Core 生命周期与存储约定](src/Workbench.Core/README.md)
 - [设计范围](docs/superpowers/specs/2026-11-06-native-workbench-design.md)
 
-可选测试服务 1（最低宿主 0.4.0）已接入项目源/用例/执行/证据上下文、共享控制器和独立原生“测试设计”入口。下载同一运行的 `workbench-testing-plugin-0.1.0`，在“插件”安装其中 ZIP，再审查并信任启用；其包不加入固定六文件业务 companion。已有预置测试列表仍是独立示例。新增源码的实际 Windows CI 与下载字节审计由当前运行报告确认，不能用 Linux 参考编译替代。见 [测试插件安装与操作](docs/testing-plugin.md) 和 [测试服务](docs/testing-services.md)。
+可选测试服务 1（最低宿主 0.4.0）已接入项目源/用例/执行/证据上下文、共享控制器和独立原生“测试设计”入口。开发配置使用 `workbench-testing-plugin-0.2.0`；仅在同一运行确有可用产物时安装其中 ZIP，再审查并信任启用，其包不加入固定六文件业务 companion。当前受控原生全量检查及下载核验仍未完成。已有预置测试列表仍是独立示例。实际 Windows CI 与下载字节审计以准确源码对应的运行报告为准，不能用 Linux 参考编译替代。见 [测试插件安装与操作](docs/testing-plugin.md) 和 [测试服务](docs/testing-services.md)。
