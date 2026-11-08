@@ -15,7 +15,7 @@
 - Host minimum0.4.0, SDK/API1, Testing0.2.0, immutable Core/owned formats and public SDK remain unchanged.
 - Per-plugin/project coordinator; no global user mutex, automatic queued action, generic engine, source-to-device execution, runtime fault flag or live provider/key/message/user-PC operation.
 - Real callbacks/accepted writes/retirement/notification tails settle before admission releases; informational IsBusy is not proof.
-- No native code/probe/CI/owned panel/source fixture/package/release change; no remote push/rerun/financial settings, deletion,403 bypass or PR retry by the implementer.
+- No native code/probe/CI/owned panel/source fixture/package payload/version/helper-validation/production-output/release change; the source-provenance additions specified below remain allowed. No remote push/rerun/financial settings, deletion,403 bypass or PR retry by the implementer.
 - Native27/current Windows and business compatibility/delivery/Windows11 human gates remain open; Linux evidence is labelled precisely.
 
 ## Review Focus
