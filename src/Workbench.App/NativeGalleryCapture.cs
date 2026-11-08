@@ -45,6 +45,7 @@ internal sealed partial class MainWindow
         string? exeHash = null, informationalVersion = null, sourceCommit = null, manifestHash = null, entryHash = null;
         string? selectedPageKey = null, selectedPluginId = null, selectedViewId = null;
         var captureUtc = DateTimeOffset.UtcNow;
+        FrameworkElement? viewportAnchor = null;
         ScrollViewer? scroller = null;
         double originalOffset = 0;
         HostRuntime? originalRuntime = null;
@@ -54,9 +55,6 @@ internal sealed partial class MainWindow
             && pageKey == "view" && pluginId == "com.upcam.task-digest" && viewId == "digest";
         bool initialOwnerFound = false, positionEntered = false, positionReturned = false, terminalFocusRejected = false;
         NativeGalleryFocusObservation? firstFocusFailure = null, terminalFocusFailure = null;
-        var aboveRootResult = NativeGalleryAboveRootResult.NotSampled;
-        int aboveRootVisitedCount = 0;
-        int? aboveRootOwnerDistance = null;
         GalleryFocusTrace? NewFocusTrace()
         {
             if (!focusDiagnosticEnabled || terminalFocusRejected) return null;
@@ -75,8 +73,6 @@ internal sealed partial class MainWindow
                 firstFocusFailure ??= observation;
                 if (!terminal) return; // Position/restore callbacks cannot assign the primary reason.
                 terminalFocusFailure = observation;
-                if (observation is { Check: NativeGalleryFocusCheck.RootReachedOwnerMissing, SawPage: true, SawRoot: true })
-                    (aboveRootResult, aboveRootVisitedCount, aboveRootOwnerDistance) = GalleryFocusAboveRoot(_root);
             }
             catch (Exception) { /* Diagnostic collection cannot change the existing failed predicate. */ }
         }
@@ -84,10 +80,10 @@ internal sealed partial class MainWindow
         bool FocusAttached(NativeGalleryFocusPhase checkpoint, bool terminal = false)
         {
             if (focus is null) return true;
-            if (scroller is null) return false;
+            if (viewportAnchor is null) return false;
             var trace = NewFocusTrace();
-            var currentOwner = GalleryFocusScroller(_root, displayedPage, focus, trace);
-            if (ReferenceEquals(currentOwner, scroller)) return true;
+            var currentOwner = GalleryFocusViewportFor(_root, displayedPage, focus, trace);
+            if (ReferenceEquals(currentOwner, viewportAnchor)) return true;
             RecordFocusFailure(checkpoint, currentOwner is null ? NativeGalleryFocusSite.FocusAttachedHelperNull
                 : NativeGalleryFocusSite.FocusAttachedOwnerChanged, trace, terminal);
             return false;
@@ -96,7 +92,10 @@ internal sealed partial class MainWindow
         {
             if (!PageLive()) { status = "blocked"; reasonCode = "page-detached"; return false; }
             if (!FocusAttached(checkpoint, terminal: true)) { status = "blocked"; reasonCode = "focus-detached"; return false; }
-            if (requireVisible && focus is not null && !GalleryFocusInViewport(scroller!, focus))
+            // Only a scroller is intentionally restored away from the captured focus.
+            // A fixed anchor must still overlap its live viewport at publication.
+            if (focus is not null && (requireVisible || scroller is null)
+                && !(scroller is null ? GalleryFixedFocusInViewport(_root, displayedPage, focus) : GalleryFocusInViewport(scroller, focus)))
             { status = "blocked"; reasonCode = "focus-outside-viewport"; return false; }
             return true;
         }
@@ -167,28 +166,37 @@ internal sealed partial class MainWindow
             {
                 status = "blocked"; reasonCode = "focus-detached";
                 var trace = NewFocusTrace();
-                scroller = GalleryFocusScroller(_root, displayedPage, focus, trace);
-                if (scroller is null)
+                viewportAnchor = GalleryFocusViewportFor(_root, displayedPage, focus, trace);
+                if (viewportAnchor is null)
                 {
                     RecordFocusFailure(NativeGalleryFocusPhase.InitialOwner, NativeGalleryFocusSite.InitialOwnerNull, trace, terminal: true);
                     return;
                 }
                 initialOwnerFound = true;
-                originalOffset = scroller.VerticalOffset;
-                status = "blocked"; reasonCode = "focus-outside-viewport";
-                if (!GalleryTryFocusBounds(scroller, focus, out var bounds)) return;
-                var target = bounds.Y >= 0 && bounds.Bottom <= scroller.ViewportHeight ? originalOffset
-                    : Math.Clamp(originalOffset + bounds.Y - Math.Max(0, (scroller.ViewportHeight - bounds.Height) / 2),
-                        0, scroller.ScrollableHeight);
-                reasonCode = "layout-unavailable";
-                positionEntered = true;
-                var positioned = await GalleryChangeViewAsync(scroller, target,
-                    () => PageLive() && FocusAttached(NativeGalleryFocusPhase.PositionLive), () => GalleryFocusInViewport(scroller, focus));
-                positionReturned = true;
-                viewportWidth = scroller.ViewportWidth;
-                viewportHeight = scroller.ViewportHeight;
-                scrollOffset = scroller.VerticalOffset;
-                if (!CaptureLive(NativeGalleryFocusPhase.PostPosition) || !positioned) return;
+                scroller = viewportAnchor as ScrollViewer;
+                if (scroller is not null)
+                {
+                    originalOffset = scroller.VerticalOffset;
+                    status = "blocked"; reasonCode = "focus-outside-viewport";
+                    if (!GalleryTryFocusBounds(scroller, focus, out var bounds)) return;
+                    var target = bounds.Y >= 0 && bounds.Bottom <= scroller.ViewportHeight ? originalOffset
+                        : Math.Clamp(originalOffset + bounds.Y - Math.Max(0, (scroller.ViewportHeight - bounds.Height) / 2),
+                            0, scroller.ScrollableHeight);
+                    reasonCode = "layout-unavailable";
+                    positionEntered = true;
+                    var positioned = await GalleryChangeViewAsync(scroller, target,
+                        () => PageLive() && FocusAttached(NativeGalleryFocusPhase.PositionLive), () => GalleryFocusInViewport(scroller, focus));
+                    positionReturned = true;
+                    viewportWidth = scroller.ViewportWidth;
+                    viewportHeight = scroller.ViewportHeight;
+                    scrollOffset = scroller.VerticalOffset;
+                    if (!CaptureLive(NativeGalleryFocusPhase.PostPosition) || !positioned) return;
+                }
+                else
+                {
+                    viewportWidth = _root.ActualWidth; viewportHeight = _root.ActualHeight;
+                    if (!CaptureLive(NativeGalleryFocusPhase.PostPosition)) return;
+                }
             }
             else
             {
@@ -244,7 +252,7 @@ internal sealed partial class MainWindow
             // Finish the owned scroll work before publishing bytes. A rejected or
             // unsettled restore must not leave a final-name PNG behind.
             status = "blocked"; reasonCode = "layout-unavailable";
-            var restored = await RestoreAsync();
+            var restored = scroller is null || await RestoreAsync();
             if (!CaptureLive(NativeGalleryFocusPhase.PostRestore, requireVisible: false) || !restored) return;
             Directory.CreateDirectory(directory);
             var candidateHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
@@ -274,7 +282,7 @@ internal sealed partial class MainWindow
                     NativeGalleryFocusDiagnostic.TryWrite(options, shotId, pageKey, pluginId, viewId, status, reasonCode,
                         new NativeGalleryFocusDiagnosticData(sourceCommit!, processId, birth, focus is not null, initialOwnerFound,
                             positionEntered, positionReturned, firstFocusFailure, terminalFocusFailure,
-                            aboveRootResult, aboveRootVisitedCount, aboveRootOwnerDistance));
+                            NativeGalleryAboveRootResult.NotSampled, 0, null));
                 }
                 catch (Exception) { /* Best effort only, independent of the immutable primary receipt. */ }
             }

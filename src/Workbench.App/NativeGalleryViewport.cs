@@ -24,7 +24,7 @@ internal sealed partial class MainWindow
         }
     }
 
-    private static ScrollViewer? GalleryFocusScroller(FrameworkElement root, FrameworkElement page, FrameworkElement focus,
+    private static FrameworkElement? GalleryFocusViewportFor(FrameworkElement root, FrameworkElement page, FrameworkElement focus,
         GalleryFocusTrace? trace = null)
     {
         // Preserve the original guard order and short-circuiting, including each XamlRoot read.
@@ -56,15 +56,15 @@ internal sealed partial class MainWindow
                 containsPage = true;
                 if (trace is not null) trace.PageDepth = trace.Depth;
             }
-            // A plugin Grid can use a host ancestor rather than own a scroller.
-            // Prove the complete chain before returning its nearest actual owner.
+            // Prove the complete chain before choosing its nearest in-root scroller
+            // or the exact root as a fixed viewport. Never inspect a parent above root.
             var isRoot = ReferenceEquals(parent, root);
             if (trace is not null) trace.SawRoot = trace.SawRoot == true || isRoot;
             if (isRoot)
             {
                 if (trace is not null) trace.RootDepth = trace.Depth;
                 if (!containsPage) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootReachedPageMissing);
-                if (owner is null) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootReachedOwnerMissing);
+                if (owner is null) return GalleryFocusObserved(trace, root, NativeGalleryFocusCheck.OwnerReturned);
                 if (!owner.IsLoaded) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.OwnerUnloaded);
                 if (!ReferenceEquals(owner.XamlRoot, root.XamlRoot)) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.OwnerXamlRootMismatch);
                 return GalleryFocusObserved(trace, owner, NativeGalleryFocusCheck.OwnerReturned);
@@ -73,29 +73,60 @@ internal sealed partial class MainWindow
         return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootNotReached); // A shared XamlRoot alone does not prove ownership.
     }
 
-    private static ScrollViewer? GalleryFocusObserved(GalleryFocusTrace? trace, ScrollViewer? result, NativeGalleryFocusCheck check)
+    private static FrameworkElement? GalleryFocusObserved(GalleryFocusTrace? trace, FrameworkElement? result, NativeGalleryFocusCheck check)
     {
         if (trace is not null) trace.Check = check;
         return result;
     }
 
-    private static (NativeGalleryAboveRootResult Result, int Visited, int? OwnerDistance) GalleryFocusAboveRoot(FrameworkElement root)
+    private static bool GalleryFixedFocusInViewport(FrameworkElement root, FrameworkElement page, FrameworkElement focus)
     {
-        int visited = 0;
-        try
+        if (!root.IsLoaded || !page.IsLoaded || !focus.IsLoaded || root.XamlRoot is null
+            || !ReferenceEquals(page.XamlRoot, root.XamlRoot) || !ReferenceEquals(focus.XamlRoot, root.XamlRoot)) return false;
+        var visible = new NativeGalleryBounds(0, 0, root.ActualWidth, root.ActualHeight);
+        static bool Finite(Point point) => double.IsFinite(point.X) && double.IsFinite(point.Y);
+        bool IntersectMeasured(UIElement element, NativeGalleryBounds local, Transform? clipTransform = null)
         {
-            DependencyObject parent = root;
-            for (var distance = 1; distance <= 16; distance++)
+            if (!NativeGalleryPolicy.TryIntersect(local, local, out _)) return false;
+            var toRoot = element.TransformToVisual(root);
+            bool TryProject(Point point, out Point projected)
             {
-                var next = VisualTreeHelper.GetParent(parent);
-                if (next is null) return (NativeGalleryAboveRootResult.ChainEnded, visited, null);
-                visited = distance;
-                if (next is ScrollViewer) return (NativeGalleryAboveRootResult.Found, visited, distance);
-                parent = next;
+                if (clipTransform is not null) point = clipTransform.TransformPoint(point);
+                projected = default;
+                if (!Finite(point)) return false;
+                projected = toRoot.TransformPoint(point);
+                return Finite(projected);
             }
-            return (NativeGalleryAboveRootResult.Capped, visited, null); // No seventeenth GetParent call.
+            // Transform corners in order before taking their bounds; an intermediate
+            // axis-aligned box would enlarge a rotated clip before its root transform.
+            var right = local.X + local.Width;
+            var bottom = local.Y + local.Height;
+            if (!TryProject(new(local.X, local.Y), out var topLeft)
+                || !TryProject(new(right, local.Y), out var topRight)
+                || !TryProject(new(local.X, bottom), out var bottomLeft)
+                || !TryProject(new(right, bottom), out var bottomRight)) return false;
+            var left = Math.Min(Math.Min(topLeft.X, topRight.X), Math.Min(bottomLeft.X, bottomRight.X));
+            var top = Math.Min(Math.Min(topLeft.Y, topRight.Y), Math.Min(bottomLeft.Y, bottomRight.Y));
+            right = Math.Max(Math.Max(topLeft.X, topRight.X), Math.Max(bottomLeft.X, bottomRight.X));
+            bottom = Math.Max(Math.Max(topLeft.Y, topRight.Y), Math.Max(bottomLeft.Y, bottomRight.Y));
+            return NativeGalleryPolicy.TryIntersect(visible, new(left, top, right - left, bottom - top), out visible);
         }
-        catch (Exception) { return (NativeGalleryAboveRootResult.Unavailable, visited, null); }
+        if (!IntersectMeasured(focus, new(0, 0, focus.ActualWidth, focus.ActualHeight))
+            || !IntersectMeasured(page, new(0, 0, page.ActualWidth, page.ActualHeight))) return false;
+        bool containsPage = false;
+        for (DependencyObject? parent = focus; parent is not null; parent = VisualTreeHelper.GetParent(parent))
+        {
+            if (parent is UIElement element)
+            {
+                if (element.Visibility != Visibility.Visible) return false;
+                if (element.Clip is { } clip
+                    && !IntersectMeasured(element, new(clip.Rect.X, clip.Rect.Y, clip.Rect.Width, clip.Rect.Height), clip.Transform))
+                    return false;
+            }
+            containsPage |= ReferenceEquals(parent, page);
+            if (ReferenceEquals(parent, root)) return containsPage;
+        }
+        return false;
     }
 
     private static bool GalleryTryFocusBounds(ScrollViewer scroller, FrameworkElement focus, out Rect bounds)
