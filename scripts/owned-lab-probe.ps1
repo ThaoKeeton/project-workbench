@@ -6,6 +6,7 @@ if (-not $IsWindows -or [Runtime.InteropServices.RuntimeInformation]::OSArchitec
 $repo = Split-Path $PSScriptRoot -Parent
 Import-Module (Join-Path $PSScriptRoot 'TestingPluginDelivery.psm1') -Force
 Import-Module (Join-Path $PSScriptRoot 'OwnedLabProbeStaging.psm1') -Force
+Import-Module (Join-Path $PSScriptRoot 'OwnedLabProbeOutput.psm1') -Force
 Test-TestingPluginDelivery -Directory $DeliveryDirectory -RequireCurrentSource
 $zip = Join-Path $DeliveryDirectory 'workbench-testing-plugin-0.2.0.zip'
 $zipSha = (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -48,10 +49,7 @@ try {
     $birth = $process.StartTime.ToUniversalTime().ToFileTimeUtc()
     if (-not $process.WaitForExit($TimeoutSeconds * 1000)) { $process.Kill($true); $process.WaitForExit(); throw 'OwnedLabProbeTimeout' }
     $identity = @{ processId = $process.Id; processCreationFileTimeUtc = $birth; processExitFileTimeUtc = $process.ExitTime.ToUniversalTime().ToFileTimeUtc(); exitCode = $process.ExitCode }
-    $console = [IO.File]::ReadAllText((Join-Path $output 'stdout.log'))
-    if ([Text.Encoding]::UTF8.GetByteCount($console) -gt 65536) { throw 'OwnedLabProbeConsoleOversize' }
-    Write-Host $console
-    if ($process.ExitCode -ne 0) { throw 'OwnedLabProbeProcessFailed' }
+    Complete-OwnedLabProbeProcessOutput -Process $process -StandardOutputPath (Join-Path $output 'stdout.log') -StandardErrorPath (Join-Path $output 'stderr.log')
     $report = Get-Content (Join-Path $output 'observations/report.json') -Raw | ConvertFrom-Json -AsHashtable
     if ($report.schema -ne 1 -or $report.succeeded -isnot [bool] -or -not $report.succeeded -or @($report.checks).Count -ne 27) { throw 'OwnedLabProbeChecksIncomplete' }
     $leases = @()

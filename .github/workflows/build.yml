@@ -25,6 +25,7 @@ jobs:
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
           ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
           ./tests/scripts/OwnedLabProbeStaging.Tests.ps1
+          ./tests/scripts/OwnedLabProbeOutput.Tests.ps1
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
@@ -76,6 +77,7 @@ jobs:
           ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
           ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
           ./tests/scripts/OwnedLabProbeStaging.Tests.ps1
+          ./tests/scripts/OwnedLabProbeOutput.Tests.ps1
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
