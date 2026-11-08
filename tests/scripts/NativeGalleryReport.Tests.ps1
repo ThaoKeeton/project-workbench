@@ -8,10 +8,20 @@ New-Item -Path $root -ItemType Directory | Out-Null
 try {
     $source = 'a' * 40
     $birth = [DateTime]::UtcNow.AddMinutes(-5).ToFileTimeUtc()
-    $exit = [DateTime]::UtcNow.AddMinutes(5).ToFileTimeUtc()
+    $exit = [DateTime]::UtcNow.AddMinutes(20).ToFileTimeUtc()
     $app = Join-Path $root 'Workbench.App.exe'
     [IO.File]::WriteAllBytes($app, [Text.Encoding]::ASCII.GetBytes('synthetic-executable-for-receipt-policy'))
     $appHash = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash.ToLowerInvariant()
+    # Add-Type emits a real metadata-bearing test PE. It is not the shipping host DLL.
+    $hostDll = Join-Path $root 'Workbench.App.dll'
+    $hostSource = @"
+using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+$source")] public static class GalleryReceiptTestPe {}
+"@
+    Add-Type -TypeDefinition $hostSource -OutputAssembly $hostDll -OutputType Library
+    if ([Diagnostics.FileVersionInfo]::GetVersionInfo($hostDll).ProductVersion -cne "0.4.0+$source") {
+        throw 'Test-only host PE does not carry the requested informational version.'
+    }
+    $hostDllHash = (Get-FileHash -LiteralPath $hostDll -Algorithm SHA256).Hash.ToLowerInvariant()
     $report = Join-Path $root 'seed.json'
     @{ schemaVersion = 1; succeeded = $true; processId = 77; probe = 'seed' } | ConvertTo-Json | Set-Content -LiteralPath $report
     $reportHash = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -23,7 +33,7 @@ try {
     [IO.File]::WriteAllBytes($pngPath, [Convert]::FromBase64String('iVBORw0KGgoAAAANSUhEUgAAAAIAAAABCAYAAAD0In+KAAAADklEQVR4nGP4z8AAQv8BD/kD/YURmXYAAAAASUVORK5CYII='))
     $pngHash = (Get-FileHash -LiteralPath $pngPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $binding = @{ schemaVersion = 1; phase = 'business-seed'; processId = 77; processCreationFileTimeUtc = $birth;
-        processExitFileTimeUtc = $exit; hasExited = $true; exitCode = 0; executableSha256 = $appHash;
+        processExitFileTimeUtc = $exit; hasExited = $true; exitCode = 0; executableSha256 = $appHash; hostDllSha256 = $hostDllHash;
         sourceCommit = $source; hostInformationalVersion = "0.4.0+$source"; originalReportFile = 'seed.json'; originalReportSha256 = $reportHash; originalProbeSucceeded = $true }
     $receipt = @{ schemaVersion = 1; captureKind = 'WinUiContentRender'; scope = 'actual-window-content-only';
         titleBarIncluded = $false; popupsIncluded = $false; status = 'captured'; reasonCode = 'none';
@@ -53,6 +63,33 @@ try {
     }
     Save-Fixture
     if ((Check-Fixture).status -cne 'captured') { throw 'Valid nonuniform PNG and independent binding were rejected.' }
+    $validBinding = $binding.Clone(); $validReceipt = $receipt.Clone()
+    $null = $binding.Remove('hostDllSha256'); Refuse-Fixture 'missing host DLL hash'; $binding.hostDllSha256 = $hostDllHash
+    $binding.hostDllSha256 = 'malformed'; Refuse-Fixture 'malformed host DLL hash'; $binding.hostDllSha256 = $hostDllHash
+    $binding.hostInformationalVersion = '0.4.0+' + ('b' * 40)
+    Refuse-Fixture 'sidecar-only host version'; $binding.hostInformationalVersion = "0.4.0+$source"
+    $withoutDll = Join-Path $root 'without-dll'
+    New-Item -Path $withoutDll -ItemType Directory | Out-Null
+    $plainApp = $app
+    $app = Join-Path $withoutDll 'Workbench.App.exe'
+    [IO.File]::Copy($plainApp, $app)
+    Refuse-Fixture 'missing actual host DLL'
+    $app = $plainApp
+    $differentDirectory = Join-Path $root 'different-version'
+    New-Item -Path $differentDirectory -ItemType Directory | Out-Null
+    $differentApp = Join-Path $differentDirectory 'Workbench.App.exe'
+    [IO.File]::Copy($app, $differentApp)
+    $differentDll = Join-Path $differentDirectory 'Workbench.App.dll'
+    $differentSource = @'
+using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")] public static class GalleryDifferentVersionPe {}
+'@
+    Add-Type -TypeDefinition $differentSource -OutputAssembly $differentDll -OutputType Library
+    $app = $differentApp
+    $binding.hostDllSha256 = (Get-FileHash -LiteralPath $differentDll -Algorithm SHA256).Hash.ToLowerInvariant()
+    Refuse-Fixture 'actual host metadata version mismatch'
+    $app = $plainApp; $binding.hostDllSha256 = $hostDllHash
+    Save-Fixture
+    if ((Check-Fixture).status -cne 'captured') { throw 'Metadata-bound positive fixture did not recover.' }
     $receipt.status = 'blocked'; $receipt.reasonCode = 'desktop-unavailable'; $receipt.selectedPageKey = $null
     $receipt.pngPath = $null; $receipt.pngBytes = 0; $receipt.pngSha256 = $null
     Save-Fixture
@@ -66,7 +103,37 @@ try {
     $receipt.pngBytes++; Refuse-Fixture 'wrong PNG size'; $receipt.pngBytes--
     $receipt.width = 3; Refuse-Fixture 'wrong PNG dimensions'; $receipt.width = 2
     $receipt.pngSha256 = '0' * 64; Refuse-Fixture 'wrong PNG hash'; $receipt.pngSha256 = $pngHash
-    $binding.originalProbeSucceeded = $false; Refuse-Fixture 'failed original probe'; $binding.originalProbeSucceeded = $true
+    $binding.originalProbeSucceeded = $false
+    Save-Fixture
+    $wrapperRejected = Check-Fixture
+    if ($wrapperRejected.status -cne 'captured' -or $wrapperRejected.originalProbeSucceeded -ne $false -or
+        $wrapperRejected.processExitCode -ne 0) {
+        throw 'A native-success report concealed the launcher failure verdict.'
+    }
+    $binding.originalProbeSucceeded = $true
+    @{ schemaVersion = 1; succeeded = $false; processId = 77; probe = 'seed' } | ConvertTo-Json | Set-Content -LiteralPath $report
+    $binding.originalReportSha256 = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
+    Refuse-Fixture 'native-failed report paired with launcher success'
+    $binding.originalProbeSucceeded = $false; $binding.exitCode = -9
+    Save-Fixture
+    $failedCapture = Check-Fixture
+    if ($failedCapture.status -cne 'captured' -or $failedCapture.originalProbeSucceeded -ne $false -or $failedCapture.processExitCode -ne -9) {
+        throw 'An independently bound earlier image lost the failed original verdict or signed exit.'
+    }
+    @{ succeeded = $false; stage = 'initialize-or-native-smoke'; userRoot = 'synthetic-isolated-root' } |
+        ConvertTo-Json | Set-Content -LiteralPath $report
+    $binding.originalReportSha256 = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
+    Save-Fixture
+    if ((Check-Fixture).originalProbeSucceeded -ne $false) {
+        throw 'A real-shape WriteFailure report without PID lost its launcher-bound earlier capture.'
+    }
+    @{ succeeded = $false; stage = 'initialize-or-native-smoke'; userRoot = 'synthetic-isolated-root'; processId = 78 } |
+        ConvertTo-Json | Set-Content -LiteralPath $report
+    $binding.originalReportSha256 = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
+    Refuse-Fixture 'failed report with conflicting declared PID'
+    @{ schemaVersion = 1; succeeded = $true; processId = 77; probe = 'seed' } | ConvertTo-Json | Set-Content -LiteralPath $report
+    $binding.originalReportSha256 = (Get-FileHash -LiteralPath $report -Algorithm SHA256).Hash.ToLowerInvariant()
+    $binding.originalProbeSucceeded = $true; $binding.exitCode = 0
     $binding.processExitFileTimeUtc = 0L; Refuse-Fixture 'unconfirmed exit'; $binding.processExitFileTimeUtc = $exit
     $receipt.pluginId = 'com.forged.plugin'; Refuse-Fixture 'forged native-only plugin identity'; $receipt.pluginId = $null
     $originalPng = [IO.File]::ReadAllBytes($pngPath)
@@ -163,6 +230,132 @@ try {
         -not (Test-Path -LiteralPath (Join-Path $aggregateRepo 'artifacts/native/genuine-gallery/index.json'))) {
         throw "Unreached fixed roster invalid: images=$($index.acceptedImages) rows=$(@($index.rows).Count) skipped=$(@($index.rows | Where-Object status -eq 'skipped-unavailable').Count)"
     }
+    $failedRepo = Join-Path $root 'failed-phase-repo'
+    New-Item -Path $failedRepo -ItemType Directory | Out-Null
+    & git -C $failedRepo init -q
+    [IO.File]::WriteAllText((Join-Path $failedRepo 'marker.txt'), 'failed original phase with earlier real PNG files')
+    & git -C $failedRepo add marker.txt
+    & git -C $failedRepo -c user.name=GalleryFixture -c user.email=gallery@example.invalid commit -qm fixture
+    if ($LASTEXITCODE -ne 0) { throw 'Failed-phase collector git fixture failed.' }
+    $failedSource = (& git -C $failedRepo rev-parse HEAD).Trim()
+    $failedNative = Join-Path $failedRepo 'artifacts/native'
+    $failedAppDirectory = Join-Path $failedNative 'app'
+    New-Item -Path $failedAppDirectory -ItemType Directory -Force | Out-Null
+    $failedApp = Join-Path $failedAppDirectory 'Workbench.App.exe'
+    [IO.File]::Copy($plainApp, $failedApp)
+    $failedDll = Join-Path $failedAppDirectory 'Workbench.App.dll'
+    $failedPeSource = @"
+using System.Reflection; [assembly: AssemblyInformationalVersion("0.4.0+$failedSource")] public static class GalleryFailedPhaseTestPe {}
+"@
+    Add-Type -TypeDefinition $failedPeSource -OutputAssembly $failedDll -OutputType Library
+    $failedReport = Join-Path $failedNative 'native-smoke.json'
+    @{ succeeded = $false; stage = 'initialize-or-native-smoke'; userRoot = 'synthetic-isolated-root' } |
+        ConvertTo-Json | Set-Content -LiteralPath $failedReport
+    $failedBinding = $validBinding.Clone()
+    $failedBinding.phase = 'native-smoke'; $failedBinding.sourceCommit = $failedSource
+    $failedBinding.hostInformationalVersion = "0.4.0+$failedSource"
+    $failedBinding.hostDllSha256 = (Get-FileHash -LiteralPath $failedDll -Algorithm SHA256).Hash.ToLowerInvariant()
+    $failedBinding.originalReportFile = 'native-smoke.json'
+    $failedBinding.originalReportSha256 = (Get-FileHash -LiteralPath $failedReport -Algorithm SHA256).Hash.ToLowerInvariant()
+    $failedBinding.originalProbeSucceeded = $false; $failedBinding.exitCode = -9
+    $failedBinding | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $failedNative 'native-smoke.gallery-binding.json')
+    $failedGallery = Join-Path $failedNative 'gallery/native-smoke'
+    New-Item -Path $failedGallery -ItemType Directory -Force | Out-Null
+    foreach ($shotId in @('host-plugins-disabled', 'host-plugins')) {
+        $failedReceipt = $validReceipt.Clone()
+        $failedReceipt.shotId = $shotId; $failedReceipt.pngPath = "$shotId.png"
+        $failedReceipt.phase = 'native-smoke'; $failedReceipt.probeKind = 'smoke'
+        $failedReceipt.sourceCommit = $failedSource; $failedReceipt.hostInformationalVersion = "0.4.0+$failedSource"
+        $failedReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $failedGallery "$shotId.json")
+        [IO.File]::WriteAllBytes((Join-Path $failedGallery "$shotId.png"), $originalPng)
+    }
+    $failedOutput = Join-Path $failedNative 'genuine-gallery'
+    $blockedImages = Join-Path $failedOutput 'images'
+    New-Item -Path $blockedImages -ItemType Directory -Force | Out-Null
+    $collision = Join-Path $blockedImages 'host-plugins.png'
+    [IO.File]::WriteAllBytes($collision, $originalPng)
+    $refused = $false
+    try { Export-NativeGallery -RepositoryRoot $failedRepo | Out-Null } catch { $refused = $true }
+    if (-not $refused) { throw 'Collector published through a destination collision.' }
+    if (Test-Path -LiteralPath (Join-Path $failedOutput 'index.json')) { throw 'Partial collector failure published an index.' }
+    foreach ($shotId in @('host-plugins-disabled', 'host-plugins')) {
+        $raw = Join-Path $failedGallery "$shotId.png"
+        if (-not (Test-Path -LiteralPath $raw) -or
+            (Get-FileHash -LiteralPath $raw -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pngHash) {
+            throw "Collector failure discarded raw PNG bytes for $shotId"
+        }
+    }
+    Remove-Item -LiteralPath $failedOutput -Recurse -Force
+    $failedIndex = Export-NativeGallery -RepositoryRoot $failedRepo
+    if ($failedIndex.acceptedImages -ne 2 -or
+        @($failedIndex.phases | Where-Object { $_.phase -eq 'native-smoke' -and $_.originalProbeStatus -eq 'failed' }).Count -ne 1) {
+        throw 'Failed original phase did not retain two validated earlier captures and a failed phase verdict.'
+    }
+    foreach ($shotId in @('host-plugins-disabled', 'host-plugins')) {
+        $row = @($failedIndex.rows | Where-Object shotId -eq $shotId)
+        $raw = Join-Path $failedGallery "$shotId.png"
+        $copy = Join-Path $failedOutput "images/$shotId.png"
+        if ($row.Count -ne 1 -or $row[0].status -cne 'failed' -or $row[0].captureStatus -cne 'captured' -or
+            $row[0].originalProbeSucceeded -ne $false -or $row[0].processExitCode -ne -9 -or
+            -not (Test-Path -LiteralPath $raw) -or -not (Test-Path -LiteralPath $copy) -or
+            (Get-FileHash -LiteralPath $raw -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pngHash -or
+            (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant() -cne $pngHash) {
+            throw "Failed-phase captured image, original verdict or exact raw/copy bytes changed for $shotId"
+        }
+    }
+    # The native report can remain green when the independent wrapper rejects OS exit/Closed/lease.
+    Remove-Item -LiteralPath $failedOutput -Recurse -Force
+    @{ schemaVersion = 1; succeeded = $true; processId = 77; probe = 'smoke' } |
+        ConvertTo-Json | Set-Content -LiteralPath $failedReport
+    $failedBinding.originalReportSha256 = (Get-FileHash -LiteralPath $failedReport -Algorithm SHA256).Hash.ToLowerInvariant()
+    $failedBinding.nativeReportSucceeded = $true
+    $failedBinding.originalProbeSucceeded = $false; $failedBinding.exitCode = 0
+    $failedBinding | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $failedNative 'native-smoke.gallery-binding.json')
+    $wrapperIndex = Export-NativeGallery -RepositoryRoot $failedRepo
+    if ($wrapperIndex.acceptedImages -ne 2 -or
+        @($wrapperIndex.phases | Where-Object { $_.phase -eq 'native-smoke' -and $_.nativeReportStatus -eq 'succeeded' -and
+            $_.originalProbeStatus -eq 'failed' }).Count -ne 1 -or
+        @($wrapperIndex.rows | Where-Object { $_.shotId -in @('host-plugins-disabled', 'host-plugins') -and
+            $_.status -eq 'failed' -and $_.captureStatus -eq 'captured' -and $_.originalProbeSucceeded -eq $false }).Count -ne 2) {
+        throw 'A green native report concealed the independent failed wrapper verdict or discarded bound earlier images.'
+    }
+    $testingOriginal = Join-Path $root 'testing-seed.json'
+    $testingRunner = Join-Path $root 'testing-seed.runner.json'
+    @{ schemaVersion = 1; succeeded = $true; processId = 77; probe = 'seed' } |
+        ConvertTo-Json | Set-Content -LiteralPath $testingOriginal
+    @{ schemaVersion = 1; succeeded = $false; processId = 77; hasExited = $true; exitCode = 0;
+        rootLeaseAvailable = $false; runnerError = 'TestingRootStillOwned' } |
+        ConvertTo-Json | Set-Content -LiteralPath $testingRunner
+    $testingBindingPath = Write-NativeGalleryBinding -OriginalReportPath $testingOriginal -Phase testing-seed `
+        -ExecutablePath $plainApp -SourceCommit $source -ProcessId 77 -ProcessCreationFileTimeUtc $birth `
+        -ProcessExitFileTimeUtc $exit -ExitCode 0 -HasExited $true
+    $testingBinding = Get-Content -LiteralPath $testingBindingPath -Raw | ConvertFrom-Json -AsHashtable
+    if ($testingBinding.originalProbeSucceeded -ne $false -or $testingBinding.nativeReportSucceeded -ne $true -or
+        $testingBinding.runnerReportSha256 -cne (Get-FileHash -LiteralPath $testingRunner -Algorithm SHA256).Hash.ToLowerInvariant()) {
+        throw 'Testing runner failure did not override the native-success report in immutable launcher binding.'
+    }
+    $testingReceipt = $validReceipt.Clone()
+    $testingReceipt.phase = 'testing-seed'; $testingReceipt.probeKind = 'testing'; $testingReceipt.projectId = 'default'
+    $testingGallery = Join-Path $root 'testing-gallery'
+    New-Item -Path $testingGallery -ItemType Directory | Out-Null
+    $testingReceiptPath = Join-Path $testingGallery 'host-plugins.json'
+    $testingReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath $testingReceiptPath
+    [IO.File]::WriteAllBytes((Join-Path $testingGallery 'host-plugins.png'), $originalPng)
+    $testingResult = Test-NativeGalleryReceipt -ReceiptPath $testingReceiptPath -BindingPath $testingBindingPath `
+        -OriginalReportPath $testingOriginal -ExecutablePath $plainApp -ExpectedSourceCommit $source `
+        -ExpectedShotId host-plugins -ExpectedPageKey plugins -ExpectedPhase testing-seed -ExpectedProbeKind testing `
+        -ExpectedPluginId $null -ExpectedViewId $null
+    if ($testingResult.status -cne 'captured' -or $testingResult.originalProbeSucceeded -ne $false) {
+        throw 'Testing earlier capture was relabelled as a passing wrapper probe.'
+    }
+    @{ schemaVersion = 1; succeeded = $true; processId = 77; hasExited = $true; exitCode = 0;
+        rootLeaseAvailable = $true } | ConvertTo-Json | Set-Content -LiteralPath $testingRunner
+    $refused = $false
+    try { Test-NativeGalleryReceipt -ReceiptPath $testingReceiptPath -BindingPath $testingBindingPath `
+        -OriginalReportPath $testingOriginal -ExecutablePath $plainApp -ExpectedSourceCommit $source `
+        -ExpectedShotId host-plugins -ExpectedPageKey plugins -ExpectedPhase testing-seed -ExpectedProbeKind testing `
+        -ExpectedPluginId $null -ExpectedViewId $null | Out-Null } catch { $refused = $true }
+    if (-not $refused) { throw 'Mutated testing runner verdict was accepted without its original hash.' }
     Write-Host 'Native gallery receipt guard fixtures passed.'
 }
 finally { Remove-Item -LiteralPath $root -Recurse -Force }

@@ -163,7 +163,33 @@ jobs:
         shell: pwsh
         run: ./scripts/native-debug.ps1 -TimeoutSeconds 240
       - uses: actions/upload-artifact@v7.0.2
-        if: always()
+        if: ${{ always() && hashFiles('artifacts/native/genuine-gallery/index.json') != '' }}
+        with:
+          name: native-verification-evidence
+          path: |
+            artifacts/native/native-smoke.json
+            artifacts/native/native-smoke.gallery-binding.json
+            artifacts/native/native-stdout.log
+            artifacts/native/native-stderr.log
+            artifacts/native/native-crash-events.json
+            artifacts/native/gallery/
+            artifacts/native/runtime-probes/
+            artifacts/native/workspace-probes/
+            artifacts/native/testing-probes/
+            artifacts/native/business-probes/
+            artifacts/native/owned-lab-probes/
+            artifacts/native/native-debug/
+            artifacts/tests/
+            src/Workbench.App/obj/**/App.g*.cs
+            src/Workbench.App/obj/**/XamlTypeInfo.g.cs
+            !artifacts/native/gallery/**/*.png
+            !artifacts/native/workspace-probes/**/gallery/**/*.png
+            !artifacts/native/testing-probes/**/gallery/**/*.png
+            !artifacts/native/business-probes/**/gallery/**/*.png
+          if-no-files-found: warn
+          retention-days: 1
+      - uses: actions/upload-artifact@v7.0.2
+        if: ${{ always() && hashFiles('artifacts/native/genuine-gallery/index.json') == '' }}
         with:
           name: native-verification-evidence
           path: |

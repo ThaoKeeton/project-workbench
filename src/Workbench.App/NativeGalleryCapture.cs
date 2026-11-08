@@ -68,11 +68,8 @@ internal sealed partial class MainWindow
             if (selectedPageKey != pageKey || selectedPluginId != pluginId || selectedViewId != viewId) return;
 
             status = "blocked"; reasonCode = "desktop-unavailable";
-            if (!Environment.UserInteractive) return;
-            var desktop = OpenInputDesktop(0, false, 0x0001);
-            if (desktop == IntPtr.Zero) return;
-            desktopVisible = true;
-            CloseDesktop(desktop);
+            desktopVisible = GalleryInputDesktopReadable();
+            if (!desktopVisible) return;
             var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
             hwndValue = hwnd.ToInt64();
             if (hwnd == IntPtr.Zero || GetWindowThreadProcessId(hwnd, out var owner) == 0
@@ -172,6 +169,7 @@ internal sealed partial class MainWindow
             Directory.CreateDirectory(directory);
             using (var output = new FileStream(pngPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 await output.WriteAsync(bytes);
+            if (!GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId)) return;
             pngBytes = bytes.Length;
             pngSha256 = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             status = "captured"; reasonCode = "none";
@@ -223,10 +221,19 @@ internal sealed partial class MainWindow
             : (selected as NavigationViewItem)?.Tag as NavigationTarget;
         if (target?.Page != pageKey || target.PluginId != pluginId || target.ViewId != viewId) return false;
         var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
-        if (hwnd.ToInt64() != hwndValue || !IsWindowVisible(hwnd) || GetWindowThreadProcessId(hwnd, out var owner) == 0
+        if (!GalleryInputDesktopReadable() || hwnd.ToInt64() != hwndValue || !IsWindowVisible(hwnd)
+            || !GetClientRect(hwnd, out var rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top
+            || GetWindowThreadProcessId(hwnd, out var owner) == 0
             || owner != (uint)Environment.ProcessId) return false;
         using var process = Process.GetCurrentProcess();
         return process.StartTime.ToUniversalTime().ToFileTimeUtc() == birth;
+    }
+
+    private static bool GalleryInputDesktopReadable()
+    {
+        if (!Environment.UserInteractive) return false;
+        var desktop = OpenInputDesktop(0, false, 0x0001);
+        return desktop != IntPtr.Zero && CloseDesktop(desktop);
     }
 
     private static string ShaFile(string path) => Convert.ToHexString(SHA256.HashData(File.ReadAllBytes(path))).ToLowerInvariant();

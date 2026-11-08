@@ -99,10 +99,29 @@ function Write-NativeGalleryBinding {
         $SourceCommit -cnotmatch '^[0-9a-f]{40}$'){throw 'GalleryBindingArgumentsInvalid'}
     $path=[IO.Path]::ChangeExtension($OriginalReportPath,'gallery-binding.json')
     $dll=Join-Path (Split-Path $ExecutablePath -Parent) 'Workbench.App.dll'
-    $reportHash=$null;$succeeded=$false
+    $reportHash=$null;$nativeSucceeded=$false
     if(Test-Path -LiteralPath $OriginalReportPath -PathType Leaf){
         $reportHash=Get-GalleryHash $OriginalReportPath
-        try{$report=Read-GalleryJson $OriginalReportPath 4194304;$succeeded=$report['succeeded'] -is [bool] -and $report['succeeded']}catch{}
+        try{$report=Read-GalleryJson $OriginalReportPath 4194304;$nativeSucceeded=$report['succeeded'] -is [bool] -and $report['succeeded']}catch{}
+    }
+    $succeeded=$nativeSucceeded -and $HasExited -and (Test-GalleryInt $ExitCode 0 0)
+    $runnerReportFile=$null;$runnerReportHash=$null;$runnerSucceeded=$null
+    if($Phase -like 'testing-*'){
+        $runnerPath=[IO.Path]::ChangeExtension($OriginalReportPath,'runner.json')
+        $runnerSucceeded=$false
+        if(Test-Path -LiteralPath $runnerPath -PathType Leaf){
+            $runnerReportFile=[IO.Path]::GetFileName($runnerPath)
+            $runnerReportHash=Get-GalleryHash $runnerPath
+            try{
+                $runner=Read-GalleryJson $runnerPath
+                $runnerSucceeded=$runner['succeeded'] -is [bool] -and $runner['succeeded'] -and
+                    (Test-GalleryInt $runner['processId'] 1 ([int]::MaxValue)) -and $runner['processId'] -eq $ProcessId -and
+                    $runner['hasExited'] -is [bool] -and $runner['hasExited'] -and
+                    (Test-GalleryInt $runner['exitCode'] ([int]::MinValue) ([int]::MaxValue)) -and
+                    $runner['exitCode'] -eq $ExitCode -and $runner['rootLeaseAvailable'] -is [bool] -and $runner['rootLeaseAvailable']
+            }catch{}
+        }
+        $succeeded=$succeeded -and $runnerSucceeded
     }
     $packages=@{}
     foreach($id in $PackageIds){
@@ -126,6 +145,8 @@ function Write-NativeGalleryBinding {
         executableSha256=(Get-GalleryHash $ExecutablePath);hostDllSha256=(Get-GalleryHash $dll);
         hostInformationalVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo($dll).ProductVersion;sourceCommit=$SourceCommit;
         originalReportFile=[IO.Path]::GetFileName($OriginalReportPath);originalReportSha256=$reportHash;
+        nativeReportSucceeded=$nativeSucceeded;runnerReportFile=$runnerReportFile;
+        runnerReportSha256=$runnerReportHash;runnerReportSucceeded=$runnerSucceeded;
         originalProbeSucceeded=$succeeded;packages=$packages}
     $bytes=[Text.Encoding]::UTF8.GetBytes(($record | ConvertTo-Json -Depth 12))
     $stream=[IO.FileStream]::new($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
@@ -157,22 +178,60 @@ function Test-NativeGalleryReceipt {
     Assert-GalleryText $b['originalReportFile'] ([IO.Path]::GetFileName($OriginalReportPath))
     if(-not (Test-GalleryHash $b['executableSha256']) -or $b['executableSha256'] -cne (Get-GalleryHash $ExecutablePath) -or
        -not (Test-GalleryHash $b['originalReportSha256']) -or $b['originalReportSha256'] -cne (Get-GalleryHash $OriginalReportPath)){throw 'GalleryBindingHashMismatch'}
-    if($b.Contains('hostDllSha256')){
-        $dll=Join-Path (Split-Path $ExecutablePath -Parent) 'Workbench.App.dll'
-        if(-not (Test-GalleryHash $b['hostDllSha256']) -or $b['hostDllSha256'] -cne (Get-GalleryHash $dll) -or
-            $b['hostInformationalVersion'] -cne [Diagnostics.FileVersionInfo]::GetVersionInfo($dll).ProductVersion){throw 'GalleryHostIdentityMismatch'}
-    }
-    if($b['hostInformationalVersion'] -cne ("0.4.0+" + $ExpectedSourceCommit)){throw 'GallerySourceIdentityMismatch'}
+    $dll=Join-Path (Split-Path $ExecutablePath -Parent) 'Workbench.App.dll'
+    if(-not $b.Contains('hostDllSha256') -or -not (Test-GalleryHash $b['hostDllSha256']) -or
+       $b['hostDllSha256'] -cne (Get-GalleryHash $dll)){throw 'GalleryHostIdentityMismatch'}
+    $actualVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo((Assert-GalleryPath $dll)).ProductVersion
+    if($actualVersion -cne ("0.4.0+" + $ExpectedSourceCommit) -or
+       $b['hostInformationalVersion'] -cne $actualVersion){throw 'GallerySourceIdentityMismatch'}
     if(-not (Test-GalleryInt $b['processId'] 1 ([int]::MaxValue)) -or
        -not (Test-GalleryInt $b['processCreationFileTimeUtc'] 1 ([long]::MaxValue)) -or
        -not (Test-GalleryInt $b['processExitFileTimeUtc'] 1 ([long]::MaxValue)) -or
        $b['processExitFileTimeUtc'] -le $b['processCreationFileTimeUtc'] -or
        $b['hasExited'] -isnot [bool] -or -not $b['hasExited'] -or
-       -not (Test-GalleryInt $b['exitCode'] 0 0) -or
-       $b['originalProbeSucceeded'] -isnot [bool] -or -not $b['originalProbeSucceeded'] -or
-       $original['succeeded'] -isnot [bool] -or -not $original['succeeded'] -or
-       -not (Test-GalleryInt $original['processId'] 1 ([int]::MaxValue)) -or
-       $original['processId'] -ne $b['processId']){throw 'GalleryOriginalProbeFailed'}
+       -not (Test-GalleryInt $b['exitCode'] ([int]::MinValue) ([int]::MaxValue)) -or
+       $b['originalProbeSucceeded'] -isnot [bool] -or
+       $original['succeeded'] -isnot [bool] -or
+       ($b['originalProbeSucceeded'] -and (-not $original['succeeded'] -or $b['exitCode'] -ne 0)) -or
+       ($b.Contains('nativeReportSucceeded') -and
+           ($b['nativeReportSucceeded'] -isnot [bool] -or $b['nativeReportSucceeded'] -ne $original['succeeded'])) -or
+       (($original['succeeded'] -or $original.Contains('processId')) -and
+           (-not (Test-GalleryInt $original['processId'] 1 ([int]::MaxValue)) -or
+            $original['processId'] -ne $b['processId']))){throw 'GalleryOriginalProbeFailed'}
+    if(($original.Contains('processCreationFileTimeUtc') -and
+            (-not (Test-GalleryInt $original['processCreationFileTimeUtc'] 1 ([long]::MaxValue)) -or
+             $original['processCreationFileTimeUtc'] -ne $b['processCreationFileTimeUtc'])) -or
+       ($original.Contains('exitCode') -and
+            (-not (Test-GalleryInt $original['exitCode'] ([int]::MinValue) ([int]::MaxValue)) -or
+             $original['exitCode'] -ne $b['exitCode'])) -or
+       ($original.Contains('hasExited') -and ($original['hasExited'] -isnot [bool] -or -not $original['hasExited']))){
+        throw 'GalleryOriginalProbeIdentityMismatch'
+    }
+    if($ExpectedProbeKind -eq 'testing'){
+        $runnerPath=[IO.Path]::ChangeExtension($OriginalReportPath,'runner.json')
+        $runnerSucceeded=$false
+        if(Test-Path -LiteralPath $runnerPath -PathType Leaf){
+            Assert-GalleryText $b['runnerReportFile'] ([IO.Path]::GetFileName($runnerPath))
+            if(-not (Test-GalleryHash $b['runnerReportSha256']) -or
+               $b['runnerReportSha256'] -cne (Get-GalleryHash $runnerPath)){throw 'GalleryRunnerHashMismatch'}
+            $runner=Read-GalleryJson $runnerPath
+            if(-not (Test-GalleryInt $runner['schemaVersion'] 1 1) -or
+               $runner['succeeded'] -isnot [bool] -or
+               -not (Test-GalleryInt $runner['processId'] 1 ([int]::MaxValue)) -or $runner['processId'] -ne $b['processId'] -or
+               $runner['hasExited'] -isnot [bool] -or -not $runner['hasExited'] -or
+               -not (Test-GalleryInt $runner['exitCode'] ([int]::MinValue) ([int]::MaxValue)) -or
+               $runner['exitCode'] -ne $b['exitCode'] -or $runner['rootLeaseAvailable'] -isnot [bool]){
+                throw 'GalleryRunnerIdentityMismatch'
+            }
+            $runnerSucceeded=$runner['succeeded'] -and $runner['rootLeaseAvailable'] -and $runner['exitCode'] -eq 0
+        }elseif($null -ne $b['runnerReportFile'] -or $null -ne $b['runnerReportSha256']){
+            throw 'GalleryRunnerHashMismatch'
+        }
+        if($b['runnerReportSucceeded'] -isnot [bool] -or $b['runnerReportSucceeded'] -ne $runnerSucceeded -or
+           $b['originalProbeSucceeded'] -ne ($original['succeeded'] -and $runnerSucceeded -and $b['exitCode'] -eq 0)){
+            throw 'GalleryRunnerVerdictMismatch'
+        }
+    }
     if($r['status'] -isnot [string] -or $r['status'] -cnotin @('captured','blocked','failed','skipped-unavailable','skipped-unsafe') -or
        $r['reasonCode'] -isnot [string] -or $r['reasonCode'] -cnotin @('none','precondition-unavailable','page-detached',
            'desktop-unavailable','focus-detached','focus-outside-viewport','layout-unavailable','render-invalid','capture-error') -or
@@ -180,7 +239,9 @@ function Test-NativeGalleryReceipt {
        -not (Test-GalleryInt $r['witnessCount'] 0 1000000)){throw 'GalleryReceiptFieldsInvalid'}
     if($r['status'] -cne 'captured'){
         if($null -ne $r['pngPath'] -or $null -ne $r['pngSha256'] -or $r['pngBytes'] -ne 0){throw 'GalleryBlockedImageInvalid'}
-        return @{shotId=$ExpectedShotId;status=$r['status'];reasonCode=$r['reasonCode'];phase=$ExpectedPhase;originalProbeSucceeded=$true;imagePath=$null}
+        return @{shotId=$ExpectedShotId;status=$r['status'];reasonCode=$r['reasonCode'];phase=$ExpectedPhase;
+            originalProbeSucceeded=$b['originalProbeSucceeded'];nativeReportSucceeded=$original['succeeded'];
+            processExitCode=$b['exitCode'];imagePath=$null}
     }
     Assert-GalleryText $r['selectedPageKey'] $ExpectedPageKey
     Assert-GalleryText $r['selectedPluginId'] $ExpectedPluginId
@@ -248,7 +309,9 @@ function Test-NativeGalleryReceipt {
     if((Get-Item -LiteralPath $image).Length -ne $r['pngBytes'] -or
        (Get-GalleryHash $image) -cne $r['pngSha256'] -or
        -not [NativeGalleryPngV1]::Valid([IO.File]::ReadAllBytes($image),$r['width'],$r['height'])){throw 'GalleryPngInvalid'}
-    return @{shotId=$ExpectedShotId;status='captured';reasonCode='none';phase=$ExpectedPhase;originalProbeSucceeded=$true;
+    return @{shotId=$ExpectedShotId;status='captured';reasonCode='none';phase=$ExpectedPhase;
+        originalProbeSucceeded=$b['originalProbeSucceeded'];nativeReportSucceeded=$original['succeeded'];
+        processExitCode=$b['exitCode'];
         imagePath=$image;pngBytes=$r['pngBytes'];pngSha256=$r['pngSha256'];width=$r['width'];height=$r['height'];
         processId=$b['processId'];processCreationFileTimeUtc=$b['processCreationFileTimeUtc'];
         processExitFileTimeUtc=$b['processExitFileTimeUtc'];executableSha256=$b['executableSha256'];sourceCommit=$ExpectedSourceCommit;
@@ -339,12 +402,19 @@ function Export-NativeGallery {
         $ids=@($group.shots | ForEach-Object { $_[0] })
         Assert-NativeGalleryDirectory -Directory $group.dir -ExpectedShotIds $ids
         $binding=[IO.Path]::ChangeExtension($group.report,'gallery-binding.json')
-        $originalStatus='unreached'
+        $originalStatus='unreached';$nativeReportStatus='unreached'
         if(Test-Path -LiteralPath $group.report -PathType Leaf){
             $original=Read-GalleryJson $group.report 4194304
-            $originalStatus=if($original['succeeded'] -is [bool] -and $original['succeeded']){'succeeded'}else{'failed'}
+            $nativeReportStatus=if($original['succeeded'] -is [bool] -and $original['succeeded']){'succeeded'}else{'failed'}
+            $originalStatus=$nativeReportStatus
+            if(Test-Path -LiteralPath $binding -PathType Leaf){
+                $phaseBinding=Read-GalleryJson $binding
+                if($phaseBinding['originalProbeSucceeded'] -isnot [bool] -or -not $phaseBinding['originalProbeSucceeded']){
+                    $originalStatus='failed'
+                }
+            }
         }
-        $phases.Add(@{phase=$group.phase;originalProbeStatus=$originalStatus})
+        $phases.Add(@{phase=$group.phase;originalProbeStatus=$originalStatus;nativeReportStatus=$nativeReportStatus})
         foreach($shot in $group.shots){
             $id=$shot[0]
             if(-not $allIds.Add($id)){throw 'GalleryRosterDuplicate'}
@@ -356,9 +426,13 @@ function Export-NativeGallery {
                 continue
             }
             if($originalStatus -eq 'failed'){
-                $rows.Add(@{shotId=$id;phase=$group.phase;status='failed';reasonCode='original-probe-failed';originalProbeStatus='failed';
-                    rawAttemptReceipt=($id+'.json')})
-                continue
+                $attempt=Read-GalleryJson $receipt
+                if($attempt['status'] -isnot [string] -or $attempt['status'] -cne 'captured'){
+                    if(Test-Path -LiteralPath (Join-Path $group.dir ($id+'.png'))){throw 'GalleryUnexpectedImage'}
+                    $rows.Add(@{shotId=$id;phase=$group.phase;status='failed';reasonCode='original-probe-failed';originalProbeStatus='failed';
+                        rawAttemptReceipt=($id+'.json')})
+                    continue
+                }
             }
             if(-not (Test-Path -LiteralPath $binding -PathType Leaf)){throw 'GalleryBindingMissing'}
             $packageRoot=$group.packages
@@ -383,8 +457,14 @@ function Export-NativeGallery {
             if($id -eq 'testing-owned-panel'){$result['actualOwnedRunProof']='blocked-no-owned-run-in-testing-probe'}
             if($id -eq 'testing-virtual-evidence'){$result['embeddedFrame']='SIMULATED virtual BMP inside genuine WinUI capture'}
             if($id -eq 'upcam-acceptance-history'){$result['providerOutcome']='synthetic local fake sent; no real delivery'}
-            $rows.Add($result)
             if($result.status -eq 'captured'){$captured.Add($result)}
+            if($originalStatus -eq 'failed'){
+                $result['captureStatus']='captured'
+                $result['status']='failed'
+                $result['reasonCode']='original-probe-failed'
+                $result['rawAttemptReceipt']=$id+'.json'
+            }
+            $rows.Add($result)
         }
     }
     $rows.Add(@{shotId='docs-page';phase='navigation';status='skipped-unavailable';
@@ -396,11 +476,32 @@ function Export-NativeGallery {
             ((Get-Item -LiteralPath $part -Force).Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0){throw 'GalleryReparsePath'}
     }
     if(Test-Path -LiteralPath (Join-Path $output 'index.json')){throw 'GalleryIndexAlreadyExists'}
-    $imageFolder=Join-Path $output 'images'
-    New-Item -Path $imageFolder -ItemType Directory -Force | Out-Null
+    # Stage on the same volume and publish only a complete directory. A failure leaves
+    # every original probe PNG untouched for the consolidated raw-evidence artifact.
+    $stage=Join-Path $native ('genuine-gallery.staging-'+[Guid]::NewGuid().ToString('N'))
+    if(Test-Path -LiteralPath $stage){throw 'GalleryStageAlreadyExists'}
+    $imageFolder=Join-Path $stage 'images'
+    [IO.Directory]::CreateDirectory($imageFolder) | Out-Null
     foreach($row in $captured){
+        $sourceImage=Assert-GalleryPath $row.imagePath
         $destination=Join-Path $imageFolder ($row.shotId+'.png')
-        [IO.File]::Move($row.imagePath,$destination,$false)
+        $total=0L
+        $buffer=[byte[]]::new(65536)
+        $inputStream=[IO.File]::OpenRead($sourceImage)
+        try{
+            $outputStream=[IO.FileStream]::new($destination,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            try{
+                while(($count=$inputStream.Read($buffer,0,$buffer.Length)) -gt 0){
+                    $total+=$count
+                    if($total -gt $row.pngBytes -or $total -gt 16777216){throw 'GalleryStageImageChanged'}
+                    $outputStream.Write($buffer,0,$count)
+                }
+                $outputStream.Flush($true)
+            }finally{$outputStream.Dispose()}
+        }finally{$inputStream.Dispose()}
+        if($total -ne $row.pngBytes -or (Get-GalleryHash $destination) -cne $row.pngSha256){
+            throw 'GalleryStageImageChanged'
+        }
         $row['imagePath']='images/'+$row.shotId+'.png'
     }
     $index=[ordered]@{schemaVersion=1;captureKind='WinUiContentRender';scope='actual-window-content-only';
@@ -408,8 +509,13 @@ function Export-NativeGallery {
         phases=@($phases);rows=@($rows);reviewedByHuman=$false;
         limits='Windows Server gallery evidence only; Windows 11 human and visual review pending.'}
     $bytes=[Text.Encoding]::UTF8.GetBytes(($index | ConvertTo-Json -Depth 16))
-    $stream=[IO.FileStream]::new((Join-Path $output 'index.json'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-    try{$stream.Write($bytes,0,$bytes.Length)}finally{$stream.Dispose()}
+    if($bytes.Length -lt 2 -or $bytes.Length -gt 65536){throw 'GalleryIndexInvalid'}
+    $stageIndex=Join-Path $stage 'index.json'
+    $stream=[IO.FileStream]::new($stageIndex,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try{$stream.Write($bytes,0,$bytes.Length);$stream.Flush($true)}finally{$stream.Dispose()}
+    $staged=Read-GalleryJson $stageIndex
+    if($staged['acceptedImages'] -ne $captured.Count -or @($staged['rows']).Count -ne $rows.Count){throw 'GalleryIndexInvalid'}
+    [IO.Directory]::Move($stage,$output)
     return $index
 }
 Export-ModuleMember -Function Test-NativeGalleryReceipt,Write-NativeGalleryBinding,Assert-NativeGalleryDirectory,Export-NativeGallery
