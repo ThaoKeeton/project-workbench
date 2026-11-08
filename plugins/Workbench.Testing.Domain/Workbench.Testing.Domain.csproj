@@ -6,6 +6,7 @@
     <IsPublishable>false</IsPublishable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Workbench.Core.Tests" />
     <ProjectReference Include="../../src/Workbench.Sdk/Workbench.Sdk.csproj" />
     <EmbeddedResource Include="Fixtures/*.json" />
   </ItemGroup>
