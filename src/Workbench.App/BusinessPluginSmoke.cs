@@ -36,6 +36,7 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
     private readonly Dictionary<int, Process> _workers = [];
     private object? _ding;
     private Input[] _inputs = [];
+    private long? _processCreationFileTimeUtc;
 
     private sealed record Input(string PluginId, string Version, string SourceCommit, string SourceRepository,
         long WorkflowRunId, string Sha256, string Transport, string PackageFile, string ProvenanceFile);
@@ -71,6 +72,12 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
     private async Task RunAsync()
     {
         window.AssertUiThread();
+        using (var process = Process.GetCurrentProcess())
+        {
+            var creation = process.StartTime.ToUniversalTime().ToFileTimeUtc();
+            Require(creation > 0, "The native business process creation FILETIME was unavailable.");
+            _processCreationFileTimeUtc = creation;
+        }
         _inputs = ReadInputs(IsAcceptance);
         if (IsAcceptance) await RunAcceptanceAsync();
         else
@@ -160,6 +167,7 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
                 var retainedStateSha256 = PersistRetainedState();
                 _checks.Add("Actual WinUI Closed followed shipping host cleanup; real monitor/worker retirement and root/business leases released; runner must still validate actual OS PID/exitCode");
                 options.WriteReport(new { succeeded = true, probe = options.BusinessProbe, userRoot = options.UserRoot, processId = Environment.ProcessId,
+                    processCreationFileTimeUtc = _processCreationFileTimeUtc,
                     actualWindowClosed = true, provenance = _inputs, checks = _checks, observations = _observations, workers,
                     retainedStateSha256,
                     credentialCoverage = IsAcceptance ? AcceptanceCredentialCoverage : "DingTalk 0.3.2: actual native model-only synthetic host-DPAPI batch save/cancel, separate approval with host commit/revision read, revoke and delete; only key+commit configured. Model-key value read/provider dispatch unexecuted; no Webhook values or purpose. Ciphertext persists without restoring grants. Production UPCAM: no automatic authority or generated binding key; business credentials stay canonical worker DPAPI.",
@@ -721,6 +729,7 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
     {
         _checks.Add(check);
         options.WriteReport(new { succeeded = false, probe = options.BusinessProbe, processId = Environment.ProcessId, userRoot = options.UserRoot,
+            processCreationFileTimeUtc = _processCreationFileTimeUtc,
             provenance = _inputs, checks = _checks, observations = _observations, startupStages = options.StartupStages });
     }
 
@@ -730,6 +739,7 @@ internal sealed partial class BusinessPluginSmoke(MainWindow window, RunOptions 
         try
         {
             var evidence = new { succeeded = false, probe = options.BusinessProbe, processId = Environment.ProcessId, userRoot = options.UserRoot,
+                processCreationFileTimeUtc = _processCreationFileTimeUtc,
                 provenance = _inputs, checks = _checks, observations = _observations, observedWorkerProcessIds = _workers.Keys.ToArray(),
                 acceptance = IsAcceptance ? AcceptanceFailureObservation() : null,
                 errorType = error.GetType().Name, errorHResult = $"0x{unchecked((uint)error.HResult):X8}", startupStages = options.StartupStages };

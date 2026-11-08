@@ -23,6 +23,7 @@ $productionRoot = Join-Path (Join-Path ([IO.Path]::GetTempPath()) 'ProjectWorkbe
 $acceptanceRoot = Join-Path (Join-Path ([IO.Path]::GetTempPath()) 'ProjectWorkbench-business-probe') ([Guid]::NewGuid().ToString('N'))
 $phases = @('seed', 'restart', 'update', 'fault', 'rollback', 'remove',
     'acceptance-seed', 'acceptance-restore', 'acceptance-stopped', 'acceptance-config', 'acceptance-missing', 'acceptance-disabled')
+$expectedChecks = @(6, 5, 5, 3, 5, 3, 5, 5, 3, 4, 4, 3)
 $completed = @()
 $binarySha256 = (Get-FileHash -LiteralPath $app -Algorithm SHA256).Hash
 foreach ($phase in $phases) {
@@ -32,33 +33,67 @@ foreach ($phase in $phases) {
     $expected = if ($synthetic) { $acceptanceInputs } else { $inputs }
     $report = Join-Path $output "$phase.json"
     $process = $null
+    $processId = $null
+    $creationFileTimeUtc = $null
+    $exitFileTimeUtc = $null
+    $captureErrors = [Collections.Generic.List[string]]::new()
     $exited = $false
     $code = $null
     try {
         # The shipping app owns installation, UI, tasks and startup maintenance; never run a vendor/source-linked host.
         $arguments = @('--business-probe', $phase, '--probe-root', "`"$root`"", '--smoke-report', "`"$report`"")
         $process = Start-Process -FilePath $app -ArgumentList $arguments -PassThru -RedirectStandardOutput (Join-Path $output "$phase.stdout.log") -RedirectStandardError (Join-Path $output "$phase.stderr.log")
-        $exited = $process.WaitForExit($TimeoutSeconds * 1000)
-        if ($exited) { $code = $process.ExitCode }
-        Complete-BusinessPluginReport -ReportPath $report -ProcessId $process.Id -ExitCode $code -HasExited $exited -ExpectedPhase $phase -ExpectedRoot $root -ExpectedInputs $expected
+        $processId = $process.Id
+        # Opening Handle retains this exact process object through observation, validation and lease checks.
+        try {
+            if ($process.Handle -eq [IntPtr]::Zero) { throw 'The newly started process did not expose its actual handle.' }
+        }
+        catch { $captureErrors.Add("handle:$($_.Exception.GetType().Name)") }
+        try { $creationFileTimeUtc = $process.StartTime.ToUniversalTime().ToFileTimeUtc() }
+        catch { $captureErrors.Add("creation:$($_.Exception.GetType().Name)") }
+        # A failed identity query still waits for the owned process; it cannot authorize a successor.
+        try { $exited = $process.WaitForExit($TimeoutSeconds * 1000) }
+        catch { $captureErrors.Add("wait:$($_.Exception.GetType().Name)") }
+        if ($exited) {
+            try { $code = $process.ExitCode }
+            catch { $captureErrors.Add("exitCode:$($_.Exception.GetType().Name)") }
+            try { $exitFileTimeUtc = $process.ExitTime.ToUniversalTime().ToFileTimeUtc() }
+            catch { $captureErrors.Add("exit:$($_.Exception.GetType().Name)") }
+        }
+        Complete-BusinessPluginReport -ReportPath $report -ProcessId $processId -ProcessCreationFileTimeUtc $creationFileTimeUtc -ProcessExitFileTimeUtc $exitFileTimeUtc `
+            -ExitCode $code -HasExited $exited -ExpectedPhase $phase -ExpectedRoot $root -ExpectedInputs $expected
+        if ($captureErrors.Count -ne 0) { throw 'The launcher could not retain/query all actual process identity and exit evidence.' }
         $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
+        $checkCount = @($result.checks).Count
+        if ($checkCount -ne $expectedChecks[$completed.Count]) { throw 'The native business phase did not retain its frozen check count.' }
         # Launcher independently reacquires the production lease after actual OS exit, before any successor.
         $lease = [IO.File]::Open((Join-Path $root 'host.lock'), [IO.FileMode]::Open, [IO.FileAccess]::ReadWrite, [IO.FileShare]::None)
         $lease.Dispose()
         $result | Add-Member -NotePropertyName launcherReacquiredHostLease -NotePropertyValue $true
         $result | Add-Member -NotePropertyName shippingExecutableSha256 -NotePropertyValue $binarySha256
         $result | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $report -Encoding utf8
-        $completed += @{ phase = $phase; userRoot = $root; syntheticAcceptance = $synthetic; processId = $process.Id; exitCode = $code; hasExited = $exited; checks = @($result.checks).Count; report = $report }
-        Write-Host "Business plugin probe passed: $phase ($(@($result.checks).Count) checks; actual PID $($process.Id), exit $code)"
+        $row = @{ phase = $phase; succeeded = $true; userRoot = $root; syntheticAcceptance = $synthetic;
+            nativeProcessId = $result.nativeProcessId; nativeProcessCreationFileTimeUtc = $result.nativeProcessCreationFileTimeUtc;
+            processId = $processId; processCreationFileTimeUtc = $creationFileTimeUtc; processExitFileTimeUtc = $exitFileTimeUtc;
+            exitCode = $code; hasExited = $exited; checks = $checkCount; report = $report }
+        $candidate = @($completed) + @($row)
+        Assert-BusinessProcessInstances -Phases $candidate -ExpectedPhases @($phases[0..($completed.Count)])
+        $completed = $candidate
+        Write-Host "Business plugin probe passed: $phase ($checkCount checks; actual PID $processId, creation FILETIME $creationFileTimeUtc, exit FILETIME $exitFileTimeUtc, exit code $code)"
     }
     catch {
         if ($null -ne $process) {
-            # Preserve the real PID/exit even if lease verification fails after a valid native success report.
+            # Preserve separate native/runner observations even if capture, lease or tuple verification failed.
             $failure = @{}
             if (Test-Path -LiteralPath $report -PathType Leaf) {
                 try { $failure = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json -AsHashtable } catch { }
             }
-            $failure['succeeded'] = $false; $failure['processId'] = $process.Id; $failure['exitCode'] = $code; $failure['hasExited'] = $exited
+            if ($failure -isnot [System.Collections.IDictionary]) { $failure = @{} }
+            if (-not $failure.Contains('nativeProcessId')) { $failure['nativeProcessId'] = $failure['processId'] }
+            if (-not $failure.Contains('nativeProcessCreationFileTimeUtc')) { $failure['nativeProcessCreationFileTimeUtc'] = $failure['processCreationFileTimeUtc'] }
+            $failure['succeeded'] = $false; $failure['processId'] = $processId; $failure['exitCode'] = $code; $failure['hasExited'] = $exited
+            $failure['processCreationFileTimeUtc'] = $creationFileTimeUtc; $failure['processExitFileTimeUtc'] = $exitFileTimeUtc
+            $failure['processIdentityCaptureErrors'] = @($captureErrors)
             $failure['runnerError'] = $_.Exception.Message; $failure['shippingExecutableSha256'] = $binarySha256
             $failure | ConvertTo-Json -Depth 40 | Set-Content -LiteralPath $report -Encoding utf8
         }
@@ -68,8 +103,9 @@ foreach ($phase in $phases) {
     }
     finally { if ($null -ne $process) { $process.Dispose() } }
 }
+Assert-BusinessProcessInstances -Phases $completed -ExpectedPhases $phases
 @{ succeeded = $true; userRoot = $productionRoot; productionRoot = $productionRoot; acceptanceRoot = $acceptanceRoot; phases = $completed; productionProvenance = $inputs; acceptanceProvenance = $acceptanceInputs; shippingExecutableSha256 = $binarySha256;
     platformCommit = (& git -C $repo rev-parse HEAD); coverage = 'Actual shipping host: six production package phases, followed by six separate genuine UPCAM acceptance-ID phases with actual automatic Core and upstream local fake providers. Synthetic sent is not real delivery. No actual HTTP/Webhook/provider calls, business messages or real credentials.';
     limitations = @('Production UPCAM provider delivery remains unexecuted; positive automatic work uses a separate compiled synthetic acceptance ID/root.', 'DingTalk host value coverage is synthetic model-only native save/approval with commit-revision read/revoke/delete; model-key value read/provider dispatch unexecuted, no Webhook values/purpose. UPCAM host secret is generated binding key only.', 'Manifest/version/fault variants are synthetic integration inputs; external canonical data and schema rollback are not covered.', 'Windows11 manual acceptance is unexecuted.') } |
     ConvertTo-Json -Depth 12 | Set-Content -LiteralPath (Join-Path $output 'summary.json') -Encoding utf8
-Write-Host "Business plugin actual process sequence completed: $output"
+Write-Host "Business plugin actual process sequence completed: $($completed.Count) unique PID/creation FILETIME instances; 27 production + 24 acceptance checks; all actual exits 0; $output"
