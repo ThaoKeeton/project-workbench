@@ -147,28 +147,57 @@ internal sealed class NativeChecks(string output, string zipSha)
         var controller = new OwnedPilotController(scope, factory, TimeProvider.System);
         using var cancellation = new CancellationTokenSource();
         using var callback = throwingCallback ? cancellation.Token.Register(() => throw new InvalidOperationException("Synthetic callback")) : default;
-        await controller.InitializeAsync();
-        var work = controller.RunAsync(OwnedScenario.Positive, cancellation.Token);
-        if (cancel)
+        OwnedRunSnapshot? run = null;
+        var phase = NativeFailurePhase.RunAndStop;
+        bool? leaseAvailable = null, helperLeaseAvailable = null;
+        void PreserveFailure()
         {
-            await factory.BrokerCreated;
-            try { cancellation.Cancel(); } catch (AggregateException) { }
+            // Even collecting the actual factory snapshot may fail; keep the primary failure.
+            try { NativeFailureDiagnostic.TryWrite(output, fixture, cancel, throwingCallback, phase, run, factory.Retirements, Results.Count, leaseAvailable, helperLeaseAvailable); }
+            catch (Exception) { }
         }
-        OwnedRunSnapshot run;
-        try { run = await work; }
-        finally { await controller.StopAsync(); }
-        Require(run.State is OwnedRunState.Failed or OwnedRunState.Cancelled, "NativeFailureMatrix must fail closed with actual retirement");
-        Require(run.Events[^1].Retirement is { ActiveProcesses: 0 }, "NativeFailureMatrix terminal receipt");
-        var fixtureReceipt = factory.Retirements.Single();
-        var receipt = new OwnedNativeReceipt(fixtureReceipt.BrokerPid, fixtureReceipt.BrokerCreationFileTime, fixtureReceipt.TargetPid, fixtureReceipt.TargetCreationFileTime,
-            fixtureReceipt.BrokerExitCode, fixtureReceipt.TargetExitCode, fixtureReceipt.BrokerExited, fixtureReceipt.TargetExited, fixtureReceipt.ActiveProcesses, fixtureReceipt.AllIoJoined, fixtureReceipt.CallbacksJoined, fixtureReceipt.WasResumed);
-        CheckReceipt(receipt, receipt.TargetPid is > 0);
-        using (File.Open(Path.Combine(scope.DataDirectory, "owned-lab-v1", "owner.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
-        using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
-        var badWire = fixture is NativeFixture.BadFrame or NativeFixture.PartialHeader or NativeFixture.TruncatedInit or NativeFixture.ExtraInit or NativeFixture.OversizeInit or NativeFixture.CrossSessionAction or NativeFixture.OutOfOrderAction;
-        if (badWire) Require(run.Events.All(e => e.Kind != OwnedEventKind.StepResult), "Malformed wire must reject before accepting any action result.");
-        if (fixture == NativeFixture.StaleReady) Require(receipt.TargetPid is null && run.Events.All(e => e.Kind != OwnedEventKind.Started), "Stale birth must never publish/join an unverified target handle.");
-        Record(new { check = badWire ? "NativeBadFrame" : fixture is NativeFixture.ChangedIdentity or NativeFixture.StaleReady ? "ChangedIdentity" : "NativeFailureMatrix", fixture = fixture.ToString(), cancel, throwingCallback, succeeded = true, run.Execution.RunId, run.Execution.SessionId, run.Execution.InputSha, run.ExecutionSha, run.Execution.Helper, run.State, run.ErrorCode, receipt, leaseAvailable = true, zipSha });
+        try
+        {
+            await controller.InitializeAsync();
+            var work = controller.RunAsync(OwnedScenario.Positive, cancellation.Token);
+            if (cancel)
+            {
+                await factory.BrokerCreated;
+                try { cancellation.Cancel(); } catch (AggregateException) { }
+            }
+            try { run = await work; }
+            finally { await controller.StopAsync(); }
+            phase = NativeFailurePhase.ExpectedState;
+            if (run.State is not (OwnedRunState.Failed or OwnedRunState.Cancelled)) PreserveFailure();
+            Require(run.State is OwnedRunState.Failed or OwnedRunState.Cancelled, "NativeFailureMatrix must fail closed with actual retirement");
+            phase = NativeFailurePhase.TerminalReceipt;
+            Require(run.Events[^1].Retirement is { ActiveProcesses: 0 }, "NativeFailureMatrix terminal receipt");
+            phase = NativeFailurePhase.NativeReceipt;
+            var fixtureReceipt = factory.Retirements.Single();
+            var receipt = new OwnedNativeReceipt(fixtureReceipt.BrokerPid, fixtureReceipt.BrokerCreationFileTime, fixtureReceipt.TargetPid, fixtureReceipt.TargetCreationFileTime,
+                fixtureReceipt.BrokerExitCode, fixtureReceipt.TargetExitCode, fixtureReceipt.BrokerExited, fixtureReceipt.TargetExited, fixtureReceipt.ActiveProcesses, fixtureReceipt.AllIoJoined, fixtureReceipt.CallbacksJoined, fixtureReceipt.WasResumed);
+            CheckReceipt(receipt, receipt.TargetPid is > 0);
+            phase = NativeFailurePhase.OwnerLease; leaseAvailable = false;
+            using (File.Open(Path.Combine(scope.DataDirectory, "owned-lab-v1", "owner.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+            leaseAvailable = true;
+            phase = NativeFailurePhase.HelperLease; helperLeaseAvailable = false;
+            using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+            helperLeaseAvailable = true;
+            phase = NativeFailurePhase.FixturePolicy;
+            var badWire = fixture is NativeFixture.BadFrame or NativeFixture.PartialHeader or NativeFixture.TruncatedInit or NativeFixture.ExtraInit or NativeFixture.OversizeInit or NativeFixture.CrossSessionAction or NativeFixture.OutOfOrderAction;
+            if (badWire) Require(run.Events.All(e => e.Kind != OwnedEventKind.StepResult), "Malformed wire must reject before accepting any action result.");
+            if (fixture == NativeFixture.StaleReady) Require(receipt.TargetPid is null && run.Events.All(e => e.Kind != OwnedEventKind.Started), "Stale birth must never publish/join an unverified target handle.");
+            if (fixture == NativeFixture.GdiBlock) Require(receipt.TargetPid is > 0 && run.Events.Any(e => e.Kind == OwnedEventKind.Started)
+                && run.Events.Any(e => e.Kind == OwnedEventKind.StepStarted && e.StepIndex == 0) && run.Events.All(e => e.Kind != OwnedEventKind.StepResult),
+                "Synthetic capture-stage hang must retire a verified target during the first step without an accepted result.");
+            phase = NativeFailurePhase.Record;
+            Record(new { check = badWire ? "NativeBadFrame" : fixture is NativeFixture.ChangedIdentity or NativeFixture.StaleReady ? "ChangedIdentity" : "NativeFailureMatrix", fixture = fixture.ToString(), cancel, throwingCallback, succeeded = true, run.Execution.RunId, run.Execution.SessionId, run.Execution.InputSha, run.ExecutionSha, run.Execution.Helper, run.State, run.ErrorCode, receipt, leaseAvailable = true, zipSha });
+        }
+        catch
+        {
+            PreserveFailure();
+            throw;
+        }
     }
 
     private async Task NestedJobAsync()

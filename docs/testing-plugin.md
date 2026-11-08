@@ -59,6 +59,8 @@ pwsh ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240
 
 独立 owned-lab 检查使用真实自带合成窗口，要求全部 27 项；它不证明插件内受控执行页面或通用电脑控制。现有虚拟执行探针只打开 `%TEMP%/ProjectWorkbench-testing-probe/<GUID>` 的专用合成根。真实 shipping EXE 两进程 seed/verify 使用实际安装 ZIP、注册页面/命令和公开 Core 存储，不静态引用测试 entry/domain。
 
+其中 `GdiBlock` 是 AcceptanceFixture 专用的 **synthetic capture-stage hang**：在原生 broker 的 Capture 完成真实目标身份核验后阻塞，用于验证父进程实际加入进程、job0、IO、回调并释放租约。它不是已复现的 Win32 `PrintWindow` 死锁；Production 编译不带该宏，仍使用真实 `PrintWindow` 与像素校准。矩阵失败时，observations 根中的 `native-failure.json` 以 schema1、CreateNew 和最多 64 KiB 保留首个失败的安全枚举、状态、计数及实际退休观察；未知观察保持 null，不写异常文本、路径或 UI 内容，也不增加 27 项成功记录或替换原始失败。当前修改仍需对应源码的实际 Windows 全矩阵验收。
+
 Seed 验证打包 JSON/CSV 实际 IO、最后原生输入、映射失效、真实文件共享阻塞导致保存/普通 Close 失败且同一控件可修正、冲突副本与原字节、虚拟 pass/negative/labeled failure、真实 BMP Image 解码、实际 store IO 等待中的取消和原生项目隔离。取消探针明确是在第一步前等待真实存储锁，并非中断真实桌面动作。Seed 在最后一次 context 切换后用公开存储生成 **synthetic inflight journal seed**：只有 RunStarted/StepStarted，没有设备动作或结果。它不是 OS 崩溃。另一个实际 EXE 的新 context 初始化将其 Interrupted；正常 Retry 用冻结用例从第一步完成新 session。Verify 还重开实际 journal/receipt/BMP，比较精确观察文本和字节。最终输入在真实 TextBox 接受后立即进入普通离开/Close，不等自动保存。
 
 每阶段必须满足实际 WinUI Closed、宿主 OS exit 0 和目录锁重新取得，PID 独立于检查数量。报告记录 Server OS/架构、ZIP 哈希、实际 PID、合成 seed 标志和原始 event/receipt/CSV/BMP 文件哈希。原生报告和一次性 runner sidecar 分开保留；失败停止后续阶段且不会覆盖已有证据。输出为 `artifacts/native/testing-probes/<UTC-GUID>`，当前 CI 收进 `native-verification-evidence`；经独立进程出生/EXE/安装文件与 PNG 校验的窗口内容图像另在 `workbench-ui-gallery`。图中的 SIMULATED 虚拟 BMP 仍是模拟层，宿主 PNG 才是 WinUI 内容渲染；owned 面板空闲画面不证明实际受控执行。Seed 的文件副本在最后立即离开输入之前采集；最终保存由 verify 重开的实际记录证明。

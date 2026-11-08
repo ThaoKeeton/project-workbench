@@ -20,9 +20,6 @@ static LRESULT CALLBACK WindowProc(HWND window, UINT message, WPARAM wp, LPARAM 
             catch (...) { DestroyWindow(window); }
         } return 0;
     case WM_PRINTCLIENT:
-#ifdef OWNED_FIXTURE_GDI_BLOCK
-        Sleep(INFINITE); return 0;
-#endif
         [[fallthrough]];
     case WM_PAINT: {
         PAINTSTRUCT paint{}; HDC dc = message == WM_PAINT ? BeginPaint(window,&paint) : reinterpret_cast<HDC>(wp);

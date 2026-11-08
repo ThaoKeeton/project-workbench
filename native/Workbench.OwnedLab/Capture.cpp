@@ -3,6 +3,11 @@
 namespace owned {
 std::vector<std::uint8_t> Capture(const TargetProcess& target) {
     target.Verify();
+#ifdef OWNED_FIXTURE_GDI_BLOCK
+    // AcceptanceFixture-only synthetic capture-stage hang, after real target verification.
+    // This exercises disposable-broker retirement; it does not simulate a PrintWindow API deadlock.
+    Sleep(INFINITE);
+#endif
     HDC dc=CreateCompatibleDC(nullptr); if (!dc) Fail(6);
     BITMAPINFO info{}; info.bmiHeader.biSize=40; info.bmiHeader.biWidth=320; info.bmiHeader.biHeight=180; info.bmiHeader.biPlanes=1; info.bmiHeader.biBitCount=24; info.bmiHeader.biCompression=BI_RGB; info.bmiHeader.biSizeImage=172800;
     void* pixels=nullptr; HBITMAP bitmap=CreateDIBSection(dc,&info,DIB_RGB_COLORS,&pixels,nullptr,0);
