@@ -1,0 +1,88 @@
+# Owned Windows task-form Pilot A specification
+
+Implementation contract, 2026-11-08. Root reviewed the frozen design before execution. Design does not itself establish native proof. Pilot A proves a fixed owned target first; Pilot B later adds a private source-revision mapping overlay without changing Core manual actions.
+
+## Intent and scope
+
+Deliver real UIA actions, target-only GDI capture, process retirement and private history for fixed synthetic scenarios. Use a portable private runner/store, managed Win32 launcher, and C++ broker/AUT in one helper. Managed WindowsDesktop UIA and arbitrary desktop agents are excluded. Pilot B later adds private source-revision mapping overlays; no source-case IDs, mapping controls, AI execution or migration are fabricated for A. Initialization/history/restoration never execute computer actions.
+
+## Global constraints
+
+- Host minimum 0.4.0; SDK/API 1; Core case/update/virtual-evidence contracts unchanged.
+- Testing production package 0.2.0, x64 only; no same-version replacement.
+- Only repository-owned synthetic target `owned.win32.task-form.v1`, protocol 1.
+- No AI/source-case execution, mapping overlay, generic device API, real service credentials/messages, or user-PC operation in Pilot A.
+- Native plugin UI stays in the host WinUI window; AUT is a separate owned Win32 process.
+- Production helper requires Windows MSVC x64, Windows SDK and static CRT; missing/unverified helper fails packaging.
+- No SDK/Core/WinUI/.NET copies in plugin payload; no Core real-frame evidence writes.
+- No remote deletion, 403 bypass, PR retry, merge, release, deploy, or binary-carrier workaround.
+- Busy and root/project ownership remain held until actual preparation, callbacks, processes, job and IO retire.
+
+## Fixed plans and grants
+
+`OwnedScenario : ushort { Positive=1, EmptyTitle=2, AssertionFailure=3 }`; public start accepts only this enum. Plans have four steps, IDs `step-1`..`step-4`, plain SDK TestAction data:
+
+| Scenario | SetText task.title | Click task.save | AssertText | AssertText task.createdCount |
+|---|---|---|---|---|
+| Positive | `Owned pilot task` | null | task.toast=`Saved` | `1` |
+| EmptyTitle | empty string | null | task.validation=`Title required` | `0` |
+| AssertionFailure | `Owned pilot task` | null | task.toast=`DELIBERATELY WRONG TOAST` | `1` |
+
+Stop on first failed assertion: deliberate failure executes three steps. Each new AUT starts empty/count0. SetTitle clears toast/validation. Save blank => validation Title required/toast empty; otherwise toast Saved/validation empty/count++. Blank is empty or entirely U+0020/00A0/1680/2000..200A/202F/205F/3000. Title: 0..256 UTF-16 units, valid Unicode, no U+0000..001F/007F..009F/2028/2029; no trim, normalization or truncation. Count is canonical invariant decimal 0..20. Reject other actions/IDs/values before launch. Managed assertions compare ordinally; expected text never crosses IPC.
+
+Ordered `input.json`: `{schema:1,targetId,protocol:1,scenario,steps:[{id,kind,elementId,value}]}`, kind=0 SetText/1 Click/2 AssertText. InputSHA hashes exact bytes. Retry copies original input bytes, validates the fixed catalog, creates fresh IDs and records ParentRunId/ParentInputSHA. CURRENT installed helper must match exact target/protocol and accept inputs; no historical EXE or identical-runtime claim.
+
+Retain actual PrepareAsync/file IO before its prefix. Before Queued commit, lease fixed `Workbench.OwnedLab.exe` beside the installed private Windows assembly for read with no write/delete sharing; reject reparse ancestors/nonregular/non-x64 PE. Hash leased bytes and compare generated descriptor (image SHA, native source SHA, full source commit, actual MSVC/SDK, Production profile). Keep lease through retirement; queued failure never launches. No configurable path/args.
+
+Ordered execution record: `{schema:1,runId,sessionId,projectId,pluginId,parentRunId,parentInputSha,inputSha,targetId,protocol,helper:{imageSha,nativeSourceSha,sourceCommit,msvc,sdk,profile},issuedUtc,expiresUtc}`. ExecutionSHA hashes exact bytes, not self-embedded. IDs: independently random 16 bytes -> lowercase hex32. Capture project/plugin/DataDirectory once. Grant binds the execution record and SHA; issue after preparation, before Queued, maximum60s monotonic lifetime. Queued IO consumes lifetime; each command max10s within remaining lifetime. Revocation/expiry forbids launch/next action; no action retry.
+
+## Process and capture ownership
+
+Host creates unnamed non-breakaway KILL_ON_JOB_CLOSE job/completion port BEFORE CreateProcessW. Broker is attached at creation with STARTUPINFOEX JOB_LIST/HANDLE_LIST, EXTENDED_STARTUPINFO_PRESENT, CREATE_SUSPENDED, CREATE_UNICODE_ENVIRONMENT. Publish retained handles before ResumeThread; no later AssignProcessToJobObject. Broker inherits only RX-read/TX-write/fixed NUL-write: stdin/stdout/stderr respectively; never job/file/root leases. Environment only SystemRoot/WINDIR from GetWindowsDirectoryW. Args `--broker`; broker starts only its same image as `--target <session>`; child inherits job. No shell/elevation.
+
+Two byte pipes: overlapped host ends, random local names, current-user/System ACL, PIPE_REJECT_REMOTE_CLIENTS, parent-preopened inherited child ends through standard handles. No arbitrary endpoint. Target stdout is its private inherited Ready writer; stdin=NUL-read, stderr=NUL-write, exactly these handles and no handle/path arguments. It emits TargetReady then closes the writer. Broker uses actual CreateProcess handles; host verifies target IsProcessInJob. Broker COM MTA has no windows; separate GUI target class `PWB.OwnedLab.TaskForm.v1`, client320x180 physical pixels, standard control IDs title1001/save1002/toast1003/validation1004/count1005. Recheck process handle/creation FILETIME/image/path/hash and exact HWND/control PID before EVERY action and capture; replacement refuses.
+
+UIA only ElementFromHandle(exact window/GetDlgItem), ValuePattern.SetValue, InvokePattern.Invoke, actual UIA reads of all state. Bounded Ready polling requires empty/count0. No global input, focus/desktop fallback, selector interpreter, clipboard, chooser or browser. PrintWindow(PW_CLIENTONLY) only that AUT: BMP54-byte header, 320x180, bottom-up24bpp BI_RGB, stride960, exact172854B. All child controls remain at y<144. Two unobstructed painted calibration rectangles [280,152,292,164) RGB(17,57,113), [296,152,308,164) RGB(149,73,31); validate centers/header/length, reject failed/empty render. Raw UIA Unicode stays separate from glyphs. Private kind OwnedWindowPrintWindow, SyntheticTarget=true; never Core AddRunEvidence/IsSimulated=false.
+
+Failure/cancel/expiry: revoke, TerminateJobObject, CancelIoEx, join actual IO/callback/preparation/process handles (target if reported), observe ActiveProcesses=0 including unreported children. Healthy completion sends Close; wait target exit, Closed reply, broker exit, zero job and all IO before success. No abandoned task/rollback/exactly-once/resume. 10/60s limits revoke authority; OS retirement can take longer and continues to hold busy/leases.
+
+## Wire 1
+
+Header52B: ASCII PWB-LAB1[8], u16LE version1, u16LE kind, u32LE sequence, u32LE bodyLength, lowercase-hex ASCII session[32]. Body<=262144B. One outstanding request, sequences1.. without wrap, exact response correlation; internal TargetReady sequence0. Read header/cap before allocation. Reject unknown/extra fields, trailing/truncated bytes, bad Unicode/session/order/identity and retire. S=u32LE UTF-8 byte length + strict UTF-8 without BOM/NUL; H=raw32-byte SHA256.
+
+| Kind/value | Exact body order |
+|---|---|
+| Init/1 | runASCII32, S(projectId<=32B), S(pluginId<=128B), S(targetId<=64B), H(Input), H(Execution), H(image), i64 expiryUnixMs, u32 remainingMs(1..60000) |
+| SetTitle/2 | S(title<=1024B plus title rules) |
+| ClickSave/3, Observe/4, Close/5 | empty |
+| TargetReady/32768 (internal only) | u32 targetPID, u64 targetCreationFILETIME, u64 HWND |
+| Ready/32769 | Identity, State |
+| Result/32770 | u16 requestKind(2/3/4), Identity, State, u32 bmpLength=172854, BMP |
+| Closed/32773 | i32 targetExitCode=0 |
+| Error/65535 | u16 requestKind, u16 error(3 ProtocolViolation/4 TargetUnavailable/5 DriverFailure/6 CaptureFailure) |
+
+Identity=u32 brokerPID,u64 brokerCreationFILETIME,u32 targetPID,u64 targetCreationFILETIME,u64 HWND,H(image). State=S(Title<=1024B),S(Toast<=64B),S(Validation<=128B),S(CreatedCount<=2B), with rules above. Init validates target/grant/image before child creation. Broker validates TargetReady against its child handle, then UIA state before Ready. TargetReady is forbidden on host pipe. Result accompanies EVERY action/Observe; assertions send Observe. Close has no input effect; Closed alone never establishes retirement. No JSON/eval in C++.
+
+## Private schema1 and recovery
+
+Root `<captured DataDirectory>/owned-lab-v1/`, exclusive `owner.lock`; `attempts/<runId>/input.json`, `execution.json`, `events/<sequence:D8>.json`, `commits/<sequence:D8>.json`, `frames/<StepResultSequence:D8>.bmp`. Limits:32 attempt directories INCLUDING corrupt/incomplete; input+execution<=4MiB/attempt; events+commits<=1MiB/attempt; <=20 frames, each172854B; event<=16384B. No deletion/eviction/cap increase. Strict UTF-8/no BOM JSON, valid Unicode, exact ordered fields/types, duplicate/unknown rejection, depth<=16. Utf8JsonWriter default encoder/no indentation; validate hashes of original bytes, not reserialization.
+
+Event fields `{schema,sequence,priorHash,executionSha,utc,kind,stepIndex,outcome,errorCode,identity,state,frameSha,captureKind,syntheticTarget,retirement,uncertainStep}`; unused=null. UTC round-trip ISO8601; hash hex64. StepResult sets captureKind=OwnedWindowPrintWindow and syntheticTarget=true; other kinds set both null. Kinds Queued0/Started1/StepStarted2/StepResult3/Terminal4. Queued seq0/priorHash64 zeros; subsequent priorHash=SHA256(previous exact event). outcome=null/Passed/Failed/Cancelled per kind; state={title,toast,validation,createdCount}; retirement={wasLaunched,brokerExitCode:int?,targetExitCode:int?,activeProcesses:0}. ErrorCode=null or InvalidPlan/UnavailableHelper/ProtocolViolation/TargetUnavailable/DriverFailure/CaptureFailure/AssertionFailed/Cancelled/Expired/StoreIoFailure/RecoveryNeeded/AdmissionClosed/StoreLimitExceeded. Commit `{schema:1,sequence,eventSha,priorHash,executionSha}`. Head=highest contiguous VERIFIED commit prefix; no mutable head file/scan past gaps. Verify plans and referenced BMP first.
+
+Immutable writes: same-directory CreateNew `.pending-<hex32>`, write-through/Flush(true), close, atomic no-overwrite rename, verify final bytes. Frame BEFORE result event BEFORE commit. Successful marker publication/readback acknowledges storage; cancellation cannot undo it. Queued before launch, Started after Ready, StepStarted before command. Retain valid received/committed result when cancellation races; issue no next action. Passed terminal requires4 passing results + retirement. Failed assertion keeps result/frame. Terminal failure/cancel carries retirement and uncertainStep=true if a started command lacks committed result.
+
+Uncertain write freezes writer, retires job, exposes RecoveryNeeded/last confirmed prefix; no inferred caller acknowledgment/retry/delete/continuation. Fresh session verifies markers from0: a complete valid terminal may be recovered as stored data, never proof of former caller acknowledgment. Orphan/pending files, gaps/missing referenced bytes/corruption => read-only root; preserve ALL bytes, no A repair/retry command. Clean unfinished prefix => projected Interrupted without rewriting/executing; explicit retry is a new attempt from step1. Retry accepts verified Passed/Failed/Cancelled or clean Interrupted only; live Queued/Running and any RecoveryNeeded/read-only root refuse. Test process-crash recovery; no power-loss guarantee beyond OS flush. Exact API/file contracts are in `docs/superpowers/plans/2026-11-08-owned-native-pilot.md`, not SDK extensions.
+
+## WinUI, package, proof
+
+TestingOwnedPilotPanel inside SAME production TestingPage: scenario/Run/Cancel/Retry/history/events/raw-state/BMP, Automation IDs `owned-pilot-{scenario,run,cancel,retry,history,events,state,frame,status}`. Copy “Owned Windows pilot · synthetic task form · actual UIA / target-window capture”; retry “From step 1 with current installed driver”. Separate SIMULATED virtual history/status. Fixed inputs need no source draft flush. Disable source/virtual/owned starts while owned busy; allow cancellation/history. Retain callbacks/UI continuations. Synchronous SealAdmission():IDisposable revokes the launch generation; plugin holds this pilot seal alongside NativeActionOwner.Seal through cancel/drain AND UI tails, so delayed owner-admitted prefixes cannot launch after controller preparation returns. Leave seal temporary; Stop permanent. Same-project page unload detaches UI only. No startup/resume background registration.
+
+Production ZIP exact8 files: Fixtures/{figma,requirements}.synthetic.json, Workbench.Testing.dll, Workbench.Testing.Domain.dll, Workbench.Testing.deps.json, plugin.json, Workbench.Testing.Windows.dll, Workbench.OwnedLab.exe. Helper FIRST via actual cl/rc/link /MT; generate expected-image descriptor into Windows DLL after hashing. Bind source/toolchain/PE/helper/exact ZIP provenance; update all0.2 version/path/guard checks. Explicit compile-time OwnedLabReferenceOnly=true generates an unavailable ReferenceOnly descriptor (hash/toolchain fields null); Prepare refuses before queue/launch. Linux reference compile produces NO production ZIP/fake EXE.
+
+Proof layers: scripted transport tests prove portable policy/store; Windows standalone runs SAME production launcher/helper and audits actual UIA/BMP/job/exit; installed exact production ZIP is exercised through host controls/history, real two-host-process interruption/retry, isolation, upgrade0.1->0.2/rollback. Separately compiled forced hang/crash helper + descriptor/launcher fixtures only; no production flags/ambient test setting. Cancel/hang must join IO/job before lease availability. Existing virtual probes and frozen DingTalk/UPCAM51 checks/12 distinct host PIDs remain mandatory.
+
+Separate compiled entry/ID `com.projectworkbench.testing.source-acceptance` delegates to SAME production TestingPlugin/page/controller through internal friend constructor composition; production default real readers, fixture injects FigmaFileReader/AiTestCaseGenerator in-memory handlers. Synthetic actual DPAPI values through host secret services. Host probes real controls, no static private Domain dependency. Zero requests at init/edit/navigation; explicit Figma/AI only, exact selected-source traces, Action=null, no service traffic. Fixture identity never equals production ZIP proof.
+
+Task2 owns every existing0.1->0.2 version/ZIP/probe/workflow guard update and adds standalone native proof before upload; existing virtual/native/business gates must still pass before Task3. Current-source Windows CI runs all gates BEFORE upload despite quota. Genuine old0.1 rebuild from exact recorded8e source may be HistoricalRebuild, never original artifact/current DLL relabeled; no Core/mapping migration claim. Windows Server automation is not Windows11 human acceptance. Actual download/eleven logical byte/PE/journal/frame audits stay blocked without capacity or authorized supported carrier. No external action or gate closure follows from these documents.
+
+These process, identity and protocol checks constrain this cooperative owned-target driver. Trusted in-process plugins retain host-user authority; this is not a security sandbox or isolation from malicious plugins.
