@@ -1,5 +1,6 @@
 #pragma once
 #include "TargetProcess.h"
+#include <ole2.h> // Explicit COM prerequisites: Protocol.h uses lean Windows headers.
 #include <UIAutomation.h>
 namespace owned {
 template<class T> struct Com {

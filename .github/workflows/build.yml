@@ -76,11 +76,11 @@ jobs:
       - name: Debug launch privacy and argument regressions
         shell: pwsh
         run: ./tests/scripts/NativeDebugSupport.Tests.ps1
-      - name: Core runtime and Windows filesystem tests
-        run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-windows.trx" --results-directory artifacts/tests
       - name: Publish native host and independent plugins
         shell: pwsh
         run: ./scripts/build.ps1
+      - name: Core runtime and Windows filesystem tests
+        run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-windows.trx" --results-directory artifacts/tests
       - name: Audited production delivery packaging regressions
         shell: pwsh
         run: |
