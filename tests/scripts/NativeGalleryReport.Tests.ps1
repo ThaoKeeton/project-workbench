@@ -54,7 +54,10 @@ function New-GalleryVersionPe([string]$Path, [string]$Commit, [string]$Case, [st
     $work = Join-Path $WorkRoot "version-pe-$Case"
     $obj = [IO.Path]::GetFullPath((Join-Path $work 'obj')).Replace('\', '/') + '/'
     $out = [IO.Path]::GetFullPath((Join-Path $work 'out')).Replace('\', '/') + '/'
-    $dotnet = (Get-Command dotnet -CommandType Application).Source
+    $dotnet = (Get-Command dotnet -CommandType Application | Select-Object -First 1).Source
+    if ($dotnet -isnot [string] -or [string]::IsNullOrWhiteSpace($dotnet)) {
+        throw 'Test-only PE SDK command must have a nonempty scalar source path.'
+    }
     $buildArguments = @('build', $project, '-c', 'Release', '--nologo',
         "-p:GalleryFixtureCommit=$Commit", "-p:BaseIntermediateOutputPath=$obj",
         "-p:OutputPath=$out", '-p:AppendTargetFrameworkToOutputPath=false')
