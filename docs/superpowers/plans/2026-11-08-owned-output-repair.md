@@ -9,7 +9,7 @@
 
 ## Global Constraints
 
-- Local only: no GitHub writes, Actions, uploads, billing changes/purchases, real providers/credentials/Webhook/DingTalk/user-PC.
+- Task implementer stays local: no GitHub writes/Actions/uploads. Parent user renewed public standard-runner Actions authorization; controller alone will coordinate reviewed-source CI after cost-conscious retention changes. No billing changes/purchases, real providers/credentials/Webhook/DingTalk/user-PC.
 - Preserve existing data, source/evidence/failed reports, business repositories and old artifacts; no deletions/403 bypass/PR retries.
 - This is a new script-regression task, not a sixth speculative native CLR fix. The older native27/9of27 CLR failure/five-round cap, shipping Windows/business/DPAPI/human gates stay open.
 - Do not normalize or weaken the production reporter just to pass a host-newline assertion. Exact stdout preservation, original failure, PID+birth+exit, finite stdout/stderr bounds, JSON control-character safety and actual child completion must still be asserted.
