@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Time.Testing;
 using Workbench.Core.Projects;
 using Workbench.Sdk;
 using Xunit;
@@ -194,7 +195,8 @@ public sealed class PluginProjectTests(ITestOutputHelper output)
     public async Task Caller_cancellation_does_not_release_preparation_that_ignores_it()
     {
         var disk = Package();
-        var manager = Manager(disk);
+        var observationTime = new FakeTimeProvider();
+        var manager = Manager(disk, observationTime);
         using var cancel = new CancellationTokenSource();
         var data = Path.Combine(disk.User, "data", Id);
         await RuntimeTest.WithCleanupAsync([manager], async () =>
@@ -204,19 +206,86 @@ public sealed class PluginProjectTests(ITestOutputHelper output)
             Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
             var request = manager.PrepareProjectLeaveAsync(Id, cancel.Token);
             await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(data, "prepare-started"))));
+            Assert.False(request.IsCompleted);
+            // Catches dropping the observer token or classifying its cancellation as Pending.
             cancel.Cancel();
-            var pending = await request;
+            var pending = await request.WaitAsync(TimeSpan.FromSeconds(5));
             Assert.False(pending.Succeeded);
             Assert.True(pending.HasPendingWork);
             Assert.Equal("ProjectPreparationCanceled", pending.ErrorCode);
             Assert.True(manager.HasPendingProjectWork);
-            Assert.True((await manager.PrepareProjectLeaveAsync(Id)).HasPendingWork);
-            Assert.Equal(1, await manager.GetSettings(Id).GetAsync("prepareCalls", 0));
+            observationTime.Advance(TimeSpan.FromMilliseconds(100));
+            Assert.Same(pending, await request);
+            await AssertPreparationRetainedThroughTerminalStopAsync(manager, data, observationTime);
         }, disk, beforeCleanup: async () =>
         {
             Directory.CreateDirectory(data);
             await File.WriteAllTextAsync(Path.Combine(data, "release-prepare"), "cleanup");
         });
+    }
+
+    [Fact]
+    public async Task Observation_timeout_before_caller_cancellation_remains_pending_and_retains_preparation()
+    {
+        var disk = Package();
+        var observationTime = new FakeTimeProvider();
+        var manager = Manager(disk, observationTime);
+        using var cancel = new CancellationTokenSource();
+        var data = Path.Combine(disk.User, "data", Id);
+        await RuntimeTest.WithCleanupAsync([manager], async () =>
+        {
+            await manager.DiscoverAsync();
+            await manager.GetSettings(Id).SetAsync("projectMode", "async-held");
+            Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            var request = manager.PrepareProjectLeaveAsync(Id, cancel.Token);
+            await RuntimeTest.WaitAsync(() => Task.FromResult(File.Exists(Path.Combine(data, "prepare-started"))));
+            Assert.False(request.IsCompleted);
+            // Catches classifying the timeout as Canceled or clearing ownership on timeout.
+            observationTime.Advance(TimeSpan.FromMilliseconds(100));
+            var pending = await request.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(pending.Succeeded);
+            Assert.True(pending.HasPendingWork);
+            Assert.Equal("ProjectPreparationPending", pending.ErrorCode);
+            Assert.True(manager.HasPendingProjectWork);
+            cancel.Cancel();
+            Assert.Same(pending, await request);
+            Assert.Equal("ProjectPreparationPending", (await request).ErrorCode);
+            await AssertPreparationRetainedThroughTerminalStopAsync(manager, data, observationTime);
+        }, disk, beforeCleanup: async () =>
+        {
+            Directory.CreateDirectory(data);
+            await File.WriteAllTextAsync(Path.Combine(data, "release-prepare"), "cleanup");
+        });
+    }
+
+    private static async Task AssertPreparationRetainedThroughTerminalStopAsync(PluginManager manager, string data,
+        FakeTimeProvider observationTime)
+    {
+        var settings = manager.GetSettings(Id);
+        // Each observer gets its own deadline while the same actual hook stays held.
+        var retry = manager.PrepareProjectLeaveAsync(Id);
+        Assert.False(retry.IsCompleted);
+        observationTime.Advance(TimeSpan.FromMilliseconds(100));
+        var pending = await retry.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.False(pending.Succeeded);
+        Assert.True(pending.HasPendingWork);
+        Assert.Equal("ProjectPreparationPending", pending.ErrorCode);
+        Assert.Equal(1, await settings.GetAsync("prepareCalls", 0));
+        Assert.False((await manager.DisableAsync(Id).WaitAsync(TimeSpan.FromSeconds(5))).Succeeded);
+        Assert.True(manager.HasPendingStops);
+        Assert.True(manager.HasPendingProjectWork);
+        Assert.True(Assert.Single(manager.Plugins).HasRuntime);
+        Assert.False((await manager.EnableAsync(Id).WaitAsync(TimeSpan.FromSeconds(5))).Succeeded);
+        await Assert.ThrowsAsync<PluginShutdownException>(() => manager.DisposeAsync().AsTask().WaitAsync(TimeSpan.FromSeconds(5)));
+        await RuntimeTest.WaitAsync(async () => await settings.GetAsync("stopCalls", 0) == 1);
+        Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+        await File.WriteAllTextAsync(Path.Combine(data, "release-prepare"), "release synthetic preparation");
+        await RuntimeTest.WaitAsync(() => Task.FromResult(!manager.HasPendingStops && !manager.HasPendingProjectWork));
+        Assert.False(Assert.Single(manager.Plugins).HasRuntime);
+        Assert.Equal(1, await settings.GetAsync("prepareCalls", 0));
+        Assert.Equal(1, await settings.GetAsync("stopCalls", 0));
+        Assert.True(await settings.GetAsync("prepareFinished", false));
+        Assert.True(await settings.GetAsync("prepareLifetimeUsable", false));
     }
 
     [Fact]
@@ -511,8 +580,8 @@ public sealed class PluginProjectTests(ITestOutputHelper output)
         disk.Package(Id, fields: new() { ["entryType"] = "Workbench.TestPlugin.ProjectFixturePlugin", ["minimumHostVersion"] = "0.3.0" });
         return disk;
     }
-    internal static PluginManager Manager(TestDirectory disk) => new(new()
+    internal static PluginManager Manager(TestDirectory disk, TimeProvider? projectPreparationTimeProvider = null) => new(new()
     {
         PluginsRoot = disk.Plugins, UserRoot = disk.User, StopTimeout = TimeSpan.FromMilliseconds(100)
-    });
+    }, new WindowsSecretProtector(), projectPreparationTimeProvider: projectPreparationTimeProvider);
 }

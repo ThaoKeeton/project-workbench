@@ -51,7 +51,7 @@ public sealed partial class PluginManager
 
         try
         {
-            var result = await preparation.WaitAsync(_options.StopTimeout, cancellationToken).ConfigureAwait(false);
+            var result = await preparation.WaitAsync(_options.StopTimeout, _projectPreparationTimeProvider, cancellationToken).ConfigureAwait(false);
             // Compare by task identity: an older waiter must not clear a newer
             // participant set admitted after the old task had actually settled.
             _ = Interlocked.CompareExchange(ref _projectPreparation, null, preparation);

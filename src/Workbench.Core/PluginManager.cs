@@ -15,6 +15,7 @@ public sealed partial class PluginManager : IAsyncDisposable
     private readonly string _pluginsRoot;
     private readonly string _userRoot;
     private readonly ProjectRuntimeScope _projectScope;
+    private readonly TimeProvider _projectPreparationTimeProvider;
     private readonly string[] _discoveryRoots;
     private readonly SemaphoreSlim _gate = new(1, 1);
     private Entry[] _entries = [];
@@ -32,12 +33,14 @@ public sealed partial class PluginManager : IAsyncDisposable
 
     public PluginManager(PluginManagerOptions options) : this(options, new WindowsSecretProtector()) { }
 
-    internal PluginManager(PluginManagerOptions options, ISecretProtector secretProtector, PluginRuntimeState? runtimeState = null)
+    internal PluginManager(PluginManagerOptions options, ISecretProtector secretProtector, PluginRuntimeState? runtimeState = null,
+        TimeProvider? projectPreparationTimeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (options.StopTimeout <= TimeSpan.Zero || options.StopTimeout == Timeout.InfiniteTimeSpan)
             throw new ArgumentOutOfRangeException(nameof(options), "StopTimeout must be a positive finite duration.");
         _options = options;
+        _projectPreparationTimeProvider = projectPreparationTimeProvider ?? TimeProvider.System;
         _secretProtector = secretProtector;
         _sharedAssemblies = options.SharedAssemblies.Distinct().Where(a => a != typeof(IWorkbenchPlugin).Assembly).ToArray();
         _sharedAssemblyNames = options.SharedAssemblyNames.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
