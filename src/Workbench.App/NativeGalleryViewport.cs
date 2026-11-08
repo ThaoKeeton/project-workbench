@@ -7,23 +7,95 @@ namespace Workbench.App;
 
 internal sealed partial class MainWindow
 {
-    private static ScrollViewer? GalleryFocusScroller(FrameworkElement root, FrameworkElement page, FrameworkElement focus)
+    private sealed class GalleryFocusTrace
     {
-        if (!root.IsLoaded || !page.IsLoaded || !focus.IsLoaded || root.XamlRoot is null
-            || !ReferenceEquals(page.XamlRoot, root.XamlRoot) || !ReferenceEquals(focus.XamlRoot, root.XamlRoot)) return null;
+        internal NativeGalleryFocusCheck Check;
+        internal bool? SawPage, SawRoot;
+        internal int Depth = -1, PageDepth = -1, RootDepth = -1, NearestOwnerDepth = -1, HiddenDepth = -1;
+        internal bool DepthCapped;
+
+        internal NativeGalleryFocusObservation Snapshot(NativeGalleryFocusPhase phase, NativeGalleryFocusSite site) =>
+            new(phase, site, Check, SawPage, SawRoot, PageDepth, RootDepth, NearestOwnerDepth, HiddenDepth, DepthCapped);
+
+        internal void Visit()
+        {
+            if (Depth < 255) Depth++;
+            else DepthCapped = true; // Only this diagnostic counter saturates; the real walk continues.
+        }
+    }
+
+    private static ScrollViewer? GalleryFocusScroller(FrameworkElement root, FrameworkElement page, FrameworkElement focus,
+        GalleryFocusTrace? trace = null)
+    {
+        // Preserve the original guard order and short-circuiting, including each XamlRoot read.
+        if (!root.IsLoaded) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootUnloaded);
+        if (!page.IsLoaded) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.PageUnloaded);
+        if (!focus.IsLoaded) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.FocusUnloaded);
+        if (root.XamlRoot is null) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootXamlRootNull);
+        if (!ReferenceEquals(page.XamlRoot, root.XamlRoot)) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.PageXamlRootMismatch);
+        if (!ReferenceEquals(focus.XamlRoot, root.XamlRoot)) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.FocusXamlRootMismatch);
         ScrollViewer? owner = null;
         bool containsPage = false;
         for (DependencyObject? parent = focus; parent is not null; parent = VisualTreeHelper.GetParent(parent))
         {
-            if (parent is UIElement { Visibility: not Visibility.Visible }) return null;
-            if (owner is null && parent is ScrollViewer viewer) owner = viewer;
-            if (ReferenceEquals(parent, page)) containsPage = true;
+            trace?.Visit();
+            if (parent is UIElement { Visibility: not Visibility.Visible })
+            {
+                if (trace is not null) trace.HiddenDepth = trace.Depth;
+                return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.AncestorHidden);
+            }
+            if (owner is null && parent is ScrollViewer viewer)
+            {
+                owner = viewer;
+                if (trace is not null) trace.NearestOwnerDepth = trace.Depth;
+            }
+            var isPage = ReferenceEquals(parent, page);
+            if (trace is not null) trace.SawPage = trace.SawPage == true || isPage;
+            if (isPage)
+            {
+                containsPage = true;
+                if (trace is not null) trace.PageDepth = trace.Depth;
+            }
             // A plugin Grid can use a host ancestor rather than own a scroller.
             // Prove the complete chain before returning its nearest actual owner.
-            if (ReferenceEquals(parent, root)) return containsPage && owner is { IsLoaded: true }
-                && ReferenceEquals(owner.XamlRoot, root.XamlRoot) ? owner : null;
+            var isRoot = ReferenceEquals(parent, root);
+            if (trace is not null) trace.SawRoot = trace.SawRoot == true || isRoot;
+            if (isRoot)
+            {
+                if (trace is not null) trace.RootDepth = trace.Depth;
+                if (!containsPage) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootReachedPageMissing);
+                if (owner is null) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootReachedOwnerMissing);
+                if (!owner.IsLoaded) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.OwnerUnloaded);
+                if (!ReferenceEquals(owner.XamlRoot, root.XamlRoot)) return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.OwnerXamlRootMismatch);
+                return GalleryFocusObserved(trace, owner, NativeGalleryFocusCheck.OwnerReturned);
+            }
         }
-        return null; // A shared XamlRoot alone does not prove page/root/scroll ownership.
+        return GalleryFocusObserved(trace, null, NativeGalleryFocusCheck.RootNotReached); // A shared XamlRoot alone does not prove ownership.
+    }
+
+    private static ScrollViewer? GalleryFocusObserved(GalleryFocusTrace? trace, ScrollViewer? result, NativeGalleryFocusCheck check)
+    {
+        if (trace is not null) trace.Check = check;
+        return result;
+    }
+
+    private static (NativeGalleryAboveRootResult Result, int Visited, int? OwnerDistance) GalleryFocusAboveRoot(FrameworkElement root)
+    {
+        int visited = 0;
+        try
+        {
+            DependencyObject parent = root;
+            for (var distance = 1; distance <= 16; distance++)
+            {
+                var next = VisualTreeHelper.GetParent(parent);
+                if (next is null) return (NativeGalleryAboveRootResult.ChainEnded, visited, null);
+                visited = distance;
+                if (next is ScrollViewer) return (NativeGalleryAboveRootResult.Found, visited, distance);
+                parent = next;
+            }
+            return (NativeGalleryAboveRootResult.Capped, visited, null); // No seventeenth GetParent call.
+        }
+        catch (Exception) { return (NativeGalleryAboveRootResult.Unavailable, visited, null); }
     }
 
     private static bool GalleryTryFocusBounds(ScrollViewer scroller, FrameworkElement focus, out Rect bounds)

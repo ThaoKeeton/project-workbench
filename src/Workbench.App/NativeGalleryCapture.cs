@@ -50,13 +50,52 @@ internal sealed partial class MainWindow
         HostRuntime? originalRuntime = null;
         long originalGeneration = 0;
         bool restorationAttempted = false;
+        bool focusDiagnosticEnabled = options.IsIsolated && options.BusinessProbe == "seed" && shotId == "upcam-preview"
+            && pageKey == "view" && pluginId == "com.upcam.task-digest" && viewId == "digest";
+        bool initialOwnerFound = false, positionEntered = false, positionReturned = false, terminalFocusRejected = false;
+        NativeGalleryFocusObservation? firstFocusFailure = null, terminalFocusFailure = null;
+        var aboveRootResult = NativeGalleryAboveRootResult.NotSampled;
+        int aboveRootVisitedCount = 0;
+        int? aboveRootOwnerDistance = null;
+        GalleryFocusTrace? NewFocusTrace()
+        {
+            if (!focusDiagnosticEnabled || terminalFocusRejected) return null;
+            try { return new GalleryFocusTrace(); }
+            catch (Exception) { return null; }
+        }
+        void RecordFocusFailure(NativeGalleryFocusPhase checkpoint, NativeGalleryFocusSite site, GalleryFocusTrace? trace, bool terminal)
+        {
+            if (!focusDiagnosticEnabled || terminalFocusRejected) return;
+            if (terminal) terminalFocusRejected = true; // Freeze even if diagnostic allocation fails.
+            try
+            {
+                var observation = trace?.Snapshot(checkpoint, site) ?? new NativeGalleryFocusObservation(checkpoint, site,
+                    site == NativeGalleryFocusSite.RequiredNull ? NativeGalleryFocusCheck.NotCalled : NativeGalleryFocusCheck.Unavailable,
+                    null, null, -1, -1, -1, -1, false);
+                firstFocusFailure ??= observation;
+                if (!terminal) return; // Position/restore callbacks cannot assign the primary reason.
+                terminalFocusFailure = observation;
+                if (observation is { Check: NativeGalleryFocusCheck.RootReachedOwnerMissing, SawPage: true, SawRoot: true })
+                    (aboveRootResult, aboveRootVisitedCount, aboveRootOwnerDistance) = GalleryFocusAboveRoot(_root);
+            }
+            catch (Exception) { /* Diagnostic collection cannot change the existing failed predicate. */ }
+        }
         bool PageLive() => GalleryLive(displayedPage, hwndValue, birth, originalRuntime, originalGeneration, pageKey, pluginId, viewId);
-        bool FocusAttached() => focus is null || (scroller is not null
-            && ReferenceEquals(GalleryFocusScroller(_root, displayedPage, focus), scroller));
-        bool CaptureLive(bool requireVisible = true)
+        bool FocusAttached(NativeGalleryFocusPhase checkpoint, bool terminal = false)
+        {
+            if (focus is null) return true;
+            if (scroller is null) return false;
+            var trace = NewFocusTrace();
+            var currentOwner = GalleryFocusScroller(_root, displayedPage, focus, trace);
+            if (ReferenceEquals(currentOwner, scroller)) return true;
+            RecordFocusFailure(checkpoint, currentOwner is null ? NativeGalleryFocusSite.FocusAttachedHelperNull
+                : NativeGalleryFocusSite.FocusAttachedOwnerChanged, trace, terminal);
+            return false;
+        }
+        bool CaptureLive(NativeGalleryFocusPhase checkpoint, bool requireVisible = true)
         {
             if (!PageLive()) { status = "blocked"; reasonCode = "page-detached"; return false; }
-            if (!FocusAttached()) { status = "blocked"; reasonCode = "focus-detached"; return false; }
+            if (!FocusAttached(checkpoint, terminal: true)) { status = "blocked"; reasonCode = "focus-detached"; return false; }
             if (requireVisible && focus is not null && !GalleryFocusInViewport(scroller!, focus))
             { status = "blocked"; reasonCode = "focus-outside-viewport"; return false; }
             return true;
@@ -65,7 +104,7 @@ internal sealed partial class MainWindow
         {
             restorationAttempted = true;
             return scroller is null || await GalleryChangeViewAsync(scroller, originalOffset,
-                () => PageLive() && FocusAttached(), () => true);
+                () => PageLive() && FocusAttached(NativeGalleryFocusPhase.RestoreLive), () => true);
         }
         try
         {
@@ -120,14 +159,21 @@ internal sealed partial class MainWindow
 
             if (requireFocus && focus is null)
             {
+                RecordFocusFailure(NativeGalleryFocusPhase.RequiredInput, NativeGalleryFocusSite.RequiredNull, null, terminal: true);
                 status = "blocked"; reasonCode = "focus-detached"; return;
             }
             _root.UpdateLayout();
             if (focus is not null)
             {
                 status = "blocked"; reasonCode = "focus-detached";
-                scroller = GalleryFocusScroller(_root, displayedPage, focus);
-                if (scroller is null) return;
+                var trace = NewFocusTrace();
+                scroller = GalleryFocusScroller(_root, displayedPage, focus, trace);
+                if (scroller is null)
+                {
+                    RecordFocusFailure(NativeGalleryFocusPhase.InitialOwner, NativeGalleryFocusSite.InitialOwnerNull, trace, terminal: true);
+                    return;
+                }
+                initialOwnerFound = true;
                 originalOffset = scroller.VerticalOffset;
                 status = "blocked"; reasonCode = "focus-outside-viewport";
                 if (!GalleryTryFocusBounds(scroller, focus, out var bounds)) return;
@@ -135,19 +181,21 @@ internal sealed partial class MainWindow
                     : Math.Clamp(originalOffset + bounds.Y - Math.Max(0, (scroller.ViewportHeight - bounds.Height) / 2),
                         0, scroller.ScrollableHeight);
                 reasonCode = "layout-unavailable";
+                positionEntered = true;
                 var positioned = await GalleryChangeViewAsync(scroller, target,
-                    () => PageLive() && FocusAttached(), () => GalleryFocusInViewport(scroller, focus));
+                    () => PageLive() && FocusAttached(NativeGalleryFocusPhase.PositionLive), () => GalleryFocusInViewport(scroller, focus));
+                positionReturned = true;
                 viewportWidth = scroller.ViewportWidth;
                 viewportHeight = scroller.ViewportHeight;
                 scrollOffset = scroller.VerticalOffset;
-                if (!CaptureLive() || !positioned) return;
+                if (!CaptureLive(NativeGalleryFocusPhase.PostPosition) || !positioned) return;
             }
             else
             {
                 await Task.Yield();
-                if (!CaptureLive()) return;
+                if (!CaptureLive(NativeGalleryFocusPhase.PostPosition)) return;
                 await Task.Yield();
-                if (!CaptureLive()) return;
+                if (!CaptureLive(NativeGalleryFocusPhase.PostPosition)) return;
                 _root.UpdateLayout();
                 viewportWidth = _root.ActualWidth; viewportHeight = _root.ActualHeight;
             }
@@ -156,38 +204,38 @@ internal sealed partial class MainWindow
             if (viewportWidth <= 0 || viewportHeight <= 0 || _root.ActualWidth <= 0 || _root.ActualHeight <= 0
                 || _root.ActualWidth * rasterizationScale > NativeGalleryPolicy.MaxDimension
                 || _root.ActualHeight * rasterizationScale > NativeGalleryPolicy.MaxDimension
-                || !CaptureLive()) return;
+                || !CaptureLive(NativeGalleryFocusPhase.PreRender)) return;
 
             status = "failed"; reasonCode = "render-invalid";
             var bitmap = new RenderTargetBitmap();
             await bitmap.RenderAsync(_root);
-            if (!CaptureLive()) return;
+            if (!CaptureLive(NativeGalleryFocusPhase.PostRender)) return;
             width = bitmap.PixelWidth;
             height = bitmap.PixelHeight;
             if (width is < 1 or > NativeGalleryPolicy.MaxDimension || height is < 1 or > NativeGalleryPolicy.MaxDimension
                 || (long)width * height * 4 > NativeGalleryPolicy.MaxBgraBytes) return;
             var buffer = await bitmap.GetPixelsAsync();
-            if (!CaptureLive()) return;
+            if (!CaptureLive(NativeGalleryFocusPhase.PostPixels)) return;
             var pixels = new byte[buffer.Length];
             using (var reader = DataReader.FromBuffer(buffer)) reader.ReadBytes(pixels);
             if (!NativeGalleryPolicy.IsValidFrame(pixels, width, height)) return;
 
             using var stream = new InMemoryRandomAccessStream();
             var encoder = await BitmapEncoder.CreateAsync(BitmapEncoder.PngEncoderId, stream);
-            if (!CaptureLive()) return;
+            if (!CaptureLive(NativeGalleryFocusPhase.PostEncoder)) return;
             // RenderTargetBitmap supplies premultiplied BGRA8. Tell the codec the
             // input alpha convention; PNG retains the actual content transparency.
             encoder.SetPixelData(BitmapPixelFormat.Bgra8, BitmapAlphaMode.Premultiplied, (uint)width, (uint)height, 96, 96, pixels);
             await encoder.FlushAsync();
-            if (!CaptureLive() || stream.Size is < 1 or > NativeGalleryPolicy.MaxPngBytes) return;
+            if (!CaptureLive(NativeGalleryFocusPhase.PostFlush) || stream.Size is < 1 or > NativeGalleryPolicy.MaxPngBytes) return;
             stream.Seek(0);
             var decoder = await BitmapDecoder.CreateAsync(stream);
-            if (!CaptureLive() || decoder.PixelWidth != width || decoder.PixelHeight != height) return;
+            if (!CaptureLive(NativeGalleryFocusPhase.PostDecoder) || decoder.PixelWidth != width || decoder.PixelHeight != height) return;
             var bytes = new byte[(int)stream.Size];
             using (var reader = new DataReader(stream.GetInputStreamAt(0)))
             {
                 await reader.LoadAsync((uint)bytes.Length);
-                if (!CaptureLive()) return;
+                if (!CaptureLive(NativeGalleryFocusPhase.PostRead)) return;
                 reader.ReadBytes(bytes);
             }
             if (bytes.Length < 24
@@ -197,12 +245,12 @@ internal sealed partial class MainWindow
             // unsettled restore must not leave a final-name PNG behind.
             status = "blocked"; reasonCode = "layout-unavailable";
             var restored = await RestoreAsync();
-            if (!CaptureLive(requireVisible: false) || !restored) return;
+            if (!CaptureLive(NativeGalleryFocusPhase.PostRestore, requireVisible: false) || !restored) return;
             Directory.CreateDirectory(directory);
             var candidateHash = Convert.ToHexString(SHA256.HashData(bytes)).ToLowerInvariant();
             // No await or live-failure return follows CreateNew: a desktop transition
             // during rendering/encoding cannot leave a rejected final-name PNG.
-            if (!CaptureLive(requireVisible: false)) return;
+            if (!CaptureLive(NativeGalleryFocusPhase.PrePublish, requireVisible: false)) return;
             using (var output = new FileStream(pngPath, FileMode.CreateNew, FileAccess.Write, FileShare.None))
                 output.Write(bytes);
             pngBytes = bytes.Length;
@@ -218,6 +266,17 @@ internal sealed partial class MainWindow
             if (scroller is not null && !restorationAttempted)
             {
                 try { await RestoreAsync(); } catch (Exception) { }
+            }
+            if (focusDiagnosticEnabled && status == "blocked" && reasonCode == "focus-detached")
+            {
+                try
+                {
+                    NativeGalleryFocusDiagnostic.TryWrite(options, shotId, pageKey, pluginId, viewId, status, reasonCode,
+                        new NativeGalleryFocusDiagnosticData(sourceCommit!, processId, birth, focus is not null, initialOwnerFound,
+                            positionEntered, positionReturned, firstFocusFailure, terminalFocusFailure,
+                            aboveRootResult, aboveRootVisitedCount, aboveRootOwnerDistance));
+                }
+                catch (Exception) { /* Best effort only, independent of the immutable primary receipt. */ }
             }
             // A receipt is immutable. If creation fails, the collector treats any image as an orphan.
             try
