@@ -2,7 +2,7 @@
 namespace owned {
 static void Ok(HRESULT hr) { if (FAILED(hr)) Fail(5); }
 struct String { BSTR value=nullptr; ~String() { SysFreeString(value); } std::wstring Copy() const { return value ? std::wstring(value,SysStringLen(value)) : L""; } };
-Automation::Automation() { Ok(CoInitializeEx(nullptr,COINIT_MULTITHREADED)); try { Ok(CoCreateInstance(CLSID_CUIAutomation,nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(automation.Put()))); } catch (...) { CoUninitialize(); throw; } }
+Automation::Automation() { Ok(CoInitializeEx(nullptr,COINIT_MULTITHREADED)); try { Ok(CoCreateInstance(__uuidof(CUIAutomation),nullptr,CLSCTX_INPROC_SERVER,IID_PPV_ARGS(automation.Put()))); } catch (...) { CoUninitialize(); throw; } }
 Automation::~Automation() { if (automation.value) { automation.value->Release(); automation.value=nullptr; } CoUninitialize(); }
 void Automation::Element(const TargetProcess& target,int id,IUIAutomationElement** out) {
     target.Verify(); const HWND control=GetDlgItem(target.window,id); if (!control) Fail(4);
