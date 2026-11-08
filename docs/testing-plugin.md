@@ -6,6 +6,8 @@
 
 Windows 构建 `pwsh ./scripts/build.ps1` 后，完整宿主位于 `artifacts/native/app`，测试交付单独位于 `artifacts/native/testing-plugin`。CI 对应下载名为 `workbench-win-x64`、`workbench-sdk-0.4.0` 和 `workbench-testing-plugin-0.1.0`；选择同一运行/源码提交的产物。在“插件”导入测试交付中的 `workbench-testing-plugin-0.1.0.zip`，审查指纹并确认信任启用。安装不会自动信任或运行。更新需要安全退出并重启。
 
+CI 在 SDK 快照验证后、任何原生产物上传前，复核测试交付与业务交付；上传配额不足仍会使工作流失败，并可能没有可下载产物。Server 自动检查不替代 Windows 11 人工验收或实际下载字节审计。
+
 测试 ZIP 精确包含 `plugin.json`、`Workbench.Testing.dll`、`Workbench.Testing.Domain.dll`、`Workbench.Testing.deps.json` 和 `Fixtures/requirements.synthetic.json`、`Fixtures/figma.synthetic.json`。不带 SDK/Core/宿主/WinUI/WinRT/.NET 运行时副本。外层交付另有 `provenance.json`、`SHA256SUMS`、`README.md`，绑定实际 ZIP、每项文件长度/哈希和源码提交/文件哈希。它不加入原有六文件业务 companion；旧 DingTalk/UPCAM 固定字节和来源保持不变。
 
 页面支持：

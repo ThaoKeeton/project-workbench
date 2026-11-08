@@ -100,6 +100,16 @@ jobs:
       - name: Verify SDK snapshot integrity and identity
         shell: pwsh
         run: ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-snapshot
+      - name: Reverify independently installable testing delivery
+        shell: pwsh
+        run: |
+          Import-Module ./scripts/TestingPluginDelivery.psm1 -Force
+          Test-TestingPluginDelivery -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
+      - name: Reverify the tested production download before upload
+        shell: pwsh
+        run: |
+          Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
+          Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
       - name: Collect native exception text after smoke failure
         id: native_debug
         if: failure() && steps.native_smoke.outcome == 'failure'
@@ -129,11 +139,6 @@ jobs:
           name: testing-plugin-probes
           path: artifacts/native/testing-probes/
           if-no-files-found: warn
-      - name: Reverify independently installable testing delivery
-        shell: pwsh
-        run: |
-          Import-Module ./scripts/TestingPluginDelivery.psm1 -Force
-          Test-TestingPluginDelivery -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: workbench-testing-plugin-0.1.0
@@ -146,11 +151,6 @@ jobs:
             artifacts/sdk-snapshot/
             artifacts/sdk-snapshot.zip
           if-no-files-found: error
-      - name: Reverify the tested production download before upload
-        shell: pwsh
-        run: |
-          Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
-          Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: workbench-business-plugins
