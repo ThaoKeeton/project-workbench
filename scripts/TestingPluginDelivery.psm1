@@ -71,6 +71,7 @@ function Get-TestingSourceFiles {
     $paths += @('tests/Workbench.Core.Tests/LifecycleTests.cs')
     $paths += @('tests/Workbench.Core.Tests/HostErrorReportExportTests.cs','tests/Workbench.Core.Tests/HostFailureTests.cs','tests/Workbench.Core.Tests/HostStartupDiagnosticsTests.cs','tests/Workbench.Core.Tests/WorkspaceRuntimeCoordinatorTests.cs')
     $paths += @('tests/scripts/DeliveryHostVersion.Tests.ps1','tests/scripts/NativeShellAssets.Tests.ps1','tests/Workbench.Core.Tests/DiscoveryTests.cs')
+    $paths += @('scripts/NativeGalleryReport.psm1','tests/scripts/NativeGalleryReport.Tests.ps1','tests/scripts/fixtures/NativeGalleryVersionPe/NativeGalleryVersionPe.csproj','tests/scripts/fixtures/NativeGalleryVersionPe/NativeGalleryVersionPe.cs')
     foreach ($part in @('plugins/Workbench.Testing', 'plugins/Workbench.Testing.Domain', 'plugins/Workbench.Testing.Windows', 'native/Workbench.OwnedLab', 'tests/Workbench.OwnedLab.WindowsProbe', 'tests/Workbench.OwnedLab.NativeFixtures', 'tests/Workbench.Testing.PackageProbe', 'tests/Workbench.Testing.SourceAcceptance', 'tests/Workbench.NativeReference', 'src/Workbench.Sdk', 'src/Workbench.WinUI.Sdk', 'src/Workbench.App', 'src/Workbench.Core')) {
         $paths += @(& git -C $Repo ls-files --cached --others --exclude-standard -- $part)
         if ($LASTEXITCODE -ne 0) { throw 'TestingSourceFileListUnavailable' }

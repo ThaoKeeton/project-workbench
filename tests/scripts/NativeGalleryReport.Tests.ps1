@@ -46,7 +46,7 @@ function Assert-GalleryFixtureVersionResource([string]$Path, [string]$ExpectedVe
         } finally { $reader.Dispose() }
     } finally { $stream.Dispose() }
 }
-function New-GalleryVersionPe([string]$Path, [string]$Commit, [string]$Case, [string]$WorkRoot) {
+function New-GalleryVersionPe([string]$Path, [string]$Commit, [string]$Case, [string]$WorkRoot, [string]$Version = '0.4.1') {
     if ($Commit -cnotmatch '^[0-9a-f]{40}$' -or $Case -cnotmatch '^[a-z-]+$') {
         throw 'Test-only PE version arguments are invalid.'
     }
@@ -59,7 +59,7 @@ function New-GalleryVersionPe([string]$Path, [string]$Commit, [string]$Case, [st
         throw 'Test-only PE SDK command must have a nonempty scalar source path.'
     }
     $buildArguments = @('build', $project, '-c', 'Release', '--nologo',
-        "-p:GalleryFixtureCommit=$Commit", "-p:BaseIntermediateOutputPath=$obj",
+        "-p:GalleryFixtureCommit=$Commit", "-p:Version=$Version", "-p:FileVersion=$Version.0", "-p:InformationalVersion=$Version+$Commit", "-p:BaseIntermediateOutputPath=$obj",
         "-p:OutputPath=$out", '-p:AppendTargetFrameworkToOutputPath=false')
     Write-Host ('Test-only PE argv JSON: ' + (@($dotnet) + $buildArguments | ConvertTo-Json -Compress -Depth 3))
     & $dotnet @buildArguments
@@ -67,7 +67,7 @@ function New-GalleryVersionPe([string]$Path, [string]$Commit, [string]$Case, [st
     Write-Host "Test-only PE build observed exit: $buildExit"
     if ($buildExit -ne 0) { throw "Test-only PE build failed: $Case" }
     [IO.File]::Copy((Join-Path $out 'NativeGalleryVersionPe.dll'), $Path, $false)
-    Assert-GalleryFixtureVersionResource $Path "0.4.0+$Commit"
+    Assert-GalleryFixtureVersionResource $Path "$Version+$Commit"
 }
 function Test-GalleryDurableSeedIdentity([string]$FixtureRoot) {
     # Break caught: rereading mutable installed code after later business removal,
@@ -135,7 +135,7 @@ function Test-GalleryDurableSeedIdentity([string]$FixtureRoot) {
                 shotId = $shot[0]; pageKey = 'view'; pluginId = $id; viewId = $shot[2]; probeKind = 'business';
                 phase = 'business-' + $phase; projectId = $null; selectedPageKey = 'view'; selectedPluginId = $id; selectedViewId = $shot[2];
                 processId = 77; processCreationFileTimeUtc = $birth; hwnd = 999L; captureUtc = [DateTimeOffset]::UtcNow;
-                executableSha256 = $exeHash; hostInformationalVersion = "0.4.0+$source"; sourceCommit = $source;
+                executableSha256 = $exeHash; hostInformationalVersion = "0.4.1+$source"; sourceCommit = $source;
                 packageManifestSha256 = $packages[$id].manifest; packageEntrySha256 = $packages[$id].entry;
                 osDescription = 'Windows (synthetic receipt fixture; no runtime claim)'; architecture = 'X64'; sessionId = 1;
                 desktopVisible = $true; windowVisible = $true; width = 2; height = 1; rasterizationScale = 1.0; theme = 'Light';
@@ -178,6 +178,16 @@ function Test-GalleryDurableSeedIdentity([string]$FixtureRoot) {
         Write-Host "SEED_WRITER_REFUSED $Name reason=$caught originalReportPreserved=true"
     }
     Refuse-SeedWriter 'snapshot publication collision' 'GalleryPackageSnapshotAlreadyExists' $writeCase.args -SnapshotCollision
+    foreach ($case in @('newline','short','uppercase','array')) {
+        $badArgs = $writeCase.args.Clone()
+        switch ($case) {
+            newline { $badArgs.SourceCommit = $source + "`n" }
+            short { $badArgs.SourceCommit = $source.Substring(0,39) }
+            uppercase { $badArgs.SourceCommit = $source.ToUpperInvariant() }
+            array { $badArgs.SourceCommit = @($source) }
+        }
+        Refuse-SeedWriter "malformed source $case" 'GalleryBindingArgumentsInvalid' $badArgs
+    }
     $badArgs = $writeCase.args.Clone(); $badArgs.HasExited = $false
     Refuse-SeedWriter 'unconfirmed process exit' 'GalleryPackageSnapshotIdentityMismatch' $badArgs
     $badArgs = $writeCase.args.Clone(); $badArgs.PackageIds = @($writeCase.ids[0], $writeCase.ids[0])
@@ -321,7 +331,7 @@ try {
     # The SDK emits managed metadata and RT_VERSION; this remains a test-only PE.
     $hostDll = Join-Path $root 'Workbench.App.dll'
     New-GalleryVersionPe $hostDll $source 'positive' $root
-    if ([Diagnostics.FileVersionInfo]::GetVersionInfo($hostDll).ProductVersion -cne "0.4.0+$source") {
+    if ([Diagnostics.FileVersionInfo]::GetVersionInfo($hostDll).ProductVersion -cne "0.4.1+$source") {
         throw 'Test-only host PE does not carry the requested informational version.'
     }
     $hostDllHash = (Get-FileHash -LiteralPath $hostDll -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -337,14 +347,14 @@ try {
     $pngHash = (Get-FileHash -LiteralPath $pngPath -Algorithm SHA256).Hash.ToLowerInvariant()
     $binding = @{ schemaVersion = 1; phase = 'business-seed'; processId = 77; processCreationFileTimeUtc = $birth;
         processExitFileTimeUtc = $exit; hasExited = $true; exitCode = 0; executableSha256 = $appHash; hostDllSha256 = $hostDllHash;
-        sourceCommit = $source; hostInformationalVersion = "0.4.0+$source"; originalReportFile = 'seed.json'; originalReportSha256 = $reportHash; originalProbeSucceeded = $true }
+        sourceCommit = $source; hostInformationalVersion = "0.4.1+$source"; originalReportFile = 'seed.json'; originalReportSha256 = $reportHash; originalProbeSucceeded = $true }
     $receipt = @{ schemaVersion = 1; captureKind = 'WinUiContentRender'; scope = 'actual-window-content-only';
         titleBarIncluded = $false; popupsIncluded = $false; status = 'captured'; reasonCode = 'none';
         shotId = 'host-plugins'; pageKey = 'plugins'; pluginId = $null; viewId = $null;
         probeKind = 'business'; phase = 'business-seed'; projectId = $null;
         selectedPageKey = 'plugins'; selectedPluginId = $null; selectedViewId = $null;
         processId = 77; processCreationFileTimeUtc = $birth; hwnd = 999L; captureUtc = [DateTimeOffset]::UtcNow;
-        executableSha256 = $appHash; hostInformationalVersion = "0.4.0+$source"; sourceCommit = $source;
+        executableSha256 = $appHash; hostInformationalVersion = "0.4.1+$source"; sourceCommit = $source;
         packageManifestSha256 = $null; packageEntrySha256 = $null;
         osDescription = 'Windows'; architecture = 'X64'; sessionId = 1; desktopVisible = $true; windowVisible = $true;
         width = 2; height = 1; rasterizationScale = 1.0; theme = 'Light'; viewportWidth = 2.0; viewportHeight = 1.0;
@@ -367,10 +377,31 @@ try {
     Save-Fixture
     if ((Check-Fixture).status -cne 'captured') { throw 'Valid nonuniform PNG and independent binding were rejected.' }
     $validBinding = $binding.Clone(); $validReceipt = $receipt.Clone()
+    # Exercise the exact source/version boundary with matching malformed values.
+    $galleryModule = Get-Module NativeGalleryReport
+    function Check-HostIdentity($expected, $actual, $declared) {
+        & $galleryModule { param($e,$a,$d) Assert-GalleryHostVersion $e $a $d } $expected $actual $declared
+    }
+    Check-HostIdentity $source "0.4.1+$source" "0.4.1+$source"
+    foreach ($bad in @(($source + "`n"), $source.Substring(0,39), $source.ToUpperInvariant())) {
+        $refused = $false
+        try { Check-HostIdentity $bad "0.4.1+$bad" "0.4.1+$bad" } catch { $refused = $true }
+        if (-not $refused) { throw 'Gallery accepted matching malformed host source and version.' }
+    }
+    foreach ($case in @('source-array','actual-array','declared-array')) {
+        $expected = $source; $actual = "0.4.1+$source"; $declared = $actual
+        switch ($case) { 'source-array' { $expected = @($expected) }; 'actual-array' { $actual = @($actual) }; 'declared-array' { $declared = @($declared) } }
+        $refused = $false
+        try { Check-HostIdentity $expected $actual $declared } catch { $refused = $true }
+        if (-not $refused) { throw "Gallery accepted non-scalar host identity: $case" }
+    }
     $null = $binding.Remove('hostDllSha256'); Refuse-Fixture 'missing host DLL hash'; $binding.hostDllSha256 = $hostDllHash
     $binding.hostDllSha256 = 'malformed'; Refuse-Fixture 'malformed host DLL hash'; $binding.hostDllSha256 = $hostDllHash
-    $binding.hostInformationalVersion = '0.4.0+' + ('b' * 40)
-    Refuse-Fixture 'sidecar-only host version'; $binding.hostInformationalVersion = "0.4.0+$source"
+    $binding.hostInformationalVersion = '0.4.1+' + ('b' * 40)
+    Refuse-Fixture 'sidecar-only host version'; $binding.hostInformationalVersion = "0.4.1+$source"
+    $binding.hostInformationalVersion = @("0.4.1+$source"); Refuse-Fixture 'array binding version'; $binding.hostInformationalVersion = "0.4.1+$source"
+    $receipt.hostInformationalVersion = @("0.4.1+$source"); Refuse-Fixture 'array receipt version'; $receipt.hostInformationalVersion = "0.4.1+$source"
+    $receipt.sourceCommit = @($source); Refuse-Fixture 'array receipt source'; $receipt.sourceCommit = $source
     $withoutDll = Join-Path $root 'without-dll'
     New-Item -Path $withoutDll -ItemType Directory | Out-Null
     $plainApp = $app
@@ -388,6 +419,19 @@ try {
     $binding.hostDllSha256 = (Get-FileHash -LiteralPath $differentDll -Algorithm SHA256).Hash.ToLowerInvariant()
     Refuse-Fixture 'actual host metadata version mismatch'
     $app = $plainApp; $binding.hostDllSha256 = $hostDllHash
+    # A real older metadata-bearing test PE with the same source must not be accepted.
+    $oldDirectory = Join-Path $root 'old-host-version'
+    New-Item -Path $oldDirectory -ItemType Directory | Out-Null
+    $oldApp = Join-Path $oldDirectory 'Workbench.App.exe'
+    [IO.File]::Copy($app, $oldApp)
+    $oldDll = Join-Path $oldDirectory 'Workbench.App.dll'
+    New-GalleryVersionPe $oldDll $source 'old-version' $root '0.4.0'
+    $app = $oldApp
+    $binding.hostDllSha256 = (Get-FileHash -LiteralPath $oldDll -Algorithm SHA256).Hash.ToLowerInvariant()
+    $binding.hostInformationalVersion = "0.4.0+$source"; $receipt.hostInformationalVersion = $binding.hostInformationalVersion
+    Refuse-Fixture 'matching-source older actual host version'
+    $app = $plainApp; $binding.hostDllSha256 = $hostDllHash
+    $binding.hostInformationalVersion = "0.4.1+$source"; $receipt.hostInformationalVersion = $binding.hostInformationalVersion
     Save-Fixture
     if ((Check-Fixture).status -cne 'captured') { throw 'Metadata-bound positive fixture did not recover.' }
     $receipt.status = 'blocked'; $receipt.reasonCode = 'desktop-unavailable'; $receipt.selectedPageKey = $null
@@ -550,7 +594,7 @@ try {
         ConvertTo-Json | Set-Content -LiteralPath $failedReport
     $failedBinding = $validBinding.Clone()
     $failedBinding.phase = 'native-smoke'; $failedBinding.sourceCommit = $failedSource
-    $failedBinding.hostInformationalVersion = "0.4.0+$failedSource"
+    $failedBinding.hostInformationalVersion = "0.4.1+$failedSource"
     $failedBinding.hostDllSha256 = (Get-FileHash -LiteralPath $failedDll -Algorithm SHA256).Hash.ToLowerInvariant()
     $failedBinding.originalReportFile = 'native-smoke.json'
     $failedBinding.originalReportSha256 = (Get-FileHash -LiteralPath $failedReport -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -562,7 +606,7 @@ try {
         $failedReceipt = $validReceipt.Clone()
         $failedReceipt.shotId = $shotId; $failedReceipt.pngPath = "$shotId.png"
         $failedReceipt.phase = 'native-smoke'; $failedReceipt.probeKind = 'smoke'
-        $failedReceipt.sourceCommit = $failedSource; $failedReceipt.hostInformationalVersion = "0.4.0+$failedSource"
+        $failedReceipt.sourceCommit = $failedSource; $failedReceipt.hostInformationalVersion = "0.4.1+$failedSource"
         $failedReceipt | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $failedGallery "$shotId.json")
         [IO.File]::WriteAllBytes((Join-Path $failedGallery "$shotId.png"), $originalPng)
     }

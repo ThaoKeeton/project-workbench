@@ -88,6 +88,11 @@ function Assert-GalleryText([AllowNull()][object]$Actual,[AllowNull()][object]$E
     if($null -eq $Expected){if($null -ne $Actual){throw 'GalleryIdentityMismatch'}}
     elseif($Actual -isnot [string] -or $Actual -cne $Expected){throw 'GalleryIdentityMismatch'}
 }
+function Assert-GalleryHostVersion([AllowNull()][object]$Source,[AllowNull()][object]$Actual,[AllowNull()][object]$Declared){
+    if($Source -isnot [string] -or $Source -cnotmatch '\A[0-9a-f]{40}\z' -or
+       $Actual -isnot [string] -or $Actual -cne ("0.4.1+" + $Source) -or
+       $Declared -isnot [string] -or $Declared -cne $Actual){throw 'GallerySourceIdentityMismatch'}
+}
 function Test-GalleryZipName([AllowNull()][object]$Name){
     return ($Name -is [string] -and $Name -cmatch '^([A-Za-z0-9][A-Za-z0-9_.-]{0,123}/)?[A-Za-z0-9][A-Za-z0-9_.-]{0,123}\.zip$')
 }
@@ -222,12 +227,12 @@ function Test-GalleryPackageSnapshot([string]$OriginalReportPath,[string]$Instal
 function Write-NativeGalleryBinding {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$OriginalReportPath,[Parameter(Mandatory)][string]$Phase,
-        [Parameter(Mandatory)][string]$ExecutablePath,[Parameter(Mandatory)][string]$SourceCommit,
+        [Parameter(Mandatory)][string]$ExecutablePath,[Parameter(Mandatory)][object]$SourceCommit,
         [AllowNull()][object]$ProcessId,[AllowNull()][object]$ProcessCreationFileTimeUtc,
         [AllowNull()][object]$ProcessExitFileTimeUtc,[AllowNull()][object]$ExitCode,[bool]$HasExited,
         [string]$InstalledRoot='',[string[]]$PackageIds=@(),[hashtable]$SourceZipPaths=@{},[string]$SourceZipRoot='')
     if($Phase -cnotmatch '^(native-smoke|workspace-(seed|verify)|testing-(seed|verify)|business-(seed|acceptance-seed))$' -or
-        $SourceCommit -cnotmatch '^[0-9a-f]{40}$'){throw 'GalleryBindingArgumentsInvalid'}
+        $SourceCommit -isnot [string] -or $SourceCommit -cnotmatch '\A[0-9a-f]{40}\z'){throw 'GalleryBindingArgumentsInvalid'}
     $path=[IO.Path]::ChangeExtension($OriginalReportPath,'gallery-binding.json')
     if(Test-Path -LiteralPath $path){throw 'GalleryBindingAlreadyExists'}
     if($Phase -clike 'business-*'){
@@ -298,11 +303,12 @@ function Test-NativeGalleryReceipt {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ReceiptPath,[Parameter(Mandatory)][string]$BindingPath,
         [Parameter(Mandatory)][string]$OriginalReportPath,[Parameter(Mandatory)][string]$ExecutablePath,
-        [Parameter(Mandatory)][string]$ExpectedSourceCommit,[Parameter(Mandatory)][string]$ExpectedShotId,
+        [Parameter(Mandatory)][object]$ExpectedSourceCommit,[Parameter(Mandatory)][string]$ExpectedShotId,
         [Parameter(Mandatory)][string]$ExpectedPageKey,[Parameter(Mandatory)][string]$ExpectedPhase,
         [Parameter(Mandatory)][string]$ExpectedProbeKind,[AllowNull()][object]$ExpectedPluginId,
         [AllowNull()][object]$ExpectedViewId,[string]$ExpectedPackageRoot='',[string]$ExpectedZipRoot='',
         [switch]$RequirePackageSnapshot)
+    if($ExpectedSourceCommit -isnot [string] -or $ExpectedSourceCommit -cnotmatch '\A[0-9a-f]{40}\z'){throw 'GallerySourceIdentityMismatch'}
     $r=Read-GalleryJson $ReceiptPath;$b=Read-GalleryJson $BindingPath;$original=Read-GalleryJson $OriginalReportPath 4194304
     if($ExpectedShotId -cnotmatch '^[a-z][a-z0-9-]{0,63}$' -or
         -not (Test-GalleryInt $r['schemaVersion'] 1 1) -or -not (Test-GalleryInt $b['schemaVersion'] 1 1) -or
@@ -324,8 +330,7 @@ function Test-NativeGalleryReceipt {
     if(-not $b.Contains('hostDllSha256') -or -not (Test-GalleryHash $b['hostDllSha256']) -or
        $b['hostDllSha256'] -cne (Get-GalleryHash $dll)){throw 'GalleryHostIdentityMismatch'}
     $actualVersion=[Diagnostics.FileVersionInfo]::GetVersionInfo((Assert-GalleryPath $dll)).ProductVersion
-    if($actualVersion -cne ("0.4.0+" + $ExpectedSourceCommit) -or
-       $b['hostInformationalVersion'] -cne $actualVersion){throw 'GallerySourceIdentityMismatch'}
+    Assert-GalleryHostVersion $ExpectedSourceCommit $actualVersion $b['hostInformationalVersion']
     if(-not (Test-GalleryInt $b['processId'] 1 ([int]::MaxValue)) -or
        -not (Test-GalleryInt $b['processCreationFileTimeUtc'] 1 ([long]::MaxValue)) -or
        -not (Test-GalleryInt $b['processExitFileTimeUtc'] 1 ([long]::MaxValue)) -or
@@ -402,8 +407,8 @@ function Test-NativeGalleryReceipt {
        $r['windowVisible'] -isnot [bool] -or -not $r['windowVisible'] -or
        -not (Test-GalleryInt $r['sessionId'] 0 ([int]::MaxValue)) -or
        $r['architecture'] -cne 'X64' -or $r['osDescription'] -isnot [string] -or $r['osDescription'].Length -gt 256 -or
-       $r['sourceCommit'] -cne $ExpectedSourceCommit -or
-       $r['hostInformationalVersion'] -cne $b['hostInformationalVersion'] -or
+       $r['sourceCommit'] -isnot [string] -or $r['sourceCommit'] -cne $ExpectedSourceCommit -or
+       $r['hostInformationalVersion'] -isnot [string] -or $r['hostInformationalVersion'] -cne $b['hostInformationalVersion'] -or
        $r['executableSha256'] -cne $b['executableSha256']){throw 'GalleryCaptureIdentityMismatch'}
     if($r['captureUtc'] -isnot [string] -or $r['captureUtc'].Length -gt 64 -or
        $r['captureUtc'] -cnotmatch '^\d{4}-\d\d-\d\dT' -or

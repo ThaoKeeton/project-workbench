@@ -51,17 +51,25 @@ internal static class NativeSmoke
         await window.SmokeCaptureGalleryAsync(options, "home", "home", null, null, initialHome, "curated-disabled", manager.Plugins.Count);
         var initialPlugins = await window.SmokeNavigateAsync("plugins");
         await window.SmokeCaptureGalleryAsync(options, "host-plugins-disabled", "plugins", null, null, initialPlugins, "curated-disabled", manager.Plugins.Count);
+        // Fixed isolated-smoke checkpoints survive the existing sanitized failure report.
+        options.TraceStartup("native-smoke-disabled-capture-complete");
         try
         {
             using var duplicate = HostRuntime.AcquireLease(options.UserRoot);
             throw new InvalidOperationException("Another owner acquired the same user store.");
         }
         catch (UserStoreInUseException) { Record("Actual lease acquisition rejects a second owner with a Windows sharing/lock violation"); }
+        options.TraceStartup("native-smoke-occupied-window-begin");
         await VerifyOccupiedStartupAsync(options);
+        options.TraceStartup("native-smoke-occupied-window-complete");
         Record("Occupied-store startup shows a manager-independent page, blocks Settings/Home navigation and closes safely");
+        options.TraceStartup("native-smoke-live-card-begin");
         await window.SmokeVerifyLiveCardThemesAsync();
+        options.TraceStartup("native-smoke-live-card-complete");
         Record("Same native host card re-resolved actual theme and fill/stroke across live Light/Dark/Light changes");
-        await VerifyShellThemesAsync(window);
+        options.TraceStartup("native-smoke-shell-themes-begin");
+        await VerifyShellThemesAsync(window, options);
+        options.TraceStartup("native-smoke-shell-themes-complete");
         Record("Native titlebar and caption colors followed live Light/Dark/Light host themes with Mica or an opaque themed fallback");
         foreach (var page in new[] { "background", "credentials", "packages" }) await window.SmokeNavigateAsync(page);
         Record("Initialized Background, Credentials and Package maintenance navigation attached native host pages");
@@ -324,25 +332,33 @@ internal static class NativeSmoke
         try
         {
             failed.Activate();
-            await VerifyShellAsync(failed);
+            options.TraceStartup("native-smoke-occupied-shell-begin");
+            await VerifyShellAsync(failed, options);
+            options.TraceStartup("native-smoke-occupied-shell-complete");
+            options.TraceStartup("native-smoke-occupied-initialize-begin");
             await failed.InitializeAsync();
+            options.TraceStartup("native-smoke-occupied-initialize-complete");
             Require(failed.SmokeStartupFailure is UserStoreInUseException, "Second host did not report the actual occupied-store failure.");
             Require(!failed.SmokeNavigationAvailable, "Navigation/settings remained available after startup failed.");
             failed.SmokeTryStartupNavigation();
         }
         finally
         {
+            options.TraceStartup("native-smoke-occupied-close-begin");
             await failed.FinishSmokeAsync();
+            options.TraceStartup("native-smoke-occupied-close-complete");
+            options.TraceStartup("native-smoke-occupied-closed-wait-begin");
             await closed.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            options.TraceStartup("native-smoke-occupied-closed-wait-complete");
         }
     }
 
     // These assertions inspect the real loaded WinUI tree, including a window with no runtime.
     // Removing the constructor's shell hook must fail before plugin discovery is consulted.
-    private static async Task VerifyShellAsync(MainWindow window)
+    private static async Task VerifyShellAsync(MainWindow window, RunOptions? smokeTrace = null)
     {
         var root = window.Content as Grid ?? throw new InvalidOperationException("The host shell root is unavailable.");
-        await SettleShellAsync(window, root);
+        await SettleShellAsync(window, root, smokeTrace);
         var titleBar = FindNamed<TitleBar>(root, "工作台标题栏");
         Require(window.ExtendsContentIntoTitleBar && window.AppWindow.TitleBar.ExtendsContentIntoTitleBar,
             "The host still uses the stock non-client titlebar.");
@@ -370,7 +386,7 @@ internal static class NativeSmoke
             "The shell has neither Mica nor an opaque themed fallback.");
     }
 
-    private static async Task VerifyShellThemesAsync(MainWindow window)
+    private static async Task VerifyShellThemesAsync(MainWindow window, RunOptions options)
     {
         var root = (Grid)window.Content;
         var titleBar = FindNamed<TitleBar>(root, "工作台标题栏");
@@ -378,7 +394,7 @@ internal static class NativeSmoke
         async Task<(Windows.UI.Color Text, Windows.UI.Color Caption, Windows.UI.Color? Fallback)> ReadAsync(ElementTheme theme)
         {
             window.SmokeSetTheme(theme);
-            await SettleShellAsync(window, root);
+            await SettleShellAsync(window, root, options);
             Require(root.ActualTheme == theme && titleBar.ActualTheme == theme,
                 "The titlebar did not inherit the host's actual theme.");
             Require(titleBar.Foreground is SolidColorBrush, "The native titlebar text brush did not resolve.");
@@ -394,9 +410,13 @@ internal static class NativeSmoke
         }
         try
         {
+            options.TraceStartup("native-smoke-shell-light-begin");
             var light = await ReadAsync(ElementTheme.Light);
+            options.TraceStartup("native-smoke-shell-dark-begin");
             var dark = await ReadAsync(ElementTheme.Dark);
+            options.TraceStartup("native-smoke-shell-light-again-begin");
             var lightAgain = await ReadAsync(ElementTheme.Light);
+            options.TraceStartup("native-smoke-shell-light-again-complete");
             Require(!light.Text.Equals(dark.Text) && !light.Caption.Equals(dark.Caption) && light.Equals(lightAgain),
                 "The same native titlebar/caption did not re-resolve across Light/Dark/Light.");
             if (window.SystemBackdrop is null)
@@ -406,18 +426,22 @@ internal static class NativeSmoke
         finally { window.SmokeSetTheme(previous); }
     }
 
-    private static async Task SettleShellAsync(MainWindow window, FrameworkElement root)
+    private static async Task SettleShellAsync(MainWindow window, FrameworkElement root, RunOptions? smokeTrace = null)
     {
         var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         void OnLoaded(object sender, RoutedEventArgs args) => ready.TrySetResult();
         root.Loaded += OnLoaded;
         try
         {
+            smokeTrace?.TraceStartup("native-smoke-shell-loaded-wait-begin");
             if (!root.IsLoaded) await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            smokeTrace?.TraceStartup("native-smoke-shell-loaded-wait-complete");
             var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
             Require(window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
                 () => settled.TrySetResult()), "The native shell dispatcher is unavailable.");
+            smokeTrace?.TraceStartup("native-smoke-shell-dispatch-wait-begin");
             await settled.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            smokeTrace?.TraceStartup("native-smoke-shell-dispatch-wait-complete");
             root.UpdateLayout();
         }
         finally { root.Loaded -= OnLoaded; }
