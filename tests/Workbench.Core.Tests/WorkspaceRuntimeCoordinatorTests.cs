@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using Workbench.App;
 using Workbench.Core.Projects;
@@ -83,6 +84,198 @@ public sealed class WorkspaceRuntimeCoordinatorTests
             Assert.Same(first, options.StartupDiagnostics.LastFailure);
         }
         finally { candidate.StopRelease.TrySetResult(); await coordinator.DisposeAsync(); }
+    }
+
+    [Fact]
+    public async Task Independent_close_after_rename_failure_reports_close_and_joins_its_pending_hook()
+    {
+        using var fixture = new Fixture();
+        using var gate = fixture.Gate(fixture.Disk.User, holdPrepare: true);
+        var options = new RunOptions(false, fixture.Disk.User, null);
+        var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+            new HostRuntime(new() { UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+                AdditionalDiscoveryRoots = [fixture.Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100) }, owner));
+        try
+        {
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+            var rename = await coordinator.RenameAsync("");
+            Assert.Equal("InvalidName", rename.ErrorCode);
+            var previous = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("InvalidName", previous.ErrorCode);
+            Assert.True(coordinator.CanUseCurrentRuntime);
+
+            var close = await coordinator.PrepareCloseAsync();
+            Assert.True(close.Pending);
+            Assert.Equal("ProjectPreparationPending", close.ErrorCode);
+            var report = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.NotEqual(previous.ReportId, report.ReportId);
+            Assert.Equal("Unknown", report.Stage);
+            Assert.Equal(close.ErrorCode, report.ErrorCode);
+            using var json = JsonDocument.Parse(report.Encode());
+            Assert.Equal(report.ReportId, json.RootElement.GetProperty("reportId").GetString());
+            Assert.Equal("Unknown", json.RootElement.GetProperty("stage").GetString());
+            Assert.Equal(close.ErrorCode, json.RootElement.GetProperty("errorCode").GetString());
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("systemErrorCode").ValueKind);
+            var destination = Path.Combine(fixture.Disk.Root, "reports");
+            Directory.CreateDirectory(destination);
+            Assert.Equal(HostReportExportStatus.Succeeded, await HostErrorReportExport.TryWriteAsync(destination, report));
+            Assert.Equal(report.Encode(), await File.ReadAllBytesAsync(Path.Combine(destination, report.FileName)));
+
+            Assert.True((await coordinator.PrepareCloseAsync()).Pending);
+            Assert.Same(report, options.StartupDiagnostics.LastFailure);
+            Assert.Single(gate.Events, item => item == "prepare");
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Disk.User); });
+        }
+        finally { gate.PrepareRelease.TrySetResult(); await coordinator.DisposeAsync(); }
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
+    public async Task Close_joining_pending_switch_keeps_the_owned_preparation_report()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync();
+        using var gate = fixture.Gate(fixture.Disk.User, holdPrepare: true);
+        var options = new RunOptions(false, fixture.Disk.User, null);
+        var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+            new HostRuntime(new() { UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+                AdditionalDiscoveryRoots = [fixture.Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100) }, owner));
+        try
+        {
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.Runtime!.Manager.EnableAsync(PluginId, confirmTrust: true)).Succeeded);
+            Assert.True((await coordinator.SwitchAsync(target.Id)).Pending);
+            var report = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("ProjectPreparationPending", report.ErrorCode);
+            Assert.True((await coordinator.PrepareCloseAsync()).Pending);
+            Assert.Same(report, options.StartupDiagnostics.LastFailure);
+            Assert.True((await coordinator.PrepareCloseAsync()).Pending);
+            Assert.Same(report, options.StartupDiagnostics.LastFailure);
+            Assert.Single(gate.Events, item => item == "prepare");
+            Assert.False(gate.StopStarted.Task.IsCompleted);
+        }
+        finally { gate.PrepareRelease.TrySetResult(); await coordinator.DisposeAsync(); }
+        Assert.Equal(0, gate.Live);
+    }
+
+    [Fact]
+    public async Task Close_joining_pending_rollback_keeps_the_original_failure_report()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync(seedEnabled: true);
+        using var candidate = fixture.Gate(fixture.Root(target.Id), holdStop: true);
+        var catalogPath = Path.Combine(fixture.Disk.User, ".workspaces", "catalog.json");
+        var original = await File.ReadAllBytesAsync(catalogPath);
+        var options = new RunOptions(false, fixture.Disk.User, null);
+        var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+        {
+            if (scope.Id == target.Id) File.WriteAllText(catalogPath, "{broken}");
+            return new HostRuntime(new() { UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+                AdditionalDiscoveryRoots = [fixture.Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100) }, owner);
+        });
+        try
+        {
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.SwitchAsync(target.Id)).Pending);
+            var report = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("CatalogCommit", report.Stage);
+            Assert.Equal("InvalidCatalog", report.ErrorCode);
+            var close = await coordinator.PrepareCloseAsync();
+            Assert.True(close.Pending);
+            Assert.Equal("ProjectCloseCleanupRequired", close.ErrorCode);
+            Assert.Same(report, options.StartupDiagnostics.LastFailure);
+            Assert.True((await coordinator.PrepareCloseAsync()).Pending);
+            Assert.Same(report, options.StartupDiagnostics.LastFailure);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(target.Id)); });
+        }
+        finally
+        {
+            candidate.StopRelease.TrySetResult();
+            await File.WriteAllBytesAsync(catalogPath, original);
+            await coordinator.DisposeAsync();
+        }
+        Assert.Equal(0, candidate.Live);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task New_work_after_retirement_drain_gets_its_own_failure_report(bool retryCatalog)
+    {
+        using var fixture = new Fixture();
+        var retired = await fixture.CreateTargetAsync();
+        var current = await fixture.CreateTargetAsync();
+        var failing = await fixture.CreateTargetAsync();
+        var options = new RunOptions(false, fixture.Disk.User, null);
+        var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+        {
+            if (scope.Id == failing.Id) throw new BadImageFormatException(HostStartupDiagnosticsTests.PrivateText);
+            return new HostRuntime(new() { UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+                AdditionalDiscoveryRoots = [fixture.Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100) }, owner);
+        });
+        RetainedLeaseFault? fault = null;
+        var catalogPath = Path.Combine(fixture.Disk.User, ".workspaces", "catalog.json");
+        byte[]? originalCatalog = null;
+        try
+        {
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.SwitchAsync(retired.Id)).Succeeded);
+            var leaseField = typeof(HostRuntime).GetField("_lease", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            fault = new RetainedLeaseFault(Assert.IsAssignableFrom<IDisposable>(leaseField.GetValue(coordinator.Runtime)));
+            leaseField.SetValue(coordinator.Runtime, fault);
+            var pending = await coordinator.SwitchAsync(current.Id);
+            Assert.True(pending.Pending);
+            Assert.Equal("ProjectRetirementPending", pending.ErrorCode);
+            Assert.Equal(current.Id, coordinator.ActiveProject!.Id);
+            var previous = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("ProjectRetirementPending", previous.ErrorCode);
+            Assert.True((await coordinator.RetryAsync()).Pending);
+            Assert.Same(previous, options.StartupDiagnostics.LastFailure);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(retired.Id)); });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(current.Id)); });
+
+            fault.AllowRelease = true;
+            ProjectSwitchResult failure;
+            if (retryCatalog)
+            {
+                originalCatalog = await File.ReadAllBytesAsync(catalogPath);
+                await File.WriteAllTextAsync(catalogPath, "{broken}");
+                failure = await coordinator.RetryAsync();
+            }
+            else failure = await coordinator.SwitchAsync(failing.Id);
+            Assert.False(failure.Succeeded);
+            Assert.False(failure.Pending);
+            Assert.Equal(retryCatalog ? "InvalidCatalog" : "ApplicationFileInvalid", failure.ErrorCode);
+            var report = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.NotEqual(previous.ReportId, report.ReportId);
+            Assert.Equal(retryCatalog ? "CatalogOpen" : "RuntimeCreation", report.Stage);
+            Assert.Equal(failure.ErrorCode, report.ErrorCode);
+            var cause = retryCatalog ? new ProjectWorkspaceStoreException("InvalidCatalog").HResult : new BadImageFormatException().HResult;
+            using var json = JsonDocument.Parse(report.Encode());
+            Assert.Equal($"0x{unchecked((uint)cause):X8}", json.RootElement.GetProperty("systemErrorCode").GetString());
+            Assert.DoesNotContain("synthetic", json.RootElement.GetRawText(), StringComparison.OrdinalIgnoreCase);
+            Assert.True(coordinator.CanUseCurrentRuntime);
+            using var next = HostRuntime.AcquireLease(fixture.Root(retired.Id));
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(current.Id)); });
+        }
+        finally
+        {
+            if (fault is not null) fault.AllowRelease = true;
+            if (originalCatalog is not null) await File.WriteAllBytesAsync(catalogPath, originalCatalog);
+            await coordinator.DisposeAsync();
+        }
+    }
+
+    // Test-only wrapper retains the real lease when disposal fails, then releases it on retry.
+    private sealed class RetainedLeaseFault(IDisposable lease) : IDisposable
+    {
+        public bool AllowRelease { get; set; }
+        public void Dispose()
+        {
+            if (!AllowRelease) throw new IOException("synthetic retirement disposal failure");
+            lease.Dispose();
+        }
     }
 
     [Fact]

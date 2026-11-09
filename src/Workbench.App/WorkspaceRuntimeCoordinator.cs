@@ -63,10 +63,19 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                 return Task.FromResult(new ProjectSwitchResult(false, true, "ProjectCloseCleanupRequired"));
             if (_closePreparation is { IsCompleted: false }) return _closePreparation;
             if (_closePreparation is { IsCompletedSuccessfully: true } done && done.Result.Succeeded) return done;
+            var continuingClose = _preparingClose;
+            var joiningOwnedTransition = _attempt is not null || _retiring is not null;
             _preparingClose = true; // Published synchronously before a queued callback can run.
             _normalCloseRequested = true; // Also cancels target admission in an already queued switch.
             return _closePreparation = QueueLocked(async () =>
             {
+                // A new close owns a new report, but a pending close or a transition it
+                // joins must retain that operation's first failure across retries.
+                if (!continuingClose && !joiningOwnedTransition && _attempt is null && _retiring is null)
+                {
+                    _options.StartupDiagnostics.BeginOperation();
+                    _options.StartupDiagnostics.Enter(HostDiagnosticStage.Unknown);
+                }
                 if (_attempt is { } attempt)
                 {
                     if (attempt.Stage == SwitchStage.Prepare && _current is { Stopped: false } && attempt.Candidate is null)
@@ -453,9 +462,10 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
             _transitionRequests++;
             return QueueLocked(async () =>
             {
+                var continuingRetirement = _retiring is not null;
                 // A retry that only continues owned startup/rollback/retirement is the
                 // same attempt. Preserve its original failure ID, checkpoint and HRESULT.
-                if (_attempt is null && _retiring is null)
+                if (_attempt is null && !continuingRetirement)
                 {
                     _options.StartupDiagnostics.BeginOperation();
                     _options.StartupDiagnostics.Enter(HostDiagnosticStage.Unknown);
@@ -464,6 +474,13 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                 {
                     if (_normalCloseRequested) return Block("ProjectClosing", HasPendingOwnedWork);
                     if (!await DrainRetiringAsync().ConfigureAwait(false)) return Block("ProjectRetirementPending", true);
+                    // Once old retirement actually settles, the queued request is new
+                    // work, unless it continues a still-owned switch attempt.
+                    if (continuingRetirement && _attempt is null)
+                    {
+                        _options.StartupDiagnostics.BeginOperation();
+                        _options.StartupDiagnostics.Enter(HostDiagnosticStage.Unknown);
+                    }
                     return await operation().ConfigureAwait(false);
                 }
                 catch (Exception error)
