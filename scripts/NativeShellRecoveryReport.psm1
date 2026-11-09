@@ -213,11 +213,39 @@ function Test-ShellRecoveryFailureDiagnostic {
     Test-ShellRecoveryDiagnosticFrame $d.initialFrame
     if ($d.Contains('icon') -and $null -ne $d.icon) {
         $icon = $d.icon
-        Assert-ShellKeys $icon @('subject','stage','actualWidth','actualHeight','referenceWidth','referenceHeight')
+        $iconKeys = @('subject','stage','actualWidth','actualHeight','referenceWidth','referenceHeight')
+        if ($icon -is [Collections.IDictionary] -and $icon.Contains('difference')) { $iconKeys += 'difference' }
+        if ($icon -is [Collections.IDictionary] -and $icon.Contains('pngSwitch')) { $iconKeys += 'pngSwitch' }
+        Assert-ShellKeys $icon $iconKeys
         if ($icon.subject -isnot [string] -or $icon.subject -cnotin @('embedded','window','regression16','regression32','regressionMismatch','regressionMissing') -or
             $icon.stage -isnot [string] -or $icon.stage -cnotin @('start','handle','load','legacy','bitmap','directory','reference','pixels','complete')) { throw 'ShellRecoveryIconDiagnosticInvalid' }
         foreach ($name in @('actualWidth','actualHeight','referenceWidth','referenceHeight')) {
             if (-not (Test-ShellInt $icon[$name] 0 ([int]::MaxValue))) { throw 'ShellRecoveryIconDiagnosticInvalid' }
+        }
+        if ($icon.Contains('pngSwitch') -and ($icon.pngSwitch -isnot [string] -or $icon.pngSwitch -cnotin @('true','false','undefined','unavailable'))) { throw 'ShellRecoveryIconDiagnosticInvalid' }
+        if ($icon.Contains('difference')) {
+            $diff = $icon.difference
+            Assert-ShellKeys $diff @('alphaOnly','transparentRgbOnly','rgbOnly','alphaAndRgb','maxAlphaDelta','maxRgbDelta')
+            foreach ($name in @('alphaOnly','transparentRgbOnly','rgbOnly','alphaAndRgb')) {
+                if (-not (Test-ShellInt $diff[$name] 0 65536)) { throw 'ShellRecoveryIconDiagnosticInvalid' }
+            }
+            foreach ($name in @('maxAlphaDelta','maxRgbDelta')) {
+                if (-not (Test-ShellInt $diff[$name] 0 255)) { throw 'ShellRecoveryIconDiagnosticInvalid' }
+            }
+            $total = $diff.alphaOnly + $diff.transparentRgbOnly + $diff.rgbOnly + $diff.alphaAndRgb
+            $alphaChanges = $diff.alphaOnly + $diff.alphaAndRgb
+            $rgbChanges = $diff.transparentRgbOnly + $diff.rgbOnly + $diff.alphaAndRgb
+            $validContext = ($d.stage -ceq 'healthy-icon-regression' -and $icon.subject -cin @('regression16','regression32','regressionMismatch','regressionMissing')) -or
+                            ($d.stage -ceq 'healthy-icon' -and $icon.subject -cin @('embedded','window'))
+            $regressionSizes = @{ regression16=16; regression32=32; regressionMismatch=16; regressionMissing=17 }
+            if ($regressionSizes.ContainsKey($icon.subject) -and
+                ($icon.actualWidth -ne $regressionSizes[$icon.subject] -or $icon.actualHeight -ne $regressionSizes[$icon.subject])) { throw 'ShellRecoveryIconDiagnosticInvalid' }
+            if (-not $icon.Contains('pngSwitch') -or -not $validContext -or $icon.stage -cne 'pixels' -or
+                -not (Test-ShellInt $icon.actualWidth 1 256) -or -not (Test-ShellInt $icon.actualHeight 1 256) -or
+                $icon.referenceWidth -ne $icon.actualWidth -or $icon.referenceHeight -ne $icon.actualHeight -or
+                $total -lt 1 -or $total -gt ($icon.actualWidth * $icon.actualHeight) -or
+                (($diff.maxAlphaDelta -eq 0) -ne ($alphaChanges -eq 0)) -or
+                (($diff.maxRgbDelta -eq 0) -ne ($rgbChanges -eq 0))) { throw 'ShellRecoveryIconDiagnosticInvalid' }
         }
     }
     if ($d.Contains('iconRegression') -and $null -ne $d.iconRegression) { Assert-ShellRecoveryIconRegression $d.iconRegression }

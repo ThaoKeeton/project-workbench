@@ -181,6 +181,66 @@ try {
     $withIcon.diagnostic.iconRegression = @{ legacyWidth=16; legacyHeight=16; legacyOutOfRange=$true }
     $iconFile = Write-Json $withIcon 'diagnostic-icon.json'
     Test-ShellRecoveryFailureDiagnostic -Path $iconFile -Directory $root | Out-Null; $passed++
+    # These values are aggregates only: the strict parser must reject hidden
+    # data and combinations that could not result from a completed scan.
+    $withSwitch = $withIcon | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $withSwitch.diagnostic.icon.stage='reference'; $withSwitch.diagnostic.icon.pngSwitch='undefined'
+    Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $withSwitch 'diagnostic-icon-switch-only.json') -Directory $root | Out-Null; $passed++
+    $withDifference = $withIcon | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $withDifference.diagnostic.icon.pngSwitch='undefined'
+    $withDifference.diagnostic.icon.difference = @{ alphaOnly=1; transparentRgbOnly=1; rgbOnly=1; alphaAndRgb=1; maxAlphaDelta=127; maxRgbDelta=10 }
+    Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $withDifference 'diagnostic-icon-difference.json') -Directory $root | Out-Null; $passed++
+    foreach ($switch in @('true','false','unavailable')) {
+        $variant = $withDifference | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+        $variant.diagnostic.icon.pngSwitch = $switch
+        Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $variant 'diagnostic-switch.json') -Directory $root | Out-Null; $passed++
+    }
+    $maxDifference = $withDifference | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $maxDifference.diagnostic.icon.actualWidth=256; $maxDifference.diagnostic.icon.actualHeight=256
+    $maxDifference.diagnostic.icon.referenceWidth=256; $maxDifference.diagnostic.icon.referenceHeight=256
+    $maxDifference.diagnostic.icon.pngSwitch='false'
+    $maxDifference.diagnostic.icon.difference=@{ alphaOnly=65536; transparentRgbOnly=0; rgbOnly=0; alphaAndRgb=0; maxAlphaDelta=255; maxRgbDelta=0 }
+    Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $maxDifference 'diagnostic-maximum.json') -Directory $root | Out-Null; $passed++
+    foreach ($entry in @(@('regression16',16),@('regression32',32),@('regressionMismatch',16),@('regressionMissing',17))) {
+        $variant = $withDifference | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+        $variant.diagnostic.stage='healthy-icon-regression'; $variant.diagnostic.icon.subject=$entry[0]
+        $variant.diagnostic.icon.actualWidth=$entry[1]; $variant.diagnostic.icon.actualHeight=$entry[1]
+        $variant.diagnostic.icon.referenceWidth=$entry[1]; $variant.diagnostic.icon.referenceHeight=$entry[1]
+        Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $variant 'diagnostic-regression-size.json') -Directory $root | Out-Null; $passed++
+    }
+    foreach ($case in @('raw','unknown-key','missing-key','null','negative','too-large','string','fraction','array','zero-differences','over-area','width-zero','width-too-large','dimensions-disagree','wrong-icon-stage','wrong-driver-stage','wrong-subject','wrong-regression-size','alpha-max-zero','alpha-max-spurious','rgb-max-zero','rgb-max-spurious','delta-too-large','switch-raw','switch-array','switch-missing','switch-null')) {
+        $bad = $withDifference | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+        switch ($case) {
+            raw { $bad.diagnostic.icon.difference.pixels='private' }
+            'unknown-key' { $bad.diagnostic.icon.difference.extra=0 }
+            'missing-key' { $bad.diagnostic.icon.difference.Remove('rgbOnly') }
+            null { $bad.diagnostic.icon.difference=$null }
+            negative { $bad.diagnostic.icon.difference.alphaOnly=-1 }
+            'too-large' { $bad.diagnostic.icon.difference.alphaOnly=65537 }
+            string { $bad.diagnostic.icon.difference.alphaOnly='1' }
+            fraction { $bad.diagnostic.icon.difference.alphaOnly=1.5 }
+            array { $bad.diagnostic.icon.difference.alphaOnly=@(1) }
+            'zero-differences' { $bad.diagnostic.icon.difference=@{alphaOnly=0;transparentRgbOnly=0;rgbOnly=0;alphaAndRgb=0;maxAlphaDelta=0;maxRgbDelta=0} }
+            'over-area' { $bad.diagnostic.icon.difference.alphaOnly=256 }
+            'width-zero' { $bad.diagnostic.icon.actualWidth=0 }
+            'width-too-large' { $bad.diagnostic.icon.actualWidth=257; $bad.diagnostic.icon.referenceWidth=257 }
+            'dimensions-disagree' { $bad.diagnostic.icon.referenceHeight=15 }
+            'wrong-icon-stage' { $bad.diagnostic.icon.stage='reference' }
+            'wrong-driver-stage' { $bad.diagnostic.stage='healthy-titlebar' }
+            'wrong-subject' { $bad.diagnostic.icon.subject='regression16' }
+            'wrong-regression-size' { $bad.diagnostic.stage='healthy-icon-regression'; $bad.diagnostic.icon.subject='regression32' }
+            'alpha-max-zero' { $bad.diagnostic.icon.difference.maxAlphaDelta=0 }
+            'alpha-max-spurious' { $bad.diagnostic.icon.difference.alphaOnly=0; $bad.diagnostic.icon.difference.alphaAndRgb=0 }
+            'rgb-max-zero' { $bad.diagnostic.icon.difference.maxRgbDelta=0 }
+            'rgb-max-spurious' { $bad.diagnostic.icon.difference.transparentRgbOnly=0; $bad.diagnostic.icon.difference.rgbOnly=0; $bad.diagnostic.icon.difference.alphaAndRgb=0 }
+            'delta-too-large' { $bad.diagnostic.icon.difference.maxRgbDelta=256 }
+            'switch-raw' { $bad.diagnostic.icon.pngSwitch='private path' }
+            'switch-array' { $bad.diagnostic.icon.pngSwitch=@('true') }
+            'switch-missing' { $bad.diagnostic.icon.Remove('pngSwitch') }
+            'switch-null' { $bad.diagnostic.icon.pngSwitch=$null }
+        }
+        Refuse { Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $bad 'bad-difference.json') -Directory $root } "icon-difference-$case"
+    }
     $withoutIcon = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
     $withoutIcon.diagnostic.icon = $null
     $withoutIcon.diagnostic.iconRegression = $null

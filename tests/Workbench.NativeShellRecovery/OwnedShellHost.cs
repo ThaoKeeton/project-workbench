@@ -7,7 +7,33 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
-// Only fixed labels and numeric bitmap dimensions are copied into failure receipts.
+// Only bounded aggregates, never individual pixels, leave the driver.
+public sealed class IconPixelDifference
+{
+    public int AlphaOnly { get; private set; }
+    public int TransparentRgbOnly { get; private set; }
+    public int RgbOnly { get; private set; }
+    public int AlphaAndRgb { get; private set; }
+    public int MaxAlphaDelta { get; private set; }
+    public int MaxRgbDelta { get; private set; }
+
+    public bool Compare(int expected, int actual)
+    {
+        if (expected == actual) return true;
+        int ea = (int)((uint)expected >> 24), aa = (int)((uint)actual >> 24);
+        bool alpha = ea != aa, rgb = (expected & 0xffffff) != (actual & 0xffffff);
+        if (alpha && rgb) AlphaAndRgb++;
+        else if (alpha) AlphaOnly++;
+        else if (ea == 0) TransparentRgbOnly++;
+        else RgbOnly++;
+        MaxAlphaDelta = Math.Max(MaxAlphaDelta, Math.Abs(ea - aa));
+        for (int shift=0; shift<=16; shift+=8)
+            MaxRgbDelta = Math.Max(MaxRgbDelta, Math.Abs(((expected >> shift) & 255) - ((actual >> shift) & 255)));
+        return false;
+    }
+}
+
+// Only fixed labels, numeric dimensions and bounded pixel aggregates are copied into failure receipts.
 public sealed class IconComparisonTrace
 {
     public string Subject { get; private set; }
@@ -16,15 +42,21 @@ public sealed class IconComparisonTrace
     public int ActualHeight { get; internal set; }
     public int ReferenceWidth { get; internal set; }
     public int ReferenceHeight { get; internal set; }
+    public IconPixelDifference Difference { get; private set; }
     public void Begin(string subject)
     {
         if (subject != "embedded" && subject != "window" && subject != "regression16" && subject != "regression32" && subject != "regressionMismatch" && subject != "regressionMissing") throw new ArgumentException();
-        Subject = subject; Stage = "start"; ActualWidth = ActualHeight = ReferenceWidth = ReferenceHeight = 0;
+        Subject = subject; Stage = "start"; ActualWidth = ActualHeight = ReferenceWidth = ReferenceHeight = 0; Difference = null;
     }
     public void SetStage(string stage)
     {
         if (stage != "start" && stage != "handle" && stage != "load" && stage != "legacy" && stage != "bitmap" && stage != "directory" && stage != "reference" && stage != "pixels" && stage != "complete") throw new ArgumentException();
         Stage = stage;
+    }
+    public void CompletePixels(IconPixelDifference difference)
+    {
+        if (Stage != "pixels" || difference == null) throw new InvalidOperationException();
+        Difference = difference;
     }
 }
 
@@ -278,13 +310,15 @@ public sealed class OwnedShellHost : IDisposable
             {
                 trace.ReferenceWidth = expected.Width; trace.ReferenceHeight = expected.Height;
                 if (expected.Width != width || expected.Height != height) return false;
-                trace.SetStage("pixels"); int visible = 0;
+                trace.SetStage("pixels"); int visible = 0; bool equal = true;
+                var difference = new IconPixelDifference();
                 for (int y=0; y<height; y++) for (int x=0; x<width; x++)
                 {
                     Color pixel = expected.GetPixel(x,y);
-                    if (pixel.ToArgb() != actual.GetPixel(x,y).ToArgb()) return false;
+                    if (!difference.Compare(pixel.ToArgb(), actual.GetPixel(x,y).ToArgb())) equal = false;
                     if (pixel.A != 0) visible++;
                 }
+                if (!equal) { trace.CompletePixels(difference); return false; }
                 trace.SetStage("complete"); return visible > 32;
             }
         }

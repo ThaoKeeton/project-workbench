@@ -56,6 +56,20 @@ function New-FailureDiagnostic {
         if ($trace.Subject -cin @('embedded','window','regression16','regression32','regressionMismatch','regressionMissing') -and
             $trace.Stage -cin @('start','handle','load','legacy','bitmap','directory','reference','pixels','complete')) {
             $icon = @{ subject=$trace.Subject; stage=$trace.Stage; actualWidth=[int]$trace.ActualWidth; actualHeight=[int]$trace.ActualHeight; referenceWidth=[int]$trace.ReferenceWidth; referenceHeight=[int]$trace.ReferenceHeight }
+            # This is the public AppContext observation at receipt time;
+            # it does not claim to reveal a framework's private cached state.
+            $switch = 'unavailable'
+            try {
+                $value = $false
+                if ([AppContext]::TryGetSwitch('Switch.System.Drawing.DontSupportPngFramesInIcons',[ref]$value)) {
+                    $switch = if ($value) { 'true' } else { 'false' }
+                } else { $switch = 'undefined' }
+            } catch { $switch = 'unavailable' }
+            $icon['pngSwitch'] = $switch
+            if ($null -ne $trace.Difference) {
+                $diff = $trace.Difference
+                $icon['difference'] = @{ alphaOnly=[int]$diff.AlphaOnly; transparentRgbOnly=[int]$diff.TransparentRgbOnly; rgbOnly=[int]$diff.RgbOnly; alphaAndRgb=[int]$diff.AlphaAndRgb; maxAlphaDelta=[int]$diff.MaxAlphaDelta; maxRgbDelta=[int]$diff.MaxRgbDelta }
+            }
         }
     }
     $legacy = $null; $legacyVariable = Get-Variable -Name iconRegression -Scope Script -ErrorAction SilentlyContinue
