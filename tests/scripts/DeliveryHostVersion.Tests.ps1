@@ -37,6 +37,20 @@ Write-Output "Delivery host version parser: $passed metadata-only cases passed (
 $testing = Import-Module (Join-Path $repo 'scripts/TestingPluginDelivery.psm1') -Force -PassThru
 & $testing { param($c) Assert-TestingHostVersion "0.4.1+$c" '0.4.1.0' '1.0.0.0' $c } $commit
 $passed++
+# Both fields contain the SAME malformed source, so a string-equality check alone cannot refuse it.
+$formatFailures = [Collections.Generic.List[string]]::new()
+foreach ($case in @(
+    @{ name = 'trailing LF'; value = ($commit + "`n") },
+    @{ name = 'short'; value = $commit.Substring(0, 39) },
+    @{ name = 'uppercase'; value = $commit.ToUpperInvariant() }
+)) {
+    $rejected = $false
+    try { & $testing { param($c) Assert-TestingHostVersion "0.4.1+$c" '0.4.1.0' '1.0.0.0' $c } $case.value }
+    catch { if ($_.Exception.Message -cne 'TestingHostSourceMismatch') { throw }; $rejected = $true }
+    if (-not $rejected) { $formatFailures.Add($case.name) }
+    else { Write-Host "Malformed Testing host source refused: $($case.name)"; $passed++ }
+}
+if ($formatFailures.Count) { throw ('Accepted malformed matching host/source metadata: ' + ($formatFailures -join ', ')) }
 foreach ($case in @(
     @("0.4.0+$commit", '0.4.0.0', '1.0.0.0'),
     @("0.4.1+$commit", '0.4.0.0', '1.0.0.0'),

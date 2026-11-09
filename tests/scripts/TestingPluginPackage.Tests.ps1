@@ -126,6 +126,37 @@ if ($HelperGuardsOnly) {
     $descriptor = @{ Available = $true; ImageSha = '1' * 64; NativeSourceSha = '2' * 64; SourceCommit = '3' * 40; Msvc = 'actual-msvc-required'; Sdk = 'actual-sdk-required'; Profile = 'Production' }
     Refuses { & $module { param($d) Assert-TestingOwnedHelper -Image ([byte[]]::new(0)) -Descriptor $d } $descriptor } 'TestingOwnedHelperInvalid'
     Refuses { & $module { param($d) Assert-TestingOwnedHelper -Image ([byte[]]::new(1024)) -Descriptor $d } $descriptor } 'TestingOwnedHelperInvalid'
+    # Distinguish source-format refusal from the following empty-image/ref-only guards.
+    # These synthetic inputs are not an accepted package or a PE/native execution.
+    $formatFailures = [Collections.Generic.List[string]]::new()
+    $validCommit = '0123456789abcdef0123456789abcdef01234567'
+    $invalidCommits = @(
+        @{ name = 'trailing LF'; value = ($validCommit + "`n") },
+        @{ name = 'short'; value = $validCommit.Substring(0, 39) },
+        @{ name = 'uppercase'; value = $validCommit.ToUpperInvariant() }
+        @{ name = 'array'; value = @($validCommit) }
+    )
+    foreach ($case in $invalidCommits) {
+        $descriptor.SourceCommit = $case.value
+        try { Refuses { & $module { param($d) Assert-TestingOwnedHelper -Image ([byte[]]::new(0)) -Descriptor $d } $descriptor } 'TestingOwnedHelperDescriptorInvalid' }
+        catch { $formatFailures.Add("descriptor $($case.name): $($_.Exception.Message)") }
+    }
+    $descriptor.SourceCommit = '3' * 40
+    $metadataRoot = Join-Path $temp 'metadata-only'
+    New-Item -ItemType Directory -Path $metadataRoot -Force | Out-Null
+    $contract = & $module { param($p) Get-TestingProfile $p } $Profile
+    foreach ($name in @('README.md', 'SHA256SUMS', $contract.zip)) { [IO.File]::WriteAllText((Join-Path $metadataRoot $name), 'synthetic boundary fixture') }
+    $metadata = @{ schemaVersion = 1; profile = $Profile; pluginId = $contract.id; version = '0.2.0'; minimumHostVersion = '0.4.0'; sourceCommit = $validCommit; referenceOnly = $true; sourceTreeDirty = $false }
+    $metadataPath = Join-Path $metadataRoot 'provenance.json'
+    [IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Compress))
+    Refuses { Test-TestingPluginDelivery -Directory $metadataRoot -AppDirectory (Join-Path $temp 'unused-app') @profileArguments } 'TestingDeliveryReferenceOnly'
+    foreach ($case in $invalidCommits) {
+        $metadata.sourceCommit = $case.value
+        [IO.File]::WriteAllText($metadataPath, ($metadata | ConvertTo-Json -Compress))
+        try { Refuses { Test-TestingPluginDelivery -Directory $metadataRoot -AppDirectory (Join-Path $temp 'unused-app') @profileArguments } 'TestingDeliveryIdentityInvalid' }
+        catch { $formatFailures.Add("metadata $($case.name): $($_.Exception.Message)") }
+    }
+    if ($formatFailures.Count) { throw ('Malformed source format was not refused at its boundary: ' + ($formatFailures -join '; ')) }
     $descriptor.Profile = 'ReferenceOnly'; $descriptor.Available = $false
     Refuses { & $module { param($d) Assert-TestingOwnedHelper -Image ([byte[]]::new(1024)) -Descriptor $d } $descriptor } 'TestingOwnedHelperDescriptorInvalid'
     Refuses { New-TestingPluginDelivery -BuildDirectory $temp -OutputDirectory (Join-Path $temp 'delivery') -ReferenceOnly @profileArguments } 'TestingDeliveryReferenceOnly'

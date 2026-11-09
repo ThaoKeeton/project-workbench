@@ -83,7 +83,7 @@ function Get-TestingSourceFiles {
 }
 function Assert-TestingHostVersion {
     param([string]$ProductVersion, [string]$FileVersion, [string]$AssemblyVersion, [string]$SourceCommit)
-    if ($SourceCommit -cnotmatch '^[0-9a-f]{40}$' -or $ProductVersion -cne "0.4.1+$SourceCommit" -or
+    if ($SourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or $ProductVersion -cne "0.4.1+$SourceCommit" -or
         $FileVersion -cne '0.4.1.0' -or $AssemblyVersion -cne '1.0.0.0') { throw 'TestingHostSourceMismatch' }
 }
 function Get-TestingHostIdentity {
@@ -111,7 +111,7 @@ function Assert-TestingSourceRecords {
 function Assert-TestingOwnedHelper {
     param([byte[]]$Image, [Collections.IDictionary]$Descriptor)
     if ($Descriptor['Available'] -isnot [bool] -or -not $Descriptor['Available'] -or $Descriptor['Profile'] -cne 'Production' -or
-        $Descriptor['ImageSha'] -cnotmatch '^[0-9a-f]{64}$' -or $Descriptor['NativeSourceSha'] -cnotmatch '^[0-9a-f]{64}$' -or $Descriptor['SourceCommit'] -cnotmatch '^[0-9a-f]{40}$' -or
+        $Descriptor['ImageSha'] -cnotmatch '^[0-9a-f]{64}$' -or $Descriptor['NativeSourceSha'] -cnotmatch '^[0-9a-f]{64}$' -or ($Descriptor['SourceCommit'] -isnot [string] -or $Descriptor['SourceCommit'] -cnotmatch '\A[0-9a-f]{40}\z') -or
         [string]::IsNullOrWhiteSpace($Descriptor['Msvc']) -or [string]::IsNullOrWhiteSpace($Descriptor['Sdk'])) { throw 'TestingOwnedHelperDescriptorInvalid' }
     if ($Image.Length -lt 256 -or $Image.Length -gt 16777216 -or -not [WorkbenchTestingArchiveAudit]::NativePe($Image)) { throw 'TestingOwnedHelperInvalid' }
     $offset = [BitConverter]::ToInt32($Image, 0x3c)
@@ -227,7 +227,7 @@ function Invoke-TestingPluginDeliveryValidation {
     if (@(Compare-Object $files @(Get-ChildItem -LiteralPath $Directory -Force | ForEach-Object Name) -CaseSensitive).Count -ne 0) { throw 'TestingDeliveryFileListInvalid' }
     foreach ($file in Get-ChildItem -LiteralPath $Directory -Force) { if ($file.PSIsContainer -or ($file.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'TestingDeliveryLinkRefused' } }
     $metadata = Read-TestingJsonFile (Join-Path $Directory 'provenance.json') 'TestingDeliveryIdentityInvalid'
-    if ($metadata.schemaVersion -ne 1 -or $metadata.profile -cne $Profile -or $metadata.pluginId -cne $contract.id -or $metadata.version -cne '0.2.0' -or $metadata.minimumHostVersion -cne '0.4.0' -or $metadata.sourceCommit -cnotmatch '^[0-9a-f]{40}$') { throw 'TestingDeliveryIdentityInvalid' }
+    if ($metadata.schemaVersion -ne 1 -or $metadata.profile -cne $Profile -or $metadata.pluginId -cne $contract.id -or $metadata.version -cne '0.2.0' -or $metadata.minimumHostVersion -cne '0.4.0' -or ($metadata.sourceCommit -isnot [string] -or $metadata.sourceCommit -cnotmatch '\A[0-9a-f]{40}\z')) { throw 'TestingDeliveryIdentityInvalid' }
     if ($metadata.referenceOnly -isnot [bool] -or $metadata.referenceOnly) { throw 'TestingDeliveryReferenceOnly' }
     if ($metadata.sourceTreeDirty -isnot [bool] -or $metadata.sourceTreeDirty) { throw 'TestingDeliveryDirtySource' }
     $actualHost = Get-TestingHostIdentity -AppDirectory $AppDirectory -SourceCommit $metadata.sourceCommit
