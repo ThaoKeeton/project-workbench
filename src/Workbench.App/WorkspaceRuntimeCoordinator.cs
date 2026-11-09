@@ -473,14 +473,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                 try
                 {
                     if (_normalCloseRequested) return Block("ProjectClosing", HasPendingOwnedWork);
-                    if (!await DrainRetiringAsync().ConfigureAwait(false)) return Block("ProjectRetirementPending", true);
-                    // Once old retirement actually settles, the queued request is new
-                    // work, unless it continues a still-owned switch attempt.
-                    if (continuingRetirement && _attempt is null)
-                    {
-                        _options.StartupDiagnostics.BeginOperation();
-                        _options.StartupDiagnostics.Enter(HostDiagnosticStage.Unknown);
-                    }
+                    if (!await DrainRetiringAsync(continuingRetirement).ConfigureAwait(false)) return Block("ProjectRetirementPending", true);
                     return await operation().ConfigureAwait(false);
                 }
                 catch (Exception error)
@@ -506,7 +499,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
         return close is { RuntimeCleanupSettled: true, Completion.IsFaulted: true };
     }
 
-    private async Task<bool> DrainRetiringAsync()
+    private async Task<bool> DrainRetiringAsync(bool handoffToNextOperation = false)
     {
         if (_retiring is not { } retired) return true;
         try
@@ -515,7 +508,17 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
             if (retired.Runtime is not null) await retired.Runtime.DisposeAsync().ConfigureAwait(false);
         }
         catch (Exception) { return false; }
-        _retiring = null;
+        lock (_gate)
+        {
+            // Close admission and this handoff must agree whether retirement is
+            // still owned; otherwise a joined close can lose its first report.
+            _retiring = null;
+            if (handoffToNextOperation && _attempt is null && !_normalCloseRequested && !_closing)
+            {
+                _options.StartupDiagnostics.BeginOperation();
+                _options.StartupDiagnostics.Enter(HostDiagnosticStage.Unknown);
+            }
+        }
         _current?.Document.SetPaused(_closing);
         return true;
     }

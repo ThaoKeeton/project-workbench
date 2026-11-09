@@ -267,13 +267,142 @@ public sealed class WorkspaceRuntimeCoordinatorTests
         }
     }
 
-    // Test-only wrapper retains the real lease when disposal fails, then releases it on retry.
+    [Fact]
+    public async Task Close_admitted_during_retirement_drain_keeps_the_retirement_report()
+    {
+        using var fixture = new Fixture();
+        var retired = await fixture.CreateTargetAsync();
+        var current = await fixture.CreateTargetAsync(seedEnabled: true);
+        using var currentGate = fixture.Gate(fixture.Root(current.Id), holdPrepare: true);
+        using var retirementRelease = new ManualResetEventSlim();
+        var options = new RunOptions(false, fixture.Disk.User, null);
+        var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+            new HostRuntime(new() { UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+                AdditionalDiscoveryRoots = [fixture.Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100) }, owner));
+        RetainedLeaseFault? fault = null;
+        try
+        {
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.SwitchAsync(retired.Id)).Succeeded);
+            var leaseField = typeof(HostRuntime).GetField("_lease", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            fault = new RetainedLeaseFault(Assert.IsAssignableFrom<IDisposable>(leaseField.GetValue(coordinator.Runtime)));
+            leaseField.SetValue(coordinator.Runtime, fault);
+            var pending = await coordinator.SwitchAsync(current.Id);
+            Assert.True(pending.Pending);
+            Assert.Equal("ProjectRetirementPending", pending.ErrorCode);
+            await currentGate.Initialized.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var first = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("CatalogCommit", first.Stage);
+            Assert.Equal("ProjectRetirementPending", first.ErrorCode);
+
+            fault.ReleaseGate = retirementRelease;
+            fault.AllowRelease = true;
+            var retry = coordinator.RetryAsync();
+            await fault.ReleaseEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(retry.IsCompleted);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(retired.Id)); });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(current.Id)); });
+            var close = coordinator.PrepareCloseAsync();
+            Assert.False(close.IsCompleted);
+            Assert.False(coordinator.CanUseCurrentRuntime);
+
+            retirementRelease.Set();
+            Assert.True((await retry.WaitAsync(TimeSpan.FromSeconds(5))).Succeeded);
+            var closeResult = await close.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.True(closeResult.Pending);
+            Assert.Equal("ProjectPreparationPending", closeResult.ErrorCode);
+            var observed = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal(first.ReportId, observed.ReportId);
+            Assert.Equal(first.Stage, observed.Stage);
+            Assert.Equal(first.ErrorCode, observed.ErrorCode);
+            Assert.Equal(first.Encode(), observed.Encode());
+            Assert.Single(currentGate.Events, item => item == "prepare");
+            using var released = HostRuntime.AcquireLease(fixture.Root(retired.Id));
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(current.Id)); });
+        }
+        finally
+        {
+            retirementRelease.Set();
+            if (fault is not null) fault.AllowRelease = true;
+            currentGate.PrepareRelease.TrySetResult();
+            await coordinator.DisposeAsync();
+        }
+        Assert.Equal(0, currentGate.Live);
+    }
+
+    [Fact]
+    public async Task Dispose_admitted_during_retirement_drain_keeps_the_retirement_report()
+    {
+        using var fixture = new Fixture();
+        var retired = await fixture.CreateTargetAsync();
+        var current = await fixture.CreateTargetAsync();
+        using var retirementRelease = new ManualResetEventSlim();
+        var options = new RunOptions(false, fixture.Disk.User, null);
+        var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+            new HostRuntime(new() { UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+                AdditionalDiscoveryRoots = [fixture.Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100) }, owner));
+        RetainedLeaseFault? retiredFault = null, currentFault = null;
+        try
+        {
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.SwitchAsync(retired.Id)).Succeeded);
+            var leaseField = typeof(HostRuntime).GetField("_lease", BindingFlags.Instance | BindingFlags.NonPublic)!;
+            retiredFault = new RetainedLeaseFault(Assert.IsAssignableFrom<IDisposable>(leaseField.GetValue(coordinator.Runtime)));
+            leaseField.SetValue(coordinator.Runtime, retiredFault);
+            var pending = await coordinator.SwitchAsync(current.Id);
+            Assert.True(pending.Pending);
+            Assert.Equal("ProjectRetirementPending", pending.ErrorCode);
+            var first = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("CatalogCommit", first.Stage);
+            Assert.Equal("ProjectRetirementPending", first.ErrorCode);
+
+            retiredFault.ReleaseGate = retirementRelease;
+            retiredFault.AllowRelease = true;
+            var retry = coordinator.RetryAsync();
+            await retiredFault.ReleaseEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            Assert.False(retry.IsCompleted);
+            currentFault = new RetainedLeaseFault(Assert.IsAssignableFrom<IDisposable>(leaseField.GetValue(coordinator.Runtime)));
+            leaseField.SetValue(coordinator.Runtime, currentFault);
+            var close = coordinator.DisposeAsync().AsTask();
+            Assert.False(close.IsCompleted);
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(retired.Id)); });
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(current.Id)); });
+
+            retirementRelease.Set();
+            Assert.True((await retry.WaitAsync(TimeSpan.FromSeconds(5))).Succeeded);
+            var failure = await Assert.ThrowsAsync<ProjectWorkspaceStoreException>(() => close.WaitAsync(TimeSpan.FromSeconds(5)));
+            Assert.Equal("ProjectClosePending", failure.ErrorCode);
+            var observed = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal(first.ReportId, observed.ReportId);
+            Assert.Equal(first.Stage, observed.Stage);
+            Assert.Equal(first.ErrorCode, observed.ErrorCode);
+            Assert.Equal(first.Encode(), observed.Encode());
+            using var released = HostRuntime.AcquireLease(fixture.Root(retired.Id));
+            Assert.ThrowsAny<IOException>(() => { using var duplicate = HostRuntime.AcquireLease(fixture.Root(current.Id)); });
+        }
+        finally
+        {
+            retirementRelease.Set();
+            if (retiredFault is not null) retiredFault.AllowRelease = true;
+            if (currentFault is not null) currentFault.AllowRelease = true;
+            await coordinator.DisposeAsync();
+        }
+    }
+
+    // Test-only wrapper retains the real lease when disposal fails or is gated, then releases it.
     private sealed class RetainedLeaseFault(IDisposable lease) : IDisposable
     {
         public bool AllowRelease { get; set; }
+        public ManualResetEventSlim? ReleaseGate { get; set; }
+        public TaskCompletionSource ReleaseEntered { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public void Dispose()
         {
             if (!AllowRelease) throw new IOException("synthetic retirement disposal failure");
+            if (ReleaseGate is { } gate)
+            {
+                ReleaseEntered.TrySetResult();
+                if (!gate.Wait(TimeSpan.FromSeconds(10))) throw new TimeoutException("Synthetic retirement gate was not released.");
+            }
             lease.Dispose();
         }
     }
