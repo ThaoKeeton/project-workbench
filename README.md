@@ -2,18 +2,20 @@
 
 Windows 原生插件工作台基础版：同一个 WinUI 3 窗口承载独立插件提供的原生页面、设置与异步命令。使用标准 Windows 控件，不嵌入其他应用窗口，不使用 WebView。
 
-默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已在历史固定运行中通过配套主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。本轮开发版本的完整复验尚未通过，历史记录见[验证边界](docs/windows-verification.md)。业务包需按需安装，下载配套 `workbench-business-plugins` 后按 [业务插件安装说明](docs/install-business-plugins.md) 选择内层 ZIP 或原厂文件夹；[固定来源与测试边界](tests/integration/README.md) 另列。另有按需安装的 [测试设计插件](docs/testing-plugin.md)：本地需求/规范化 Figma JSON、可追溯用例、自动保存/CSV 和 SIMULATED 虚拟执行。原生页面新增明确发起的[有界远程 Figma 只读导入](docs/figma-readonly-capture.md)及所选来源的 OpenAI 用例创作；凭据使用宿主项目凭据存储，必须人工审核，生成步骤保持手动。验证使用合成凭据、内存 HTTP 与真实 Core 项目存储；新远程控件的 Windows 实际操作、真实服务和完整受控 Windows 自动化尚未验证。
+默认分发两个独立构建的本地示例：工作摘要（可编辑草稿）和测试用例（可编辑列表、CSV 导出），均使用预置数据。钉钉 0.3.2 和 UPCAM 0.1.0 已在历史固定运行中通过配套主程序的原生页面、模拟业务、生命周期及重启维护测试；另以独立 UPCAM 模拟验收插件验证实际定时 Core、停止与授权恢复。当前功能源码 `b1a3e9c9963c2d75798a6068f99a6270d81bd074` 已通过 [Actions42559172825](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825) 的 Linux 和 Windows 两个 job，完整范围与历史记录见[验证边界](docs/windows-verification.md)。业务包按需安装；已交付的 UPCAM 0.1.1 配对宿主功能源码为 `655d7b6496067daad7c5e4cefb1f1da1b8379536`，当前 b1 的 `workbench-business-plugins` 仍是旧 UPCAM 0.1.0 回归基线，不应替换已交付的 0.1.1，b1 + 0.1.1 尚未运行验证。版本选择与安装方式见 [业务插件安装说明](docs/install-business-plugins.md)；[固定来源与测试边界](tests/integration/README.md) 另列。
+
+另有按需安装的 [测试设计插件](docs/testing-plugin.md)：本地需求/规范化 Figma JSON、可追溯用例、自动保存/CSV 和 SIMULATED 虚拟执行。原生页面新增明确发起的[有界远程 Figma 只读导入](docs/figma-readonly-capture.md)及所选来源的 OpenAI 用例创作；凭据使用宿主项目凭据存储，必须人工审核，生成步骤保持手动。新远程控件已在上述 b1 批次的 Windows Server 2025 上通过实际控件操作、真实 Core 项目存储及合成凭据/内存 HTTP 验证；真实 provider、完整已安装 owned 面板逐项点跑、任意用户电脑控制和 Windows 11 人工验收仍待验证。
 
 ## 在 Windows 构建和启动
 
-主要开发与验收环境为受支持的 **Windows 11 24H2 或更新版本、x64**。安装 [.NET 10 SDK](https://learn.microsoft.com/dotnet/core/install/windows)（仓库固定 `10.0.403`，允许更新补丁）和 PowerShell 7。还需安装可由 `vswhere` 发现的 MSVC x64 C++ 工具和 Windows SDK；`scripts/build-owned-lab.ps1` 使用真实 `cl`、`rc`、`link` 构建静态 CRT 原生 helper，NuGet/.NET SDK 不能代替这一步。若使用 IDE，需要 Visual Studio 2026 18.0+；CLI 可使用带上述组件的 Build Tools。首次还原需要 NuGet 网络访问。
+主要开发与验收环境为受支持的 **Windows 11 24H2 或更新版本、x64**。安装 [.NET 10 SDK](https://learn.microsoft.com/dotnet/core/install/windows)（仓库固定 `10.0.403`，允许更新补丁）和 **PowerShell 7.5+**。当前报告解析使用 `ConvertFrom-Json -DateKind String`；[官方文档](https://learn.microsoft.com/en-us/powershell/module/microsoft.powershell.utility/convertfrom-json?view=powershell-7.5)注明 `DateKind` 从 7.5 引入。还需安装可由 `vswhere` 发现的 MSVC x64 C++ 工具和 Windows SDK；`scripts/build-owned-lab.ps1` 使用真实 `cl`、`rc`、`link` 构建静态 CRT 原生 helper，NuGet/.NET SDK 不能代替这一步。若使用 IDE，需要 Visual Studio 2026 18.0+；CLI 可使用带上述组件的 Build Tools。首次还原需要 NuGet 网络访问。
 
 ```powershell
 pwsh -File .\scripts\build.ps1
 .\artifacts\native\app\Workbench.App.exe
 ```
 
-脚本清理 `artifacts/native`，发布自包含的 .NET/Windows App SDK 应用目录，并分别编译、暂存两个分发示例及一个独立可安装测试 ZIP（不自动安装）。分发和解压时必须保留 **整个 `artifacts/native/app/` 目录**，不能只复制 EXE。固定 Windows App SDK `1.8.260921001`；不裁剪、不 AOT、不单文件发布。API 目标为 `net10.0-windows10.0.19041.0`，该 API 下限不表示 Windows 10 已获运行时支持或通过兼容性验收；Windows 10 企业版/LTSC 需另行验证。
+脚本在任何构建前检查 `artifacts/native` 和所选 Testing package-build 根：默认是 `artifacts/testing-package-build`，显式 `-IncludeSourceAcceptance` 时是 `artifacts/testing-source-acceptance-package-build`。任一根非空即以 `TestingDeliveryAlreadyExists` 拒绝，保留已有产物与证据。再次构建应保留此前输出，使用新的 checkout 及不存在或为空的这些构建根。脚本发布自包含的 .NET/Windows App SDK 应用目录，并分别编译、暂存两个分发示例及一个独立可安装测试 ZIP（不自动安装）。分发和解压时必须保留 **整个 `artifacts/native/app/` 目录**，不能只复制 EXE。固定 Windows App SDK `1.8.260921001`；不裁剪、不 AOT、不单文件发布。API 目标为 `net10.0-windows10.0.19041.0`，该 API 下限不表示 Windows 10 已获运行时支持或通过兼容性验收；Windows 10 企业版/LTSC 需另行验证。
 
 首次打开“插件”，审查包详情，再点击“启用”并明确确认信任。启用后左侧出现插件页面及各自设置入口。“命令”可生成本地摘要草稿或导出演示 CSV。设置页支持跟随系统、浅色和深色主题。
 
@@ -68,13 +70,13 @@ pwsh -File .\scripts\project-workspace-probe.ps1 -TimeoutSeconds 180
 
 冒烟使用新的 `%TEMP%/ProjectWorkbench-smoke/<随机 ID>/` 用户根目录，只复制、发现两个已知分发示例，不读取真实用户设置或已安装插件。它在真实 WinUI UI 线程创建并附加页面和设置控件，执行本地命令；编辑真实摘要 TextBox，跨页面导航后检查草稿、调用保存按钮并验证重复生成保留编辑；停用/重新启用时检查恢复已保存版本，最后停止/关闭，输出 `artifacts/native/native-smoke.json`。失败、超时或无法初始化 WinUI 都返回非零退出码。临时数据保留用于排查，位置写入报告。它不代替主题外观、DPI、键盘和屏幕阅读器的人工验收。
 
-GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbench` 分支提交运行 Linux Core 测试及 Windows Core/发布/原生冒烟。当前工作流最多上传七个保留一天的产物：Linux 结果、合并的 `native-verification-evidence`、通过严格收集后才存在的 `workbench-ui-gallery`，以及仅在任务成功时上传的主程序、测试插件、SDK 和业务插件四个交付包。Gallery 使用真实 WinUI `MainWindow.Content` 渲染，只包含窗口内容，不包含系统标题栏、独立弹窗或桌面；其 index 明列阻塞、跳过、未到达页面与原探针失败。当前开发环境是 Linux；跨目标 C# 编译不证明 Windows 原生启动或截图成功。[Windows 验证记录和待验清单](docs/windows-verification.md) 区分这些证据。
+GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbench` 分支提交运行 Linux Core 测试及 Windows Core/发布/原生冒烟。当前工作流最多上传七个保留一天的产物：Linux 结果、合并的 `native-verification-evidence`、通过严格收集后才存在的 `workbench-ui-gallery`，以及仅在任务成功时上传的主程序、测试插件、SDK 和业务插件四个交付包。Gallery 使用真实 WinUI `MainWindow.Content` 渲染，只包含窗口内容，不包含系统标题栏、独立弹窗或桌面；其 index 明列阻塞、跳过、未到达页面与原探针失败。功能源码 b1a3e9c 的 [Actions42559172825](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825) 已实际通过 Windows Core 1561 项、0 跳过和 Linux Core 1558 项、4 项 Windows 专用跳过；SourceAcceptance 36 项/4 个实际进程、旧 DingTalk+UPCAM 51 项/12 个实际进程及 owned 驱动 27 项均通过，七份下载字节已核对。owned 驱动 27 项不等于完整已安装 owned 面板 UI 验收。当前开发环境是 Linux，Windows 原生结果来自该 Windows Server 2025 运行；[Windows 验证记录和待验清单](docs/windows-verification.md) 列明证据及边界。
 
 新增 runtime probe 显式使用 `%TEMP%/ProjectWorkbench-runtime-probe/<GUID>/`，测试夹具位于 `artifacts/native/fixtures/`，不进入应用 `Plugins/` 或普通启动。它验证原生凭据操作、后台响应、关闭超时/回调/重试所有权，以及六个独立 OS 进程的恢复、停用、更新、回滚和移除。[历史 host/SDK 0.2 Server 2025 CI](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231)（源码 `a54a668`）已通过 Windows Core 267 项、原生 14 项、管理 17 项、六阶段平台重启 7 项，以及独立业务插件 12 进程共 51 项检查。后六进程使用不同 ID、不同隔离根的上游模拟验收二进制；实际定时 Core 和本地模拟发送成功不代表真实送达。钉钉仅测试合成模型值保存及 commit/revision 读取，模型 key 值消费与 provider dispatch 未执行。没有真实 Webhook/HTTP/业务发送。Windows 11 的 18 项主题/DPI/选择器/可访问性等人工清单全部待验。完整 [Windows 应用目录](https://github.com/ThaoKeeton/project-workbench/actions/runs/42307917231/artifacts/13547711575) 和校验值见 [验证记录](docs/windows-verification.md)。
 
-当前主程序及两个 SDK 预览版本为 0.4.0，程序集/API/运行服务身份保持 1；可选项目服务 1 的契约和已知工作保留规则见 [项目服务](docs/project-services.md)。真实旧 SDK 0.2 业务包与固定来源不变；新的 Windows 原生/独立业务兼容结果需由当前提交的 CI 单独验证。
+当前主程序及两个 SDK 预览版本为 0.4.0，程序集/API/运行服务身份保持 1；可选项目服务 1 的契约和已知工作保留规则见 [项目服务](docs/project-services.md)。真实旧 SDK 0.2 业务包与固定来源不变；其与功能源码 b1a3e9c 的 Windows 原生/独立业务兼容结果已由上述同源 CI 验证。该旧包结果及 SDK 兼容性不证明尚未运行的 b1 + UPCAM 0.1.1 配对。
 
-新增 workspace probe 只使用 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/` 的合成数据，以两个实际 EXE 进程运行 seed16/verify3；检查原生项目控件、上下文/主题/设置/空凭据分离、草稿、失败重试、归档、窗口重开与进程恢复。新增检查在实际上下文控件接受文字后立即切换/关闭，不等异步事件或自动保存，并在同一插件实例的私有编辑器内修正已结束的准备失败后显式重试。成功需同时具备实际 WinUI Closed、OS exit 0 和退出后重新取得目录锁。阶段报告只完成一次，保留原生 PID、首个拒绝原因和实际租约结果；当前工作流收进 `native-verification-evidence`。此脚本需要源码构建生成的独立测试夹具，普通下载的主程序目录不包含夹具；它不是下载用户的操作步骤。当前新增源码仍需本轮 Windows CI 的实际报告，参考编译不等于原生执行。Windows 11 人工、真实旧独立 GUI、更高版本迁移和真实 provider 验收继续延期，不要求用户现在参与测试。
+新增 workspace probe 只使用 `%TEMP%/ProjectWorkbench-workspace-probe/<GUID>/` 的合成数据，以两个实际 EXE 进程运行 seed16/verify3；检查原生项目控件、上下文/主题/设置/空凭据分离、草稿、失败重试、归档、窗口重开与进程恢复。新增检查在实际上下文控件接受文字后立即切换/关闭，不等异步事件或自动保存，并在同一插件实例的私有编辑器内修正已结束的准备失败后显式重试。成功需同时具备实际 WinUI Closed、OS exit 0 和退出后重新取得目录锁。阶段报告只完成一次，保留原生 PID、首个拒绝原因和实际租约结果；当前工作流收进 `native-verification-evidence`。此脚本需要源码构建生成的独立测试夹具，普通下载的主程序目录不包含夹具；它不是下载用户的操作步骤。上述功能源码 b1a3e9c 的 Windows CI 已通过这些实际进程检查；后续文档提交不代表新的构建或原生运行。Windows 11 人工、真实旧独立 GUI、更高版本迁移和真实 provider 验收继续延期，不要求用户现在参与测试。
 
 独立 SDK 导出：`pwsh ./scripts/export-sdk.ps1`。CI artifact `workbench-sdk-0.4.0` 含固定版本源码、两个 NuGet 包及提交/文件哈希清单；接入步骤见 [插件契约与独立构建](docs/integrations/plugin-contract-v1.md)。
 
@@ -84,4 +86,4 @@ GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbenc
 - [Core 生命周期与存储约定](src/Workbench.Core/README.md)
 - [设计范围](docs/superpowers/specs/2026-11-06-native-workbench-design.md)
 
-可选测试服务 1（最低宿主 0.4.0）已接入项目源/用例/执行/证据上下文、共享控制器和独立原生“测试设计”入口。开发配置使用 `workbench-testing-plugin-0.2.0`；仅在同一运行确有可用产物时安装其中 ZIP，再审查并信任启用，其包不加入固定六文件业务 companion。当前受控原生全量检查及下载核验仍未完成。已有预置测试列表仍是独立示例。实际 Windows CI 与下载字节审计以准确源码对应的运行报告为准，不能用 Linux 参考编译替代。见 [测试插件安装与操作](docs/testing-plugin.md) 和 [测试服务](docs/testing-services.md)。
+可选测试服务 1（最低宿主 0.4.0）已接入项目源/用例/执行/证据上下文、共享控制器和独立原生“测试设计”入口。开发配置使用 `workbench-testing-plugin-0.2.0`；仅在同一运行确有可用产物时安装其中 ZIP，再审查并信任启用，其包不加入固定六文件业务 companion。功能源码 b1a3e9c 的既有 Testing 本地原生流程、独立来源验收及下载核验已通过；完整已安装 owned 面板逐项点跑、任意用户电脑、真实 provider 和 Windows 11 人工验收继续单列。已有预置测试列表仍是独立示例。实际 Windows CI 与下载字节审计以准确源码对应的运行报告为准，不能用 Linux 参考编译替代。见 [测试插件安装与操作](docs/testing-plugin.md) 和 [测试服务](docs/testing-services.md)。

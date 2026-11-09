@@ -1,18 +1,24 @@
 # 钉钉与 UPCAM 生产插件安装
 
-2026-11-09 当前已核对的配套为 [Actions42559172825](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825)，宿主0.4.0/API与服务1，功能源码 `b1a3e9c9963c2d75798a6068f99a6270d81bd074`：[完整Windows x64宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649448205)与[业务插件配套](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649572382)均已下载核对实际字节及EXE/DLL/manifest配对。宿主原始ZIP90,666,891bytes/SHA256 `fad691b874f66bf1ef522f5be38e9aa12edb81b69a0000da63609351409a1139`，配套ZIP `6399a0f3919baf2c31277900926e5da9b4440d30e91e04b54871166bf3f609f7`。目录含.NET10.0.14运行时，完整解压后运行 `Workbench.App.exe`。
+2026-11-09 已交付的UPCAM生产插件0.1.1（源码 `389ccb1`，完整提交 `389ccb1ef578e0cd01db91d4df540578e1851378`，共享core0.4.4）已配对实际shipping Workbench0.4.0功能源码 `655d7b6496067daad7c5e4cefb1f1da1b8379536`，见 [UPCAM Actions42560626924](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42560626924)，`shipping-pairing` job成功、32/32项通过。配对宿主是 [run42518602297/artifact13633291911](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633291911)，原始ZIP SHA256为 `eee78758d3f38e94abe81a6c13f3252b76ce02c00f13375dd6d925e8dd6a9db4`。继续使用已交付的这组文件；下列较新b1宿主是另一批开发证据，b1 + 0.1.1尚未运行验证，源码/SDK兼容性与旧包51项不能代替配对结果。
 
-**UPCAM版本限制：此配套仍为生产0.1.0，共享core0.4.3，不含用户报告的只读诊断卡死修复。** 新core/独立版0.4.4及插件0.1.1由独立任务处理；待正式包到位，须重新核对并在实际宿主检查，不把本轮旧包51项报告当成新包结果。当前51项/12进程证明旧包安装、原生页面、本地虚构预览、后台及退役；不证明真实Teambition账户可用性。
+该32项使用未修改的shipping EXE及Core PackageStore按文件夹安装714文件，验证原生信任/启用/页面、worker停止/重新启用、正常退出与租约释放，并验证未配置的诊断前置检查在10秒内返回拒绝；未执行活动采集中的诊断取消，也未操作原生文件夹选择器。没有服务操作、真实provider或继承的业务凭据，不能据此声称完整真实诊断流程已通过。
 
-只安装UPCAM时，解压业务配套外层ZIP，选择其中 `upcam/package.zip` 导入“包维护”，再在“插件”审查并明确启用。其根清单ID `com.upcam.task-digest` /0.1.0/API1/最低宿主0.2.0；ZIP SHA256仍为 `3e07b7db0e3f17871b88ce1e45ac09d3b8724e6628a35fd5e0cdc1eb9ad95dbe`。不得将GitHub外层ZIP当作插件包。
+该次[配对证据artifact13648829414](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42560626924/artifacts/13648829414)名为 `UPCAMTaskDigest-0.1.1-Workbench-0.4.0-shipping-pairing`，59,420bytes、SHA256 `a0bf0c3ea074930e368ce7d2fc3912d368c78c36587cd2b1518b59a3e8631ab9`，记录到期时间2026-11-23T04:14:39Z；它是配对证据，不是可直接导入的插件ZIP。
+
+0.1.1生产插件的[上游外层下载artifact13648103554](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42558432795/artifacts/13648103554)名为 `UPCAMTaskDigest-workbench-plugin-0.1.1-windows`，11,373,048bytes、API声明SHA256 `31ff967f419c5fe87b6d33e4f00a115eb5d607747075c4e1979b28df673d6d49`，记录到期时间2026-11-23T03:57:01Z。此处只核对现有API元数据，未重新下载该插件；配对输入记录的内层生产包SHA256为 `e026ba443810ea6e1368cecc18ffb0dedc0c2a445ba752a8925b06a96b35833e`。外层下载、内层生产包与配对证据是不同对象；保留已交付文件，不能把外层下载或配对证据直接导入为根清单插件包。
+
+较新的宿主/旧业务回归配套为 [Actions42559172825](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825)，宿主0.4.0/API与服务1，功能源码 `b1a3e9c9963c2d75798a6068f99a6270d81bd074`：[完整Windows x64宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649448205)与[业务插件配套](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649572382)均已下载核对实际字节及EXE/DLL/manifest配对。宿主原始ZIP90,666,891bytes/SHA256 `fad691b874f66bf1ef522f5be38e9aa12edb81b69a0000da63609351409a1139`，配套ZIP `6399a0f3919baf2c31277900926e5da9b4440d30e91e04b54871166bf3f609f7`。目录含.NET10.0.14运行时，完整解压后运行 `Workbench.App.exe`。
+
+**b1业务配套仍为旧UPCAM生产0.1.0/共享core0.4.3，不含0.1.1诊断修复；不要用它覆盖用户已收到的0.1.1。** 当前51项/12进程仅证明旧包安装、原生页面、本地虚构预览、后台及退役，不证明真实Teambition账户可用性。仅在空白回归账户明确试用旧包时，解压业务配套外层ZIP，选择其中 `upcam/package.zip` 导入“包维护”，再在“插件”审查并明确启用。其根清单ID `com.upcam.task-digest` /0.1.0/API1/最低宿主0.2.0；ZIP SHA256仍为 `3e07b7db0e3f17871b88ce1e45ac09d3b8724e6628a35fd5e0cdc1eb9ad95dbe`。不得将GitHub外层ZIP当作插件包。
 
 普通工作台数据根为 `%LOCALAPPDATA%\ProjectWorkbench`。默认单项目的UPCAM配置绑定在 `settings\com.upcam.task-digest\settings.json`，默认业务profile为 `data\com.upcam.task-digest\profile`；其他项目使用各自runtime根。业务凭据留在该profile的当前Windows用户DPAPI存储，宿主保险库仅保存生成的恢复绑定密钥。不会自动读取旧独立版 `%LOCALAPPDATA%\UPCAM\TaskDigest`；接续原目录须完全退出独立版并由用户明确选择，保留原账本，不复制出第二个可调度副本。实际Teambition凭据与权限仍由用户在本机配置；本轮未连接真实profile、使用Webhook、调用真实模型或发送钉钉。
 
-此批次还通过Windows Core1561、Linux1558/4明确跳过、来源36项/4实际进程及owned27项。WindowsServer2025自动验证不等于Windows11用户实测。链接按一天保留，当前约2026-11-10 04:21UTC到期；没有创建安装器或release。不可变的下载包README保留构建时历史655批次说明，当前b1配套以本页链接及其manifest中的宿主来源/哈希为准。下列历史记录仍保留。
+此b1批次还通过Windows Core1561/0跳过、Linux1558/4项Windows专用明确跳过、来源36项/4实际进程及owned驱动27项。来源控件在Windows Server2025使用合成凭据/内存HTTP；owned驱动27项不等于完整已安装owned面板逐项点跑。任意用户电脑、真实provider和Windows11人工验收仍单列。b1链接按一天保留，当前约2026-11-10 04:21UTC到期；没有创建安装器或release。不可变的下载包README保留构建时历史655批次说明，b1旧包回归配套以本页链接及其manifest中的宿主来源/哈希为准；后续文档提交不代表新二进制。下列历史记录仍保留。
 
 历史2026-11-08已核对的配套批次为 [Actions42518602297](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297)，功能源码 `655d7b6496067daad7c5e4cefb1f1da1b8379536`、宿主0.4.0/API1：[完整宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633291911)与[两个业务生产插件](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13632778983)已下载核对实际字节；原生自动矩阵及51项双插件检查通过。下方安装层级/固定插件版本与本批次一致。产物按一天保留，链接是否仍有效以Actions页面为准；这不是installer、签名release或Windows11人工验收。全程只用合成数据，没有真实Webhook或钉钉消息；当前不要求用户开始人工集中验收。
 
-从本仓库**同一次成功的 Windows Actions 运行**下载 `workbench-win-x64` 和 `workbench-business-plugins`。前者是完整宿主目录；后者是可按需安装的两个生产插件。保留整个宿主目录后启动 `Workbench.App.exe`，不能只复制 EXE。人工验收目标为仍在微软服务期内的 Windows 11 24H2 或更新版本、x64；版本下限不表示该版本所有 edition 仍受支持，请核对[微软版本服务信息](https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information)。Server 2025 自动检查与 Windows 11 人工检查分别记录。
+以下配套安装与上游下载步骤均针对固定的钉钉0.3.2/UPCAM0.1.0旧版回归基线，不是已交付0.1.1的替换步骤。从本仓库**同一次成功的 Windows Actions 运行**下载 `workbench-win-x64` 和 `workbench-business-plugins`。前者是完整宿主目录；后者是可按需安装的两个生产插件。保留整个宿主目录后启动 `Workbench.App.exe`，不能只复制 EXE。人工验收目标为仍在微软服务期内的 Windows 11 24H2 或更新版本、x64；版本下限不表示该版本所有 edition 仍受支持，请核对[微软版本服务信息](https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information)。Server 2025 自动检查与 Windows 11 人工检查分别记录。
 
 `workbench-business-plugins` 的 GitHub 外层下载 ZIP 先解压到普通目录，得到：
 
@@ -62,7 +68,7 @@ if ((Get-FileHash (Join-Path $app 'Workbench.App.exe')).Hash -ne $manifest.host.
 
 ## 已有的上游下载如何选择
 
-若上游产物仍在有效期内，也可从下列运行获取原包；已过期时选择同次新构建的业务配套，避免把独立应用目录当插件：
+仅为上述旧版回归基线，若上游产物仍在有效期内，也可从下列运行获取原包；已过期时核对同次新构建业务配套的固定版本，避免把独立应用目录当插件。这些旧包不应替换已交付的0.1.1：
 
 - [钉钉 42295585483 的产物](https://github.com/ThaoKeeton/dingtalk-insights/actions/runs/42295585483/artifacts/13542127319)：先解压 GitHub 外层下载，再找 `workbench-plugin/DingTalkInsights.Workbench-0.3.2-win-x64.zip`。该内层 ZIP 已有根 `plugin.json`，在“导入 ZIP”选择它。
 - [UPCAM 42268731102 的产物](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42268731102/artifacts/13529430900)：先解压 GitHub 外层下载，找到 `UPCAMTaskDigest-workbench-production-0.1.0-win-x64.zip`，再解压该原厂内层 ZIP，进入 `com.upcam.task-digest` 文件夹。使用“包维护”→“导入文件夹”（或“插件”→“从本地文件夹安装”），在 FolderPicker 中选择**直接包含 `plugin.json` 的这个文件夹**。不要选其父目录；选择器可取消。

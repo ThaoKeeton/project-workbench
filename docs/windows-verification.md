@@ -24,13 +24,19 @@
 
 [完整宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649448205)90,666,891bytes；实际EXE `9ce9b9c2d9d112edcf41e0487e9200bf8d54b2f33abde45f32833d928661efc7`、DLL `34b57b9cdbfa7d616c5eed6bbc4234349b0947643d3c836333f8f5e3c65a94f5`，ProductVersion0.4.0+b1a3e9c、FileVersion0.4.0.0、AssemblyVersion1.0.0.0。目录实际含.NET10.0.14运行时。SDK0.4.0的两份NuGet/11份源码、Testing生产8/夹具10及共同7项字节/245份Git源码记录、实际PE/依赖/Production helper/当前宿主配套均核对通过。测试内层ZIP `c12a7945629c558138e3ee46642edaa37254e771571888f9850c0082de53f103`；来源夹具内层ZIP `eaad414132ccee5eb83d76c6077d27048746801be005d7caa4014c57a7ccf702`。
 
-[业务配套](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649572382)仍固定DingTalk0.3.2/UPCAM生产0.1.0（共享core0.4.3），不含正在另行修复的UPCAM0.1.1诊断进度/取消问题。旧包的51项不能充当新包验收；后者须单独核对新版本/源码/哈希并在实际宿主检查。安装与数据路径见[当前操作说明](install-business-plugins.md)。
+[业务配套](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649572382)仍固定DingTalk0.3.2/UPCAM生产0.1.0（共享core0.4.3），UPCAM根清单ZIP SHA256为 `3e07b7db0e3f17871b88ce1e45ac09d3b8724e6628a35fd5e0cdc1eb9ad95dbe`。这是不含0.1.1诊断修复的旧回归基线，不应覆盖用户已收到的0.1.1。旧包51项及源码/SDK兼容性不证明b1 + 0.1.1，后者尚未运行验证。安装与数据路径见[当前操作说明](install-business-plugins.md)。
+
+**独立已交付的UPCAM配对：** 生产插件0.1.1（源码 `389ccb1`，完整提交 `389ccb1ef578e0cd01db91d4df540578e1851378`，共享core0.4.4）已配对实际shipping Workbench0.4.0功能源码 `655d7b6496067daad7c5e4cefb1f1da1b8379536`，见 [UPCAM Actions42560626924](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42560626924)，`shipping-pairing` job成功、32/32项通过。实际使用未修改shipping EXE及其Core PackageStore按文件夹安装714文件，核对原生信任/启用/页面、worker停止/重新启用及正常关闭退役；未配置的诊断前置检查在10秒内返回拒绝。未执行活动采集中的诊断取消，未操作原生文件夹选择器，没有服务操作、真实provider或继承的业务凭据。这些结果不覆盖完整真实诊断流程。
+
+该次[配对证据artifact13648829414](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42560626924/artifacts/13648829414)名为 `UPCAMTaskDigest-0.1.1-Workbench-0.4.0-shipping-pairing`，59,420bytes、SHA256 `a0bf0c3ea074930e368ce7d2fc3912d368c78c36587cd2b1518b59a3e8631ab9`，记录到期时间2026-11-23T04:14:39Z。它是配对证据，不是可直接安装的插件ZIP。配对宿主来自 [run42518602297/artifact13633291911](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633291911)，原始ZIP SHA256为 `eee78758d3f38e94abe81a6c13f3252b76ce02c00f13375dd6d925e8dd6a9db4`。已交付的655 + 0.1.1组合与本页较新b1宿主/原生来源开发证据分别记录，不据此建议更换宿主。
+
+0.1.1生产插件的[上游外层下载artifact13648103554](https://github.com/ThaoKeeton/upcam-task-digest/actions/runs/42558432795/artifacts/13648103554)名为 `UPCAMTaskDigest-workbench-plugin-0.1.1-windows`，11,373,048bytes、API声明SHA256 `31ff967f419c5fe87b6d33e4f00a115eb5d607747075c4e1979b28df673d6d49`，记录到期时间2026-11-23T03:57:01Z。此处只核对现有API元数据，未重新下载该插件；配对输入记录的内层生产包SHA256为 `e026ba443810ea6e1368cecc18ffb0dedc0c2a445ba752a8925b06a96b35833e`，不能与外层下载或配对证据哈希混用。
 
 当前24张原始PNG已逐张解码并核对哈希/尺寸/当前EXE/进程绑定；协调助手仅查看home与upcam-preview两图，其余没有声称逐图查看。25行清单的唯一不可用项仍是独立Docs页，替代为项目上下文编辑器。这些是实际WinUI内容渲染，保留透明图层、裁剪和上轮所列限制，不包含OS背景、标题栏、弹窗，也不构成人工外观验收。UPCAM图为虚构预览，合成acceptance的sent不是真实送达。
 
 保留42539771658、42544171178、42549570595、42555126213各次失败原件：由早期来源断言、B操作原因不可见、明确初始化失败，推进到加载器修复后重试控件表面错误。b1批次是后续实际通过，未改写早期失败。协调器下载后审计另保留PowerShell缓存启动失败和图集误把总25行当24行的检查错误；仅修正本地审计环境/索引分类，无产品测试或Windows批次重复。
 
-产物保留一天，Linux到2026-11-10约04:03UTC、其余约04:21UTC，以Actions页面为准。功能程序始终指b1a3e9c；后续文档提交不被当作新二进制。没有创建release、部署、修改账单或删除产物。Windows11用户人工验收继续单列。
+上述七份b1产物保留一天，Linux到2026-11-10约04:03UTC、其余约04:21UTC，以Actions页面为准。该批次功能程序始终指b1a3e9c；后续文档提交不被当作新二进制。没有创建release、部署、修改账单或删除产物。Windows11用户人工验收继续单列。
 
 ## 历史655d7b6批次及后续过程记录
 
