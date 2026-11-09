@@ -6,6 +6,31 @@ namespace Workbench.Core.Tests;
 
 public sealed class HostFailureTests
 {
+    [Theory]
+    [InlineData("owner", "UserStoreInUse")]
+    [InlineData("access", "StoreAccessDenied")]
+    [InlineData("io", "StoreIoFailure")]
+    [InlineData("file", "ApplicationFileMissing")]
+    [InlineData("image", "ApplicationFileInvalid")]
+    [InlineData("native", "NativeDependencyMissing")]
+    [InlineData("directory", "StoreDirectoryUnavailable")]
+    [InlineData("load", "ApplicationFileLoadFailed")]
+    public void Known_startup_failures_keep_actionable_codes_without_exposing_exception_text(string kind, string expected)
+    {
+        Exception error = kind switch
+        {
+            "owner" => new UserStoreInUseException(new IOException(PrivateResponse)),
+            "access" => new UnauthorizedAccessException(PrivateResponse),
+            "file" => new FileNotFoundException(PrivateResponse, PrivateResponse),
+            "image" => new BadImageFormatException(PrivateResponse),
+            "native" => new DllNotFoundException(PrivateResponse),
+            "directory" => new DirectoryNotFoundException(PrivateResponse),
+            "load" => new FileLoadException(PrivateResponse, PrivateResponse),
+            _ => new HostileStorageException()
+        };
+        Assert.Equal(expected, HostFailure.ProjectCode(error));
+    }
+
     [Fact]
     public void Project_failure_codes_are_allow_listed_even_for_public_sdk_and_storage_exceptions()
     {

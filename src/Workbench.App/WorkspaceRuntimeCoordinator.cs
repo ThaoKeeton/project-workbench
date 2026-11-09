@@ -288,16 +288,19 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                     {
                         if (attempt.Candidate is null)
                         {
+                            _options.StartupDiagnostics.Enter(HostDiagnosticStage.RuntimeCreation);
                             var scope = new ProjectRuntimeScope(attempt.Target.Id, attempt.Target.Name, _store.GetProjectRoot(attempt.Target.Id));
                             var candidate = attempt.Candidate = new(attempt.Target, scope, CanRecoverDocumentAfterFailedClose);
                             candidate.Document.SetPaused(true);
+                            _options.StartupDiagnostics.Enter(HostDiagnosticStage.ProjectContext);
                             await candidate.Document.InitializeAsync(ct).ConfigureAwait(false);
                             ct.ThrowIfCancellationRequested();
+                            _options.StartupDiagnostics.Enter(HostDiagnosticStage.RuntimeCreation);
                             candidate.Runtime = _factory(scope.UserRoot, scope, _owner!);
                             if (!ReferenceEquals(candidate.Runtime.Scope, scope)
                                 || !string.Equals(candidate.Runtime.UserRoot, scope.UserRoot, OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal))
                                 throw new ProjectWorkspaceStoreException("ProjectRuntimeMismatch");
-                            candidate.Startup = candidate.Runtime.InitializeAsync();
+                            candidate.Startup = candidate.Runtime.InitializeAsync(_options.TraceStartup);
                         }
                         if (attempt.Candidate.Startup is { } startup) await startup.WaitAsync(ct).ConfigureAwait(false);
                         if (attempt.Candidate.Runtime!.Manager.HasPendingStops || attempt.Candidate.Runtime.Manager.HasPendingProjectWork)
@@ -313,6 +316,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                     }
                     catch (Exception error)
                     {
+                        _options.StartupDiagnostics.Capture(error);
                         attempt.FailureCode = HostFailure.ProjectCode(error);
                         attempt.Stage = SwitchStage.Rollback;
                     }
@@ -321,10 +325,12 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
                     SetState(ProjectTransitionState.PersistingSelection);
                     try
                     {
+                        _options.StartupDiagnostics.Enter(HostDiagnosticStage.CatalogCommit);
                         Catalog = await _store.SetActiveAsync(attempt.Target.Id, Catalog!.Revision, ct).ConfigureAwait(false);
                     }
                     catch (Exception error)
                     {
+                        _options.StartupDiagnostics.Capture(error);
                         attempt.FailureCode = HostFailure.ProjectCode(error);
                         attempt.Stage = SwitchStage.Rollback;
                         break;
@@ -416,7 +422,11 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
         return Block(attempt.FailureCode ?? "ProjectOperationFailed", false, attempt.Target.Id);
     }
 
-    private void EnsureOwner() => _owner ??= WorkspaceRootLease.Acquire(_options.UserRoot);
+    private void EnsureOwner()
+    {
+        _options.StartupDiagnostics.Enter(HostDiagnosticStage.WorkspaceOwnership);
+        _owner ??= WorkspaceRootLease.Acquire(_options.UserRoot);
+    }
     private async Task EnsureCatalogAsync(CancellationToken ct)
     {
         EnsureOwner();
@@ -425,6 +435,7 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
     private async Task OpenCatalogAsync(CancellationToken ct)
     {
         EnsureOwner();
+        _options.StartupDiagnostics.Enter(HostDiagnosticStage.CatalogOpen);
         Catalog = await _store.OpenAsync(ct).ConfigureAwait(false);
         if (_current is { } current)
         {
@@ -442,13 +453,24 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
             _transitionRequests++;
             return QueueLocked(async () =>
             {
+                // A retry that only continues owned startup/rollback/retirement is the
+                // same attempt. Preserve its original failure ID, checkpoint and HRESULT.
+                if (_attempt is null && _retiring is null)
+                {
+                    _options.StartupDiagnostics.BeginOperation();
+                    _options.StartupDiagnostics.Enter(HostDiagnosticStage.Unknown);
+                }
                 try
                 {
                     if (_normalCloseRequested) return Block("ProjectClosing", HasPendingOwnedWork);
                     if (!await DrainRetiringAsync().ConfigureAwait(false)) return Block("ProjectRetirementPending", true);
                     return await operation().ConfigureAwait(false);
                 }
-                catch (Exception error) { return Block(HostFailure.ProjectCode(error), HasPendingOwnedWork); }
+                catch (Exception error)
+                {
+                    _options.StartupDiagnostics.Capture(error);
+                    return Block(HostFailure.ProjectCode(error), HasPendingOwnedWork);
+                }
                 finally { lock (_gate) _transitionRequests--; }
             });
         }
@@ -483,11 +505,13 @@ internal sealed class WorkspaceRuntimeCoordinator : IAsyncDisposable
 
     private ProjectSwitchResult Ready()
     {
+        _options.StartupDiagnostics.Enter(HostDiagnosticStage.UiReady);
         SetState(ProjectTransitionState.Idle);
         return new(true, false, null);
     }
     private ProjectSwitchResult Block(string code, bool pending, string? target = null)
     {
+        _options.StartupDiagnostics.CaptureCodeIfMissing(code);
         Transition = new(ProjectTransitionState.Blocked, ActiveProject?.Id, target ?? _attempt?.Target.Id, code);
         return new(false, pending, code);
     }

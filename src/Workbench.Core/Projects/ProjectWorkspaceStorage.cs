@@ -20,7 +20,7 @@ internal static class ProjectWorkspaceStorage
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or SecurityException)
         {
             // Never inspect an exception's Message, ToString, or inner exceptions.
-            throw Error("StoreIoFailure");
+            throw new ProjectWorkspaceStoreException("StoreIoFailure", error.HResult);
         }
     }
 

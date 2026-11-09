@@ -11,6 +11,81 @@ public sealed class WorkspaceRuntimeCoordinatorTests
     private const string PluginId = "com.example.workspace";
 
     [Fact]
+    public async Task Normal_workspace_ownership_failure_is_exportable_without_changing_data_and_retry_remains_usable()
+    {
+        using var disk = new TestDirectory();
+        var options = new RunOptions(false, disk.User, null);
+        await using var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+            new HostRuntime(new() { UserRoot = root, PluginsRoot = disk.Plugins, ProjectScope = scope }, owner));
+        using (var owner = HostRuntime.AcquireLease(disk.User))
+        {
+            var result = await coordinator.InitializeAsync();
+            Assert.False(result.Succeeded);
+            Assert.False(coordinator.CanUseCurrentRuntime);
+            Assert.Equal(OperatingSystem.IsWindows() ? "UserStoreInUse" : "StoreIoFailure", result.ErrorCode);
+            var report = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("WorkspaceOwnership", report.Stage);
+            Assert.Equal(result.ErrorCode, report.ErrorCode);
+            Assert.False(Directory.Exists(Path.Combine(disk.User, ".workspaces")));
+            var exports = Path.Combine(disk.Root, "exports");
+            Directory.CreateDirectory(exports);
+            Assert.Equal(HostReportExportStatus.Succeeded, await HostErrorReportExport.TryWriteAsync(exports, report));
+        }
+        Assert.True((await coordinator.RetryAsync()).Succeeded);
+        Assert.True(coordinator.CanUseCurrentRuntime);
+    }
+
+    [Fact]
+    public async Task Runtime_creation_failure_keeps_its_checkpoint_through_rollback()
+    {
+        using var disk = new TestDirectory();
+        var options = new RunOptions(false, disk.User, null);
+        await using var coordinator = new WorkspaceRuntimeCoordinator(options, (_, _, _) =>
+            throw new BadImageFormatException(HostStartupDiagnosticsTests.PrivateText));
+        var result = await coordinator.InitializeAsync();
+        Assert.False(result.Succeeded);
+        Assert.Equal("ApplicationFileInvalid", result.ErrorCode);
+        var report = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+        Assert.Equal("RuntimeCreation", report.Stage);
+        Assert.Equal("ApplicationFileInvalid", report.ErrorCode);
+        Assert.DoesNotContain("synthetic", System.Text.Encoding.UTF8.GetString(report.Encode()));
+    }
+
+    [Fact]
+    public async Task Retrying_pending_rollback_keeps_the_original_catalog_failure_report()
+    {
+        using var fixture = new Fixture();
+        var target = await fixture.CreateTargetAsync(seedEnabled: true);
+        using var candidate = fixture.Gate(fixture.Root(target.Id), holdStop: true);
+        var catalogPath = Path.Combine(fixture.Disk.User, ".workspaces", "catalog.json");
+        var original = await File.ReadAllBytesAsync(catalogPath);
+        var options = new RunOptions(false, fixture.Disk.User, null);
+        var coordinator = new WorkspaceRuntimeCoordinator(options, (root, scope, owner) =>
+        {
+            if (scope.Id == target.Id) File.WriteAllText(catalogPath, "{broken}");
+            return new HostRuntime(new() { UserRoot = root, PluginsRoot = Path.Combine(root, "Plugins"), ProjectScope = scope,
+                AdditionalDiscoveryRoots = [fixture.Disk.Plugins], SharedAssemblies = [typeof(WorkspaceLifecycleGate).Assembly], StopTimeout = TimeSpan.FromMilliseconds(100) }, owner);
+        });
+        try
+        {
+            Assert.True((await coordinator.InitializeAsync()).Succeeded);
+            Assert.True((await coordinator.SwitchAsync(target.Id)).Pending);
+            var first = Assert.IsType<StartupErrorReport>(options.StartupDiagnostics.LastFailure);
+            Assert.Equal("CatalogCommit", first.Stage);
+            Assert.Equal("InvalidCatalog", first.ErrorCode);
+            Assert.True((await coordinator.RetryAsync()).Pending);
+            Assert.Same(first, options.StartupDiagnostics.LastFailure);
+            await File.WriteAllBytesAsync(catalogPath, original);
+            candidate.StopRelease.TrySetResult();
+            var completed = await coordinator.RetryAsync();
+            Assert.False(completed.Succeeded);
+            Assert.False(completed.Pending);
+            Assert.Same(first, options.StartupDiagnostics.LastFailure);
+        }
+        finally { candidate.StopRelease.TrySetResult(); await coordinator.DisposeAsync(); }
+    }
+
+    [Fact]
     public async Task Sealed_close_joins_admitted_action_then_flushes_root_bound_host_state_before_hooks()
     {
         using var fixture = new Fixture();

@@ -93,6 +93,7 @@ internal sealed partial class MainWindow : Window
                 if (_options.TestingProbe is not null && !_options.SkipAutomaticProbe) await TestingNativeProbe.PrepareAsync(_options);
                 if (_options.SourceAcceptanceProbe is not null && !_options.SkipAutomaticProbe) await TestingSourceAcceptanceProbe.PrepareAsync(_options);
                 if (_workspaceCloseRequested) return; // Close may have arrived before coordinator publication.
+                _options.StartupDiagnostics.Enter(HostDiagnosticStage.WorkspaceOwnership);
                 _workspace = new(_options, (_, scope, owner) =>
                 {
                     _options.TraceStartup("constructing-project-runtime");
@@ -137,6 +138,7 @@ internal sealed partial class MainWindow : Window
         }
         catch (Exception error)
         {
+            var report = _options.StartupDiagnostics.Capture(error);
             _startupFailure = error;
             _initializing = false;
             _initialized = false;
@@ -145,7 +147,8 @@ internal sealed partial class MainWindow : Window
             DetachPluginViews();
             var message = HostFailure.Describe("HostStartupFailed", error);
             var failure = Ui.Page("工作台未能启动", message);
-            failure.Children.Add(Ui.Text("请关闭此窗口后重试。若用户目录已被占用，请先关闭另一个工作台实例。"));
+            failure.Children.Add(Ui.Text(WorkspaceGuidance(report.ErrorCode)));
+            failure.Children.Add(CreateErrorReportPanel(report));
             var close = Ui.Named(new Button { Content = "关闭窗口" }, "关闭未能启动的工作台窗口");
             close.Click += async (_, _) => await CloseAsync();
             failure.Children.Add(close);

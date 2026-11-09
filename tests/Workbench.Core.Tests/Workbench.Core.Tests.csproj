@@ -18,6 +18,8 @@
     <Compile Include="../../src/Workbench.App/RunOptions.cs" Link="Host/RunOptions.cs" />
     <Compile Include="../../src/Workbench.App/HostThemeSession.cs" Link="Host/HostThemeSession.cs" />
     <Compile Include="../../src/Workbench.App/HostFailure.cs" Link="Host/HostFailure.cs" />
+    <Compile Include="../../src/Workbench.App/HostStartupDiagnostics.cs" Link="Host/HostStartupDiagnostics.cs" />
+    <Compile Include="../../src/Workbench.App/HostErrorReportExport.cs" Link="Host/HostErrorReportExport.cs" />
     <Compile Include="../../src/Workbench.App/PackagePresentation.cs" Link="Host/PackagePresentation.cs" />
     <Compile Include="../../src/Workbench.App/NativeProbeEvidence.cs" Link="Host/NativeProbeEvidence.cs" />
     <Compile Include="../../src/Workbench.App/NativeStoreObservation.cs" Link="Host/NativeStoreObservation.cs" />

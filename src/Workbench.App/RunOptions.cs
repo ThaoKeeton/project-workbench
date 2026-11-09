@@ -19,9 +19,11 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
     public static readonly string[] SampleIds = ["com.projectworkbench.summary", "com.projectworkbench.test-cases"];
     private readonly List<object> _startupStages = [];
     public IReadOnlyList<object> StartupStages => _startupStages.ToArray();
+    internal HostStartupDiagnostics StartupDiagnostics { get; } = new();
 
     public void TraceStartup(string stage)
     {
+        StartupDiagnostics.ObserveStartup(stage);
         if (ReportPath is null) return;
         _startupStages.Add(new { stage, threadId = Environment.CurrentManagedThreadId, utc = DateTimeOffset.UtcNow });
         WriteReport(new { succeeded = false, stage, userRoot = UserRoot, startupStages = StartupStages });

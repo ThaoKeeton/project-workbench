@@ -7,6 +7,21 @@ internal static class HostFailure
 {
     internal static string ProjectCode(Exception error)
     {
+        // Host-owned categories are distinct from public SDK exception codes. Never read
+        // Message, StackTrace, Data, InnerException, or plugin-defined virtual members.
+        var startup = error switch
+        {
+            UserStoreInUseException => "UserStoreInUse",
+            UnauthorizedAccessException or System.Security.SecurityException => "StoreAccessDenied",
+            DirectoryNotFoundException => "StoreDirectoryUnavailable",
+            FileNotFoundException => "ApplicationFileMissing",
+            FileLoadException => "ApplicationFileLoadFailed",
+            BadImageFormatException => "ApplicationFileInvalid",
+            DllNotFoundException or EntryPointNotFoundException => "NativeDependencyMissing",
+            IOException => "StoreIoFailure",
+            _ => null
+        };
+        if (startup is not null) return startup;
         if (error is Workbench.Sdk.PluginTestingException testing)
         {
             var testingCode = testing.ErrorCode;

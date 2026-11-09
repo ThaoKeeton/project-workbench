@@ -8,4 +8,8 @@ public sealed record ProjectContextDocument(string Revision, string Text, bool I
 public sealed class ProjectWorkspaceStoreException(string errorCode) : Exception("Project workspace storage failed.")
 {
     public string ErrorCode { get; } = errorCode;
+    /// <summary>A numeric OS error, when available. Never retains the exception text or inner exception.</summary>
+    public int? SystemErrorHResult { get; }
+    internal ProjectWorkspaceStoreException(string errorCode, int systemErrorHResult) : this(errorCode)
+        => SystemErrorHResult = systemErrorHResult;
 }

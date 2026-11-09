@@ -268,6 +268,9 @@ internal sealed partial class MainWindow
         var page = Ui.Page(_shutdownPending ? "关闭尚未完成" : "项目尚未就绪",
             _shutdownPending ? "当前目录仍由此窗口持有。可以在清理确认完成后修正上下文，再重试安全关闭。"
                 : WorkspaceGuidance(_workspace?.Transition.ErrorCode));
+        var report = _options.StartupDiagnostics.LastFailure
+            ?? _options.StartupDiagnostics.CaptureCodeIfMissing(_workspace?.Transition.ErrorCode);
+        page.Children.Add(CreateErrorReportPanel(report));
         if (_workspace?.Document is not null) page.Children.Add(ProjectContextPage());
         if (!_shutdownPending && _workspace is not null)
         {
@@ -286,6 +289,11 @@ internal sealed partial class MainWindow
 
     private static string WorkspaceGuidance(string? code) => code switch
     {
+        "UserStoreInUse" => "另一个工作台实例正在使用本地数据目录。请先退出该实例，再点击重试。不要删除锁文件或项目数据。",
+        "StoreAccessDenied" => "工作台无法访问本地数据目录。请检查当前 Windows 账户的读写权限后重试；也可以先导出错误报告，原数据不会改写。",
+        "StoreDirectoryUnavailable" => "本地数据目录暂不可用。请先导出错误报告，并检查该磁盘或目录是否仍可访问；不要删除原数据。",
+        "ApplicationFileMissing" or "ApplicationFileInvalid" or "ApplicationFileLoadFailed" or "NativeDependencyMissing"
+            => "应用文件或依赖无法载入。请先导出错误报告，再退出并完整解压同一版本的应用；不要删除原数据目录。",
         "InvalidName" => "请使用有效的项目名称后重试。",
         "RevisionConflict" => "上下文或项目列表已在别处更新。上下文可先保留本地副本并重新读取；项目操作请重试。",
         "ContextLimitExceeded" => "上下文过长。请缩短当前文本，系统会自动重试保存。",
@@ -295,6 +303,6 @@ internal sealed partial class MainWindow
             => "仍在等待已知插件工作结束。目录租约继续保留，请等待后重试。",
         "ProjectPreparationFailed" => "插件尚未完成离开前准备。请修正可编辑的内容后重试。",
         "StoreBusy" or "StoreIoFailure" => "本地目录暂不可写或被占用。请检查目录后重试；原内容已保留。",
-        _ => "项目操作未完成。已保留目录和当前内容，请检查本地文件并重试。"
+        _ => "项目操作未完成。原目录和当前内容仍保留。请导出错误报告供分析，再决定下一步；不需要删除数据。"
     };
 }
