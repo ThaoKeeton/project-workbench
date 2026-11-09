@@ -4,10 +4,33 @@ on:
   push:
     branches: [main, feat/native-plugin-workbench]
   workflow_dispatch:
+    inputs:
+      mode:
+        description: Verification lane
+        type: choice
+        options: [full, shell-recovery-consumer]
+        default: full
+      producer_run_id:
+        description: Successful producer run ID
+        type: string
+        required: false
+      artifact_id:
+        description: Producer workbench-win-x64 artifact ID
+        type: string
+        required: false
+      host_source:
+        description: Exact producer source commit
+        type: string
+        required: false
+      archive_sha256:
+        description: Exact producer artifact archive SHA256
+        type: string
+        required: false
 permissions:
   contents: read
 jobs:
   core-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'full' }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -69,6 +92,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
   native-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.mode == 'full' }}
     runs-on: windows-2025
     timeout-minutes: 35
     steps:
@@ -269,4 +293,29 @@ jobs:
           name: workbench-win-x64
           path: artifacts/native/app/
           if-no-files-found: error
+          retention-days: 1
+  shell-recovery-consumer:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'shell-recovery-consumer' }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Validate exact producer and run owned shell recovery
+        shell: pwsh
+        env:
+          SHELL_RECOVERY_API_TOKEN: ${{ github.token }}
+          PRODUCER_RUN_ID: ${{ inputs.producer_run_id }}
+          PRODUCER_ARTIFACT_ID: ${{ inputs.artifact_id }}
+          PRODUCER_HOST_SOURCE: ${{ inputs.host_source }}
+          PRODUCER_ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+        run: ./scripts/native-shell-recovery-probe.ps1 -ProducerRunId $env:PRODUCER_RUN_ID -ArtifactId $env:PRODUCER_ARTIFACT_ID -HostSource $env:PRODUCER_HOST_SOURCE -ArchiveSha256 $env:PRODUCER_ARCHIVE_SHA256
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: shell-recovery-consumer-evidence
+          path: artifacts/native/shell-recovery-probes/
+          if-no-files-found: warn
           retention-days: 1
