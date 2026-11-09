@@ -297,6 +297,12 @@ public sealed class OwnedShellHost : IDisposable
     }
     public static bool IconAssetMatches(string asset, Icon candidate, IconComparisonTrace trace)
     {
+        return IconAssetMatches(asset, candidate, trace, null);
+    }
+    // The observer is internal to this test assembly so the native regression can
+    // verify ownership, including when execution throws after acquisition.
+    internal static bool IconAssetMatches(string asset, Icon candidate, IconComparisonTrace trace, Action<IntPtr> referenceObserver)
+    {
         if (asset == null || candidate == null || trace == null) throw new ArgumentNullException();
         trace.SetStage("bitmap");
         using (Bitmap actual = candidate.ToBitmap())
@@ -306,21 +312,29 @@ public sealed class OwnedShellHost : IDisposable
             trace.SetStage("directory");
             if (!IconFileHasSize(asset,width,height)) return false;
             trace.SetStage("reference");
-            using (var reference = new Icon(asset,width,height)) using (Bitmap expected = reference.ToBitmap())
+            // LR_LOADFROMFILE without LR_SHARED returns a new owned HICON.
+            IntPtr handle = LoadImageW(IntPtr.Zero, asset, 1, width, height, 0x10);
+            if (handle == IntPtr.Zero) return false;
+            try
             {
-                trace.ReferenceWidth = expected.Width; trace.ReferenceHeight = expected.Height;
-                if (expected.Width != width || expected.Height != height) return false;
-                trace.SetStage("pixels"); int visible = 0; bool equal = true;
-                var difference = new IconPixelDifference();
-                for (int y=0; y<height; y++) for (int x=0; x<width; x++)
+                if (referenceObserver != null) referenceObserver(handle);
+                using (var reference = Icon.FromHandle(handle)) using (Bitmap expected = reference.ToBitmap())
                 {
-                    Color pixel = expected.GetPixel(x,y);
-                    if (!difference.Compare(pixel.ToArgb(), actual.GetPixel(x,y).ToArgb())) equal = false;
-                    if (pixel.A != 0) visible++;
+                    trace.ReferenceWidth = expected.Width; trace.ReferenceHeight = expected.Height;
+                    if (expected.Width != width || expected.Height != height) return false;
+                    trace.SetStage("pixels"); int visible = 0; bool equal = true;
+                    var difference = new IconPixelDifference();
+                    for (int y=0; y<height; y++) for (int x=0; x<width; x++)
+                    {
+                        Color pixel = expected.GetPixel(x,y);
+                        if (!difference.Compare(pixel.ToArgb(), actual.GetPixel(x,y).ToArgb())) equal = false;
+                        if (pixel.A != 0) visible++;
+                    }
+                    if (!equal) { trace.CompletePixels(difference); return false; }
+                    trace.SetStage("complete"); return visible > 32;
                 }
-                if (!equal) { trace.CompletePixels(difference); return false; }
-                trace.SetStage("complete"); return visible > 32;
             }
+            finally { if (!DestroyIcon(handle)) throw new InvalidOperationException(); }
         }
     }
     public IconComparisonTrace IconTrace { get; private set; }
@@ -377,4 +391,6 @@ public sealed class OwnedShellHost : IDisposable
     [DllImport("user32.dll")] private static extern bool PrintWindow(IntPtr w,IntPtr dc,uint flags);
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr w,uint m,IntPtr a,IntPtr b);
     [DllImport("user32.dll",EntryPoint="GetClassLongPtrW")] private static extern IntPtr GetClassLongPtr(IntPtr w,int index);
+    [DllImport("user32.dll",CharSet=CharSet.Unicode,ExactSpelling=true,SetLastError=true)] private static extern IntPtr LoadImageW(IntPtr instance,string name,uint type,int width,int height,uint flags);
+    [DllImport("user32.dll",SetLastError=true)] private static extern bool DestroyIcon(IntPtr icon);
 }
