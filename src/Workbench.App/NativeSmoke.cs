@@ -39,7 +39,7 @@ internal static class NativeSmoke
             && metadata.GetXamlType("Microsoft.UI.Xaml.Controls.NavigationView") is not null,
             "Application could not resolve WinUI control metadata by type and full name.");
         Record("Application resolved WinUI control XAML metadata by type and full name");
-        await VerifyShellAsync(window);
+        var shell = await VerifyShellAsync(window);
         Record("Native titlebar, bundled icon, content rows and system caption integration attached to the host window");
         var manager = window.SmokeManager;
         Require(manager.Plugins.Count == 2, "Smoke must discover exactly the two curated bundled packages.");
@@ -68,7 +68,7 @@ internal static class NativeSmoke
         options.TraceStartup("native-smoke-live-card-complete");
         Record("Same native host card re-resolved actual theme and fill/stroke across live Light/Dark/Light changes");
         options.TraceStartup("native-smoke-shell-themes-begin");
-        await VerifyShellThemesAsync(window, options);
+        await VerifyShellThemesAsync(window, shell, options);
         options.TraceStartup("native-smoke-shell-themes-complete");
         Record("Native titlebar and caption colors followed live Light/Dark/Light host themes with Mica or an opaque themed fallback");
         foreach (var page in new[] { "background", "credentials", "packages" }) await window.SmokeNavigateAsync(page);
@@ -355,11 +355,14 @@ internal static class NativeSmoke
 
     // These assertions inspect the real loaded WinUI tree, including a window with no runtime.
     // Removing the constructor's shell hook must fail before plugin discovery is consulted.
-    private static async Task VerifyShellAsync(MainWindow window, RunOptions? smokeTrace = null)
+    private sealed record ShellIdentity(MainWindow Window, Grid Root, TitleBar TitleBar, XamlRoot XamlRoot);
+
+    private static async Task<ShellIdentity> VerifyShellAsync(MainWindow window, RunOptions? smokeTrace = null)
     {
         var root = window.Content as Grid ?? throw new InvalidOperationException("The host shell root is unavailable.");
         await SettleShellAsync(window, root, smokeTrace);
         var titleBar = FindNamed<TitleBar>(root, "工作台标题栏");
+        var xamlRoot = root.XamlRoot ?? throw new InvalidOperationException("The host shell is not attached to a XamlRoot.");
         Require(window.ExtendsContentIntoTitleBar && window.AppWindow.TitleBar.ExtendsContentIntoTitleBar,
             "The host still uses the stock non-client titlebar.");
         Require(window.Title == "Project Workbench" && titleBar.Title == "Project Workbench",
@@ -384,17 +387,27 @@ internal static class NativeSmoke
             "Navigation inserted a second titlebar spacer below the unified frame.");
         Require(window.SystemBackdrop is MicaBackdrop || root.Background is SolidColorBrush { Color.A: 255 },
             "The shell has neither Mica nor an opaque themed fallback.");
+        return new(window, root, titleBar, xamlRoot);
     }
 
-    private static async Task VerifyShellThemesAsync(MainWindow window, RunOptions options)
+    private static async Task VerifyShellThemesAsync(MainWindow window, ShellIdentity shell, RunOptions options)
     {
-        var root = (Grid)window.Content;
-        var titleBar = FindNamed<TitleBar>(root, "工作台标题栏");
+        var root = shell.Root;
+        var titleBar = shell.TitleBar;
         var previous = root.RequestedTheme;
         async Task<(Windows.UI.Color Text, Windows.UI.Color Caption, Windows.UI.Color? Fallback)> ReadAsync(ElementTheme theme)
         {
             window.SmokeSetTheme(theme);
-            await SettleShellAsync(window, root, options);
+            // A previously verified root need not raise Loaded again for a theme change.
+            // Keep the live tree and titlebar checks below instead of waiting for a new load.
+            options.TraceStartup(root.IsLoaded ? "native-smoke-shell-theme-root-loaded" : "native-smoke-shell-theme-root-not-loaded");
+            await SettleShellLayoutAsync(window, root, options);
+            options.TraceStartup("native-smoke-shell-theme-identity-begin");
+            Require(ReferenceEquals(window, shell.Window) && ReferenceEquals(window.Content, root)
+                && root.Children.Contains(titleBar) && titleBar.IsLoaded && titleBar.ActualHeight >= 32
+                && ReferenceEquals(root.XamlRoot, shell.XamlRoot) && ReferenceEquals(titleBar.XamlRoot, shell.XamlRoot),
+                "The original native titlebar is no longer attached to the same host window and XamlRoot.");
+            options.TraceStartup("native-smoke-shell-theme-identity-complete");
             Require(root.ActualTheme == theme && titleBar.ActualTheme == theme,
                 "The titlebar did not inherit the host's actual theme.");
             Require(titleBar.Foreground is SolidColorBrush, "The native titlebar text brush did not resolve.");
@@ -436,15 +449,20 @@ internal static class NativeSmoke
             smokeTrace?.TraceStartup("native-smoke-shell-loaded-wait-begin");
             if (!root.IsLoaded) await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
             smokeTrace?.TraceStartup("native-smoke-shell-loaded-wait-complete");
-            var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-            Require(window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
-                () => settled.TrySetResult()), "The native shell dispatcher is unavailable.");
-            smokeTrace?.TraceStartup("native-smoke-shell-dispatch-wait-begin");
-            await settled.Task.WaitAsync(TimeSpan.FromSeconds(15));
-            smokeTrace?.TraceStartup("native-smoke-shell-dispatch-wait-complete");
-            root.UpdateLayout();
         }
         finally { root.Loaded -= OnLoaded; }
+        await SettleShellLayoutAsync(window, root, smokeTrace);
+    }
+
+    private static async Task SettleShellLayoutAsync(MainWindow window, FrameworkElement root, RunOptions? smokeTrace)
+    {
+        var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        Require(window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+            () => settled.TrySetResult()), "The native shell dispatcher is unavailable.");
+        smokeTrace?.TraceStartup("native-smoke-shell-dispatch-wait-begin");
+        await settled.Task.WaitAsync(TimeSpan.FromSeconds(15));
+        smokeTrace?.TraceStartup("native-smoke-shell-dispatch-wait-complete");
+        root.UpdateLayout();
     }
 
     private static async Task AttachAllViewsAsync(MainWindow window)
