@@ -7,7 +7,7 @@ $module = Import-Module (Join-Path $repo 'scripts/BusinessPluginDelivery.psm1') 
 $commit = '0123456789abcdef0123456789abcdef01234567'
 $passed = 0
 # Pure metadata parser cases. These strings are never PE/native execution evidence.
-foreach ($semantic in @('0.2.0', '0.3.0', '12.34.56')) {
+foreach ($semantic in @('0.2.0', '0.3.0', '0.4.1', '12.34.56')) {
     $stamp = & $module { param($product, $file) Get-DeliveryHostVersion $product $file '1.0.0.0' } "$semantic+$commit" "$semantic.0"
     if ($stamp.productVersion -cne "$semantic+$commit" -or $stamp.fileVersion -cne "$semantic.0" -or $stamp.sourceCommit -cne $commit) { throw 'Semantic/file version parsing changed the declared source.' }
     $passed++
@@ -32,3 +32,21 @@ foreach ($case in @(
     $passed++
 }
 Write-Output "Delivery host version parser: $passed metadata-only cases passed (no PE/native execution)."
+
+# The Testing delivery binds the exact current shipping host, not merely a valid semantic version.
+$testing = Import-Module (Join-Path $repo 'scripts/TestingPluginDelivery.psm1') -Force -PassThru
+& $testing { param($c) Assert-TestingHostVersion "0.4.1+$c" '0.4.1.0' '1.0.0.0' $c } $commit
+$passed++
+foreach ($case in @(
+    @("0.4.0+$commit", '0.4.0.0', '1.0.0.0'),
+    @("0.4.1+$commit", '0.4.0.0', '1.0.0.0'),
+    @("0.4.1+$('f'*40)", '0.4.1.0', '1.0.0.0'),
+    @("0.4.1+$commit", '0.4.1.0', '2.0.0.0')
+)) {
+    $rejected = $false
+    try { & $testing { param($product,$file,$assembly,$c) Assert-TestingHostVersion $product $file $assembly $c } @case $commit }
+    catch { if ($_.Exception.Message -cne 'TestingHostSourceMismatch') { throw }; $rejected = $true }
+    if (-not $rejected) { throw 'Testing accepted mismatched host/source metadata.' }
+    $passed++
+}
+Write-Host 'Exact Testing host metadata and source refusals passed.'

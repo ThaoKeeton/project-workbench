@@ -198,6 +198,7 @@ if ($HelperGuardsOnly) {
         'tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceScenarioLedger.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceHttpHandlers.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceOwnership.cs','tests/Workbench.Testing.SourceAcceptance/SourceAcceptanceReleaseBridge.cs',
         'tests/Workbench.NativeReference/Workbench.NativeReference.csproj','tests/Workbench.NativeReference/GeneratedApplicationReference.cs',
         'tests/Workbench.Core.Tests/SourceAcceptanceTests.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Ownership.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Transport.cs','tests/Workbench.Core.Tests/SourceAcceptanceReleaseTests.cs',
+        'tests/scripts/DeliveryHostVersion.Tests.ps1','tests/Workbench.Core.Tests/DiscoveryTests.cs',
         'tests/Workbench.Core.Tests/HostErrorReportExportTests.cs','tests/Workbench.Core.Tests/HostFailureTests.cs','tests/Workbench.Core.Tests/HostStartupDiagnosticsTests.cs','tests/Workbench.Core.Tests/WorkspaceRuntimeCoordinatorTests.cs',
         'scripts/source-acceptance-probe.ps1','scripts/SourceAcceptanceProbe.psm1','tests/scripts/SourceAcceptanceProbe.Tests.ps1','tests/Workbench.Core.Tests/RunOptionsTests.cs',
         'src/Workbench.App/TestingSourceAcceptanceProbe.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Controls.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Records.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Lifecycle.cs',

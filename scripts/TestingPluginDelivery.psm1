@@ -70,6 +70,7 @@ function Get-TestingSourceFiles {
     $paths += @('tests/Workbench.Core.Tests/SourceAcceptanceTests.cs', 'tests/Workbench.Core.Tests/SourceAcceptanceTests.Ownership.cs', 'tests/Workbench.Core.Tests/SourceAcceptanceTests.Transport.cs', 'tests/Workbench.Core.Tests/SourceAcceptanceReleaseTests.cs', 'docs/testing-plugin.md', 'docs/windows-verification.md')
     $paths += @('tests/Workbench.Core.Tests/LifecycleTests.cs')
     $paths += @('tests/Workbench.Core.Tests/HostErrorReportExportTests.cs','tests/Workbench.Core.Tests/HostFailureTests.cs','tests/Workbench.Core.Tests/HostStartupDiagnosticsTests.cs','tests/Workbench.Core.Tests/WorkspaceRuntimeCoordinatorTests.cs')
+    $paths += @('tests/scripts/DeliveryHostVersion.Tests.ps1','tests/Workbench.Core.Tests/DiscoveryTests.cs')
     foreach ($part in @('plugins/Workbench.Testing', 'plugins/Workbench.Testing.Domain', 'plugins/Workbench.Testing.Windows', 'native/Workbench.OwnedLab', 'tests/Workbench.OwnedLab.WindowsProbe', 'tests/Workbench.OwnedLab.NativeFixtures', 'tests/Workbench.Testing.PackageProbe', 'tests/Workbench.Testing.SourceAcceptance', 'tests/Workbench.NativeReference', 'src/Workbench.Sdk', 'src/Workbench.WinUI.Sdk', 'src/Workbench.App', 'src/Workbench.Core')) {
         $paths += @(& git -C $Repo ls-files --cached --others --exclude-standard -- $part)
         if ($LASTEXITCODE -ne 0) { throw 'TestingSourceFileListUnavailable' }
@@ -80,6 +81,11 @@ function Get-TestingSourceFiles {
         @{ path = $_; length = $file.Length; sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
     })
 }
+function Assert-TestingHostVersion {
+    param([string]$ProductVersion, [string]$FileVersion, [string]$AssemblyVersion, [string]$SourceCommit)
+    if ($SourceCommit -cnotmatch '^[0-9a-f]{40}$' -or $ProductVersion -cne "0.4.1+$SourceCommit" -or
+        $FileVersion -cne '0.4.1.0' -or $AssemblyVersion -cne '1.0.0.0') { throw 'TestingHostSourceMismatch' }
+}
 function Get-TestingHostIdentity {
     param([string]$AppDirectory, [string]$SourceCommit)
     $dll = Join-Path $AppDirectory 'Workbench.App.dll'
@@ -87,7 +93,7 @@ function Get-TestingHostIdentity {
     Assert-TestingNoLinks $dll
     Assert-TestingNoLinks $exe
     $version = [Diagnostics.FileVersionInfo]::GetVersionInfo($dll)
-    if ($version.ProductVersion -cne "0.4.0+$SourceCommit" -or $version.FileVersion -cne '0.4.0.0' -or [Reflection.AssemblyName]::GetAssemblyName($dll).Version.ToString() -cne '1.0.0.0') { throw 'TestingHostSourceMismatch' }
+    Assert-TestingHostVersion $version.ProductVersion $version.FileVersion ([Reflection.AssemblyName]::GetAssemblyName($dll).Version.ToString()) $SourceCommit
     return @{ sourceCommit = $SourceCommit; productVersion = $version.ProductVersion; fileVersion = $version.FileVersion; assemblyVersion = '1.0.0.0'; executableSha256 = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLowerInvariant(); dllSha256 = (Get-FileHash $dll -Algorithm SHA256).Hash.ToLowerInvariant() }
 }
 function Assert-TestingSourceIdentity {
@@ -315,7 +321,7 @@ function New-TestingPluginDelivery {
         @"
 # Independent testing plugin 0.2.0 — $Profile
 
-Install $($contract.zip) deliberately with the native host package installation action. Identity: $($contract.id). Requires host/SDK 0.4.0/API1 from this same source and build. In-process code is trusted; ALC is not a sandbox or a hot-unload facility. Source: $sourceCommit. This is an exact $($contract.payload.Count)-file ZIP; the outer delivery is exactly README.md, SHA256SUMS, provenance.json and the ZIP.
+Install $($contract.zip) deliberately with the native host package installation action. Identity: $($contract.id). Requires host 0.4.1, SDK 0.4.0 and API1 from this same source and build. In-process code is trusted; ALC is not a sandbox or a hot-unload facility. Source: $sourceCommit. This is an exact $($contract.payload.Count)-file ZIP; the outer delivery is exactly README.md, SHA256SUMS, provenance.json and the ZIP.
 
 Production offers explicit Figma read-only imports and selected-only OpenAI authoring with gpt-5.4-mini-2026-03-17. Selected identities, versions, titles, descriptions and criteria are sent to OpenAI and may incur charges. Manage figma-token/openai-api-key in the host protected credential UI. No credentials are packaged. Generated cases require human review and remain manual; cancellation waits for actual IO and callbacks, and partial AI receipts are never automatically retried or deleted. CSV export prefixes each text cell with an apostrophe; original records remain exact.
 

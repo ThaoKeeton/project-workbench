@@ -10,7 +10,7 @@ public sealed class PluginManagerOptions
     public required string UserRoot { get; init; }
     public ProjectRuntimeScope? ProjectScope { get; init; }
     public IReadOnlyCollection<string> AdditionalDiscoveryRoots { get; init; } = [];
-    public Version HostVersion { get; init; } = new(0, 4, 0);
+    public Version HostVersion { get; init; } = new(0, 4, 1);
     public TimeSpan StopTimeout { get; init; } = TimeSpan.FromSeconds(5);
     public IReadOnlyCollection<Assembly> SharedAssemblies { get; init; } = [];
     public IReadOnlyCollection<string> SharedAssemblyNames { get; init; } = [];

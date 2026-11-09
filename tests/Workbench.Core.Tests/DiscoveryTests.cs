@@ -9,6 +9,13 @@ public sealed class DiscoveryTests
     // These fail if scanning activates code, ignores a good package after a bad one,
     // or silently accepts ambiguous IDs/paths/compatibility.
     [Fact]
+    public void Default_host_version_identifies_the_current_shipping_patch()
+    {
+        var options = new PluginManagerOptions { UserRoot = "user", PluginsRoot = "plugins" };
+        Assert.Equal(new Version(0, 4, 1), options.HostVersion);
+    }
+
+    [Fact]
     public async Task Discovers_metadata_without_executing_the_real_plugin_assembly()
     {
         using var disk = new TestDirectory();
