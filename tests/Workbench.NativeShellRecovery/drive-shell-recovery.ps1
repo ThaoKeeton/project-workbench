@@ -12,6 +12,7 @@ $script:result = $null; $script:canWrite = $false
 $script:stage = 'preflight'; $script:diagnosticNumber = 1; $script:checkpointWriteFailed = $false
 $script:lastWaitFailure = $null; $script:primaryWaitFailure = $null; $script:primaryFailure = $null; $script:cleanupFailure = $null
 $script:initialFrame = @{ status='not-attempted'; image=$null; failure=$null }
+$script:iconTrace = $null; $script:iconRegression = $null
 function Assert-Condition([bool]$Condition) { if (-not $Condition) { throw 'NativeAssertionFailed' } }
 function Get-SafeFailure($Record) {
     try {
@@ -24,7 +25,7 @@ function Get-SafeFailure($Record) {
     } catch { return @{ type='Other'; category='Other'; hresult=$null; line=$null } }
 }
 function Set-DiagnosticStage([string]$Stage) {
-    $allowed = @('healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker')
+    $allowed = @('healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon-regression','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker')
     if ($Stage -cnotin $allowed) { throw 'DiagnosticStageInvalid' }
     $script:stage = $Stage; $script:lastWaitFailure = $null
     if (-not $script:canWrite) { return }
@@ -49,7 +50,17 @@ function Wait-For([scriptblock]$Probe, [int]$Seconds = 30) {
     throw 'NativeWaitExpired'
 }
 function New-FailureDiagnostic {
-    return @{ stage=$script:stage; failure=$script:primaryFailure; lastWaitFailure=$script:primaryWaitFailure; checkpointWriteFailed=$script:checkpointWriteFailed; cleanupFailure=$script:cleanupFailure; initialFrame=$script:initialFrame }
+    $icon = $null; $traceVariable = Get-Variable -Name iconTrace -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $traceVariable -and $null -ne $traceVariable.Value) {
+        $trace = $traceVariable.Value
+        if ($trace.Subject -cin @('embedded','window','regression16','regression32','regressionMismatch','regressionMissing') -and
+            $trace.Stage -cin @('start','handle','load','legacy','bitmap','directory','reference','pixels','complete')) {
+            $icon = @{ subject=$trace.Subject; stage=$trace.Stage; actualWidth=[int]$trace.ActualWidth; actualHeight=[int]$trace.ActualHeight; referenceWidth=[int]$trace.ReferenceWidth; referenceHeight=[int]$trace.ReferenceHeight }
+        }
+    }
+    $legacy = $null; $legacyVariable = Get-Variable -Name iconRegression -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $legacyVariable) { $legacy = $legacyVariable.Value }
+    return @{ stage=$script:stage; failure=$script:primaryFailure; lastWaitFailure=$script:primaryWaitFailure; checkpointWriteFailed=$script:checkpointWriteFailed; cleanupFailure=$script:cleanupFailure; initialFrame=$script:initialFrame; icon=$icon; iconRegression=$legacy }
 }
 function Set-Phase([string]$Name) {
     $script:phase = $Name; $script:stage = $Name; $script:lastWaitFailure = $null
@@ -327,7 +338,8 @@ try {
         [Threading.Thread]::CurrentThread.ApartmentState -ne 'STA' -or $env:CI -cne 'true' -or $env:GITHUB_ACTIONS -cne 'true' -or
         $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or -not [Environment]::UserInteractive) { throw 'UnsafeEnvironment' }
     Add-Type -AssemblyName UIAutomationClient,UIAutomationTypes,System.Drawing
-    Add-Type -Path (Join-Path $PSScriptRoot 'OwnedShellHost.cs') -ReferencedAssemblies System.dll,System.Core.dll,System.Drawing.dll
+    $helperSources = @((Join-Path $PSScriptRoot 'OwnedShellHost.cs'),(Join-Path $PSScriptRoot 'IconComparisonRegression.cs'))
+    Add-Type -Path $helperSources -ReferencedAssemblies System.dll,System.Core.dll,System.Drawing.dll
     $userRoot = [IO.Path]::Combine([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData),'ProjectWorkbench')
     [OwnedShellHost]::RejectLinks($userRoot); [OwnedShellHost]::RejectLinks($EvidenceRoot); [OwnedShellHost]::RejectLinks($HostExe)
     Assert-Condition (-not [OwnedShellHost]::PathExists($userRoot))
@@ -373,9 +385,16 @@ try {
     Assert-HostElement $first $first.window
     if ($selector.Count -eq 1) { $candidate = $selector.Item(0); Assert-HostElement $first $candidate; $offscreen = $candidate.Current.IsOffscreen; Assert-HostElement $first $candidate }
     Assert-Condition ($selector.Count -eq 0 -or ($selector.Count -eq 1 -and $offscreen))
-    Set-DiagnosticStage 'healthy-icon'
     $icon = Join-Path ([IO.Path]::GetDirectoryName($HostExe)) 'Assets/Workbench.ico'; [OwnedShellHost]::RejectLinks($icon)
-    Assert-Condition ($first.host.IconMatches($first.hwnd,$HostExe,$icon))
+    Set-DiagnosticStage 'healthy-icon-regression'
+    $script:iconTrace = [IconComparisonTrace]::new()
+    $legacyIcon = [IconComparisonRegression]::Run($icon,$script:iconTrace)
+    Assert-Condition ($legacyIcon.Length -eq 3 -and $legacyIcon[0] -ge 1 -and $legacyIcon[0] -le 256 -and $legacyIcon[1] -ge 1 -and $legacyIcon[1] -le 256 -and $legacyIcon[2] -in @(0,1) -and (($legacyIcon[2] -eq 1) -eq ($legacyIcon[0] -lt 32 -or $legacyIcon[1] -lt 32)))
+    $script:iconRegression = @{ legacyWidth=[int]$legacyIcon[0]; legacyHeight=[int]$legacyIcon[1]; legacyOutOfRange=($legacyIcon[2] -eq 1) }
+    Set-DiagnosticStage 'healthy-icon'
+    try { $iconMatches = $first.host.IconMatches($first.hwnd,$HostExe,$icon) }
+    finally { $script:iconTrace = $first.host.IconTrace }
+    Assert-Condition $iconMatches
     Set-DiagnosticStage 'healthy-maximize'
     $win = $null; Assert-HostElement $first $first.window
     $available = $first.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$win)
@@ -494,7 +513,7 @@ try {
     $catalogAfter = (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-Condition ($catalogBefore -ceq $catalogAfter)
     foreach ($record in $script:records) { $record.rootReacquired = $true }
-    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); diagnosticFrame=$script:initialFrame; reports=@($script:reports.ToArray()); cancelWritten=$cancelWritten; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; sentinelBefore=$script:sentinelHash; sentinelAfter=$script:sentinelChecks[$script:sentinelChecks.Count-1].sha256; sentinelChecks=@($script:sentinelChecks.ToArray()); pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
+    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); diagnosticFrame=$script:initialFrame; iconRegression=$script:iconRegression; reports=@($script:reports.ToArray()); cancelWritten=$cancelWritten; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; sentinelBefore=$script:sentinelHash; sentinelAfter=$script:sentinelChecks[$script:sentinelChecks.Count-1].sha256; sentinelChecks=@($script:sentinelChecks.ToArray()); pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
     $script:phase = 'completed'
 } catch {
     $script:primaryFailure = Get-SafeFailure $_; $script:primaryWaitFailure = $script:lastWaitFailure

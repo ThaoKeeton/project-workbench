@@ -125,8 +125,27 @@ try {
     $closeEvidence = [ordered]@{ navigation=$closeNavigation; beforeFile='close-before.json'; afterFile='close-after.json'; beforeSha256=$closeHash; afterSha256=$closeHash }
     $repeatEvidence = [ordered]@{ patternAvailable=$true; attempted=$true; outcome='ElementNotEnabled'; popupRetained=$true }
     $receipt = [ordered]@{ schemaVersion = 1; succeeded = $true; sourceCommit = $commit; executableSha256 = $exe; dllSha256 = $dll; forcedCleanup = $false; processes = $processes; images = @($light,$dark); diagnosticFrame=$diagnosticFrame; reports = $reports; cancelWritten = $false; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore = $conflictHash; collisionAfter = $conflictHash; catalogBefore = $catalogHash; catalogAfter = $catalogHash; sentinelBefore = $sentinelHash; sentinelAfter = $sentinelHash; sentinelChecks = $sentinelChecks; pickerPendingAtClose = $true; checks = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
+    $receipt['iconRegression'] = @{ legacyWidth=16; legacyHeight=16; legacyOutOfRange=$true }
     $result = Write-Json $receipt 'result.json'
     Test-ShellRecoveryFinal -Path $result -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll | Out-Null; $passed++
+    $withRegression = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $withRegression.iconRegression = @{ legacyWidth=16; legacyHeight=16; legacyOutOfRange=$true }
+    Test-ShellRecoveryFinal -Path (Write-Json $withRegression 'result-icon.json') -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll | Out-Null; $passed++
+    $withRegression.iconRegression = @{ legacyWidth=32; legacyHeight=32; legacyOutOfRange=$false }
+    Test-ShellRecoveryFinal -Path (Write-Json $withRegression 'result-icon-no-bounds.json') -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll | Out-Null; $passed++
+    $withoutRegression = $withRegression | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $withoutRegression.Remove('iconRegression')
+    Refuse { Test-ShellRecoveryFinal -Path (Write-Json $withoutRegression 'result-missing-icon.json') -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } 'missing-icon-regression'
+    foreach ($case in @('width-zero','height-string','wrong-bounds','wrong-no-bounds','raw','missing')) {
+        $bad = $withRegression | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+        switch ($case) {
+            'width-zero' { $bad.iconRegression.legacyWidth=0 }; 'height-string' { $bad.iconRegression.legacyHeight='16' }
+            'wrong-bounds' { $bad.iconRegression.legacyOutOfRange=$true }
+            'wrong-no-bounds' { $bad.iconRegression.legacyWidth=16; $bad.iconRegression.legacyOutOfRange=$false }
+            raw { $bad.iconRegression.path='private' }; missing { $bad.iconRegression.Remove('legacyHeight') }
+        }
+        Refuse { Test-ShellRecoveryFinal -Path (Write-Json $bad 'bad-icon-regression.json') -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } "icon-regression-$case"
+    }
     $claimedCapture = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
     $claimedCapture.diagnosticFrame = @{ status='captured'; image=$diagnosticImage; failure=$null }
     $claimedCaptureFile = Write-Json $claimedCapture 'claimed-capture.json'
@@ -156,6 +175,28 @@ try {
     $failureDiagnostic = [ordered]@{ schemaVersion=1; succeeded=$false; phase='healthy'; failureCode='NativeGateFailed'; forcedCleanup=$false; diagnostic=[ordered]@{ stage='healthy-titlebar'; failure=$safeFailure; lastWaitFailure=$safeFailure; checkpointWriteFailed=$false; cleanupFailure=$null; initialFrame=$diagnosticFrame } }
     $diagnosticFile = Write-Json $failureDiagnostic 'diagnostic-failure.json'
     Test-ShellRecoveryFailureDiagnostic -Path $diagnosticFile -Directory $root | Out-Null; $passed++
+    $withIcon = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $withIcon.diagnostic.stage = 'healthy-icon'
+    $withIcon.diagnostic.icon = @{ subject='window'; stage='pixels'; actualWidth=16; actualHeight=16; referenceWidth=16; referenceHeight=16 }
+    $withIcon.diagnostic.iconRegression = @{ legacyWidth=16; legacyHeight=16; legacyOutOfRange=$true }
+    $iconFile = Write-Json $withIcon 'diagnostic-icon.json'
+    Test-ShellRecoveryFailureDiagnostic -Path $iconFile -Directory $root | Out-Null; $passed++
+    $withoutIcon = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $withoutIcon.diagnostic.icon = $null
+    $withoutIcon.diagnostic.iconRegression = $null
+    Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $withoutIcon 'diagnostic-no-icon.json') -Directory $root | Out-Null; $passed++
+    foreach ($case in @('subject','stage','width-string','width-negative','width-range','height-array','reference-negative','extra','missing','legacy-raw','legacy-inconsistent')) {
+        $bad = $withIcon | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+        switch ($case) {
+            subject { $bad.diagnostic.icon.subject='private path' }; stage { $bad.diagnostic.icon.stage='raw error' }
+            'width-string' { $bad.diagnostic.icon.actualWidth='16' }; 'width-negative' { $bad.diagnostic.icon.actualWidth=-1 }
+            'width-range' { $bad.diagnostic.icon.actualWidth=[long]2147483648 }; 'height-array' { $bad.diagnostic.icon.actualHeight=@(16) }
+            'reference-negative' { $bad.diagnostic.icon.referenceHeight=-1 }; extra { $bad.diagnostic.icon.path='private' }
+            missing { $bad.diagnostic.icon.Remove('stage') }
+            'legacy-raw' { $bad.diagnostic.iconRegression.path='private' }; 'legacy-inconsistent' { $bad.diagnostic.iconRegression.legacyOutOfRange=$false }
+        }
+        Refuse { Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $bad 'bad-icon.json') -Directory $root } "icon-diagnostic-$case"
+    }
     foreach ($case in @('stage','stage-array','early-frame-stage','type','category','hresult-string','hresult-range','line-string','line-negative','line-range','raw-message','extra','missing-failure','wait-raw','checkpoint-type','cleanup-raw','frame-status','frame-captured','frame-unavailable','frame-image','frame-failure')) {
         $bad = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
         switch ($case) {

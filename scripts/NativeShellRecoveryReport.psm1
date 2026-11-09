@@ -187,22 +187,40 @@ function Test-ShellRecoveryDiagnosticFrame($Frame) {
     if ($Frame.status -isnot [string] -or $Frame.status -cne 'not-attempted' -or
         $null -ne $Frame.image -or $null -ne $Frame.failure) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
 }
+function Assert-ShellRecoveryIconRegression($Legacy) {
+    Assert-ShellKeys $Legacy @('legacyWidth','legacyHeight','legacyOutOfRange')
+    if (-not (Test-ShellInt $Legacy.legacyWidth 1 256) -or -not (Test-ShellInt $Legacy.legacyHeight 1 256) -or
+        $Legacy.legacyOutOfRange -isnot [bool] -or $Legacy.legacyOutOfRange -ne ($Legacy.legacyWidth -lt 32 -or $Legacy.legacyHeight -lt 32)) { throw 'ShellRecoveryIconRegressionInvalid' }
+}
 function Test-ShellRecoveryFailureDiagnostic {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Directory)
     $r = Read-ShellRecoveryJson $Path
     Assert-ShellKeys $r @('schemaVersion','succeeded','phase','failureCode','forcedCleanup','diagnostic')
     $phases = @('preflight','healthy','lease-conflict','corrupt-catalog','close-pending-picker','cleanup')
-    $stages = @('preflight','healthy','healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker','cleanup','completed')
+    $stages = @('preflight','healthy','healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon-regression','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker','cleanup','completed')
     if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or $r.succeeded -or $r.phase -isnot [string] -or $r.phase -cnotin $phases -or
         $r.failureCode -isnot [string] -or $r.failureCode -cne 'NativeGateFailed' -or $r.forcedCleanup -isnot [bool]) { throw 'ShellRecoveryFailureDiagnosticInvalid' }
     $d = $r.diagnostic
-    Assert-ShellKeys $d @('stage','failure','lastWaitFailure','checkpointWriteFailed','cleanupFailure','initialFrame')
+    $diagnosticKeys = @('stage','failure','lastWaitFailure','checkpointWriteFailed','cleanupFailure','initialFrame')
+    if ($d -is [Collections.IDictionary] -and $d.Contains('icon')) { $diagnosticKeys += 'icon' }
+    if ($d -is [Collections.IDictionary] -and $d.Contains('iconRegression')) { $diagnosticKeys += 'iconRegression' }
+    Assert-ShellKeys $d $diagnosticKeys
     if ($d.stage -isnot [string] -or $d.stage -cnotin $stages -or $d.checkpointWriteFailed -isnot [bool]) { throw 'ShellRecoveryFailureDiagnosticInvalid' }
     Assert-ShellRecoverySafeFailure $d.failure
     if ($null -ne $d.lastWaitFailure) { Assert-ShellRecoverySafeFailure $d.lastWaitFailure }
     if ($null -ne $d.cleanupFailure) { Assert-ShellRecoverySafeFailure $d.cleanupFailure }
     Test-ShellRecoveryDiagnosticFrame $d.initialFrame
+    if ($d.Contains('icon') -and $null -ne $d.icon) {
+        $icon = $d.icon
+        Assert-ShellKeys $icon @('subject','stage','actualWidth','actualHeight','referenceWidth','referenceHeight')
+        if ($icon.subject -isnot [string] -or $icon.subject -cnotin @('embedded','window','regression16','regression32','regressionMismatch','regressionMissing') -or
+            $icon.stage -isnot [string] -or $icon.stage -cnotin @('start','handle','load','legacy','bitmap','directory','reference','pixels','complete')) { throw 'ShellRecoveryIconDiagnosticInvalid' }
+        foreach ($name in @('actualWidth','actualHeight','referenceWidth','referenceHeight')) {
+            if (-not (Test-ShellInt $icon[$name] 0 ([int]::MaxValue))) { throw 'ShellRecoveryIconDiagnosticInvalid' }
+        }
+    }
+    if ($d.Contains('iconRegression') -and $null -ne $d.iconRegression) { Assert-ShellRecoveryIconRegression $d.iconRegression }
     return $r
 }
 function Test-ShellRecoveryFinal {
@@ -210,7 +228,8 @@ function Test-ShellRecoveryFinal {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Directory,
         [Parameter(Mandatory)][string]$ExpectedSourceCommit, [Parameter(Mandatory)][string]$ExpectedExeSha256, [Parameter(Mandatory)][string]$ExpectedDllSha256)
     $r = Read-ShellRecoveryJson $Path
-    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','diagnosticFrame','reports','cancelWritten','cancelEvidence','closeEvidence','repeatEvidence','collisionBefore','collisionAfter','catalogBefore','catalogAfter','sentinelBefore','sentinelAfter','sentinelChecks','pickerPendingAtClose','checks')
+    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','diagnosticFrame','iconRegression','reports','cancelWritten','cancelEvidence','closeEvidence','repeatEvidence','collisionBefore','collisionAfter','catalogBefore','catalogAfter','sentinelBefore','sentinelAfter','sentinelChecks','pickerPendingAtClose','checks')
+    Assert-ShellRecoveryIconRegression $r.iconRegression
     if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or -not $r.succeeded -or
         ($r.sourceCommit -isnot [string] -or $r.sourceCommit -cne $ExpectedSourceCommit) -or $ExpectedSourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or
         -not (Test-ShellHash $ExpectedExeSha256) -or -not (Test-ShellHash $r.executableSha256) -or $r.executableSha256 -cne $ExpectedExeSha256 -or

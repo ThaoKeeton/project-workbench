@@ -7,6 +7,27 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Win32.SafeHandles;
 
+// Only fixed labels and numeric bitmap dimensions are copied into failure receipts.
+public sealed class IconComparisonTrace
+{
+    public string Subject { get; private set; }
+    public string Stage { get; private set; }
+    public int ActualWidth { get; internal set; }
+    public int ActualHeight { get; internal set; }
+    public int ReferenceWidth { get; internal set; }
+    public int ReferenceHeight { get; internal set; }
+    public void Begin(string subject)
+    {
+        if (subject != "embedded" && subject != "window" && subject != "regression16" && subject != "regression32" && subject != "regressionMismatch" && subject != "regressionMissing") throw new ArgumentException();
+        Subject = subject; Stage = "start"; ActualWidth = ActualHeight = ReferenceWidth = ReferenceHeight = 0;
+    }
+    public void SetStage(string stage)
+    {
+        if (stage != "start" && stage != "handle" && stage != "load" && stage != "legacy" && stage != "bitmap" && stage != "directory" && stage != "reference" && stage != "pixels" && stage != "complete") throw new ArgumentException();
+        Stage = stage;
+    }
+}
+
 // This helper only creates normal Workbench processes and inspects their owned windows.
 public sealed class OwnedShellHost : IDisposable
 {
@@ -211,17 +232,80 @@ public sealed class OwnedShellHost : IDisposable
         }
         Validate(window); return new int[] { before.Left,before.Top,before.Right,before.Bottom };
     }
-    private static bool SamePixels(Icon a, Icon b)
+    // Reject a missing, malformed or unrepresented size rather than accepting a
+    // nearest frame or comparing only a crop. Zero ICO dimensions encode 256.
+    public static bool IconDirectoryHasSize(byte[] directory, long fileLength, int width, int height)
     {
-        using (var aa = new Icon(a,32,32)) using (var bb = new Icon(b,32,32)) using (Bitmap x=aa.ToBitmap()) using (Bitmap y=bb.ToBitmap())
-        { int varied=0; for(int j=0;j<32;j++) for(int i=0;i<32;i++) { if(x.GetPixel(i,j).ToArgb()!=y.GetPixel(i,j).ToArgb()) return false; if(x.GetPixel(i,j).A!=0) varied++; } return varied>32; }
+        if (directory == null || width < 1 || width > 256 || height < 1 || height > 256 || directory.Length < 6 || fileLength < 6 ||
+            directory[0] != 0 || directory[1] != 0 || directory[2] != 1 || directory[3] != 0) return false;
+        int count = directory[4] | (directory[5] << 8);
+        if (count < 1 || count > 256 || directory.Length != 6 + 16 * count || fileLength < directory.Length) return false;
+        bool found = false;
+        for (int n=0; n<count; n++)
+        {
+            int p = 6 + n * 16;
+            int w = directory[p] == 0 ? 256 : directory[p], h = directory[p+1] == 0 ? 256 : directory[p+1];
+            uint bytes = BitConverter.ToUInt32(directory, p+8), offset = BitConverter.ToUInt32(directory, p+12);
+            if (directory[p+3] != 0 || bytes == 0 || offset < directory.Length || (long)offset + bytes > fileLength) return false;
+            if (w == width && h == height) found = true;
+        }
+        return found;
     }
+    private static bool IconFileHasSize(string asset, int width, int height)
+    {
+        using (var stream = new FileStream(asset, FileMode.Open, FileAccess.Read, FileShare.Read))
+        using (var reader = new BinaryReader(stream))
+        {
+            byte[] header = reader.ReadBytes(6); if (header.Length != 6) return false;
+            int count = header[4] | (header[5] << 8); if (count < 1 || count > 256) return false;
+            byte[] entries = reader.ReadBytes(count * 16); if (entries.Length != count * 16) return false;
+            byte[] directory = new byte[6 + entries.Length]; Buffer.BlockCopy(header,0,directory,0,6); Buffer.BlockCopy(entries,0,directory,6,entries.Length);
+            return IconDirectoryHasSize(directory, stream.Length, width, height);
+        }
+    }
+    public static bool IconAssetMatches(string asset, Icon candidate, IconComparisonTrace trace)
+    {
+        if (asset == null || candidate == null || trace == null) throw new ArgumentNullException();
+        trace.SetStage("bitmap");
+        using (Bitmap actual = candidate.ToBitmap())
+        {
+            int width = actual.Width, height = actual.Height;
+            trace.ActualWidth = width; trace.ActualHeight = height;
+            trace.SetStage("directory");
+            if (!IconFileHasSize(asset,width,height)) return false;
+            trace.SetStage("reference");
+            using (var reference = new Icon(asset,width,height)) using (Bitmap expected = reference.ToBitmap())
+            {
+                trace.ReferenceWidth = expected.Width; trace.ReferenceHeight = expected.Height;
+                if (expected.Width != width || expected.Height != height) return false;
+                trace.SetStage("pixels"); int visible = 0;
+                for (int y=0; y<height; y++) for (int x=0; x<width; x++)
+                {
+                    Color pixel = expected.GetPixel(x,y);
+                    if (pixel.ToArgb() != actual.GetPixel(x,y).ToArgb()) return false;
+                    if (pixel.A != 0) visible++;
+                }
+                trace.SetStage("complete"); return visible > 32;
+            }
+        }
+    }
+    public IconComparisonTrace IconTrace { get; private set; }
     public bool IconMatches(IntPtr window, string executable, string asset)
     {
+        IconTrace = new IconComparisonTrace(); IconTrace.Begin("window"); IconTrace.SetStage("handle");
         Validate(window); IntPtr h = SendMessage(window, 0x7f, new IntPtr(1), IntPtr.Zero); if (h == IntPtr.Zero) h = GetClassLongPtr(window, -14);
         if (h == IntPtr.Zero) return false;
-        using (var file = new Icon(asset,32,32)) using (var embedded = Icon.ExtractAssociatedIcon(executable)) using (var actual = (Icon)Icon.FromHandle(h).Clone())
-        { bool same = embedded != null && SamePixels(file, embedded) && SamePixels(file, actual); Validate(window); return same; }
+        IconTrace.Begin("embedded"); IconTrace.SetStage("load");
+        using (var embedded = Icon.ExtractAssociatedIcon(executable))
+        {
+            bool same = embedded != null && IconAssetMatches(asset, embedded, IconTrace);
+            if (same)
+            {
+                IconTrace.Begin("window"); IconTrace.SetStage("load");
+                using (var borrowed = Icon.FromHandle(h)) using (var actual = (Icon)borrowed.Clone()) same = IconAssetMatches(asset, actual, IconTrace);
+            }
+            Validate(window); return same;
+        }
     }
     public void TerminateOwned() { if (!TerminateJobObject(job, 1)) throw new InvalidOperationException(); }
     public void Dispose() { if (process != null) { process.Dispose(); process=null; } if (job != null) { job.Dispose(); job=null; } }
