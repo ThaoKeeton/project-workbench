@@ -1,6 +1,16 @@
 # 钉钉与 UPCAM 生产插件安装
 
-2026-11-08 已核对的配套批次为 [Actions42518602297](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297)，功能源码 `655d7b6496067daad7c5e4cefb1f1da1b8379536`、宿主0.4.0/API1：[完整宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633291911)与[两个业务生产插件](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13632778983)已下载核对实际字节；原生自动矩阵及51项双插件检查通过。下方安装层级/固定插件版本与本批次一致。产物按一天保留，链接是否仍有效以Actions页面为准；这不是installer、签名release或Windows11人工验收。全程只用合成数据，没有真实Webhook或钉钉消息；当前不要求用户开始人工集中验收。
+2026-11-09 当前已核对的配套为 [Actions42559172825](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825)，宿主0.4.0/API与服务1，功能源码 `b1a3e9c9963c2d75798a6068f99a6270d81bd074`：[完整Windows x64宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649448205)与[业务插件配套](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649572382)均已下载核对实际字节及EXE/DLL/manifest配对。宿主原始ZIP90,666,891bytes/SHA256 `fad691b874f66bf1ef522f5be38e9aa12edb81b69a0000da63609351409a1139`，配套ZIP `6399a0f3919baf2c31277900926e5da9b4440d30e91e04b54871166bf3f609f7`。目录含.NET10.0.14运行时，完整解压后运行 `Workbench.App.exe`。
+
+**UPCAM版本限制：此配套仍为生产0.1.0，共享core0.4.3，不含用户报告的只读诊断卡死修复。** 新core/独立版0.4.4及插件0.1.1由独立任务处理；待正式包到位，须重新核对并在实际宿主检查，不把本轮旧包51项报告当成新包结果。当前51项/12进程证明旧包安装、原生页面、本地虚构预览、后台及退役；不证明真实Teambition账户可用性。
+
+只安装UPCAM时，解压业务配套外层ZIP，选择其中 `upcam/package.zip` 导入“包维护”，再在“插件”审查并明确启用。其根清单ID `com.upcam.task-digest` /0.1.0/API1/最低宿主0.2.0；ZIP SHA256仍为 `3e07b7db0e3f17871b88ce1e45ac09d3b8724e6628a35fd5e0cdc1eb9ad95dbe`。不得将GitHub外层ZIP当作插件包。
+
+普通工作台数据根为 `%LOCALAPPDATA%\ProjectWorkbench`。默认单项目的UPCAM配置绑定在 `settings\com.upcam.task-digest\settings.json`，默认业务profile为 `data\com.upcam.task-digest\profile`；其他项目使用各自runtime根。业务凭据留在该profile的当前Windows用户DPAPI存储，宿主保险库仅保存生成的恢复绑定密钥。不会自动读取旧独立版 `%LOCALAPPDATA%\UPCAM\TaskDigest`；接续原目录须完全退出独立版并由用户明确选择，保留原账本，不复制出第二个可调度副本。实际Teambition凭据与权限仍由用户在本机配置；本轮未连接真实profile、使用Webhook、调用真实模型或发送钉钉。
+
+此批次还通过Windows Core1561、Linux1558/4明确跳过、来源36项/4实际进程及owned27项。WindowsServer2025自动验证不等于Windows11用户实测。链接按一天保留，当前约2026-11-10 04:21UTC到期；没有创建安装器或release。不可变的下载包README保留构建时历史655批次说明，当前b1配套以本页链接及其manifest中的宿主来源/哈希为准。下列历史记录仍保留。
+
+历史2026-11-08已核对的配套批次为 [Actions42518602297](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297)，功能源码 `655d7b6496067daad7c5e4cefb1f1da1b8379536`、宿主0.4.0/API1：[完整宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633291911)与[两个业务生产插件](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13632778983)已下载核对实际字节；原生自动矩阵及51项双插件检查通过。下方安装层级/固定插件版本与本批次一致。产物按一天保留，链接是否仍有效以Actions页面为准；这不是installer、签名release或Windows11人工验收。全程只用合成数据，没有真实Webhook或钉钉消息；当前不要求用户开始人工集中验收。
 
 从本仓库**同一次成功的 Windows Actions 运行**下载 `workbench-win-x64` 和 `workbench-business-plugins`。前者是完整宿主目录；后者是可按需安装的两个生产插件。保留整个宿主目录后启动 `Workbench.App.exe`，不能只复制 EXE。人工验收目标为仍在微软服务期内的 Windows 11 24H2 或更新版本、x64；版本下限不表示该版本所有 edition 仍受支持，请核对[微软版本服务信息](https://learn.microsoft.com/en-us/windows/release-health/windows11-release-information)。Server 2025 自动检查与 Windows 11 人工检查分别记录。
 

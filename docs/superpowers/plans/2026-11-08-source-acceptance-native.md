@@ -69,7 +69,7 @@
 
 ### Task 4: Reviewed-source combined public validation and actual delivery audit
 
-**Files:** Root-owned planworkspace evidence/ledger; numeric outcome updates to docs/testing-plugin.md and docs/windows-verification.md only after actual audit, no functional/sourcefix hidden in this verification task.
+**Files:** Root-owned planworkspace evidence/ledger; numeric outcome updates to docs/testing-plugin.md, docs/windows-verification.md and docs/install-business-plugins.md only after actual audit; this plan-file scope clarification is documentation only. The third guide is admitted by Root ruling for the latest usable Workbench/UPCAM delivery request; no functional/sourcefix hidden in this verification task.
 
 **Consumes:** Reviewed Task1–3HEAD, public twojobworkflow, separate same-build8/10payload profiles and exact native source reports. **Produces:** Original logs/TRX/package/store/source/owned/business/SDK/currentgallery reports; actual API digest-matched downloads and per-gate audit; accurate final current-plan review package.
 

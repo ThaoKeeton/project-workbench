@@ -2,13 +2,47 @@
 
 证据分层记录。Linux Core 行为测试、跨目标 C# 参考编译、Windows 发布、真实 WinUI 自动冒烟和 Windows 人工验收各有不同范围，不互相替代。
 
+## 2026-11-09 当前已核对批次
+
+[PUBLIC Actions42559172825](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825)绑定功能源码 `b1a3e9c9963c2d75798a6068f99a6270d81bd074`，两个标准job全部成功。Windows Core1561通过/0跳过；Linux1558通过/4项Windows专用检查明确跳过（两项DPAPI、两项扩展路径实际加载）。Windows实际执行并通过259/261字符边界的私有依赖初始化、扩展路径/重解析拒绝测试；项目B初始化成功。两项真实manager取消/期限顺序测试在两端通过。
+
+独立SourceAcceptance安装在当前shipping EXE中完成seed/verify/stop-figma/stop-ai四个不同实际进程，共36项原生检查；原生PID与Int64出生身份、真实Closed、独立启动器正常exit0及全部根租约匹配。7个先捕获的held释放能力、13份实际来源/回执/人工用例记录、重启前后字节与记录身份均已核对。现有严格验证器另重放实际记录正文，确认选择/trace、回执先行、人工步骤和无取消后发布。它使用真实控件/Core/Windows DPAPI，但凭据、HTTP和数据均是合成替身；没有真实provider或Webhooks/钉钉消息。
+
+其他原生启动、管理/重启、项目空间/恢复、已安装Testing本地流程、DingTalk+UPCAM51项/12个实际进程、owned27项均通过；owned另审计23份journal、13份原生构建、11张可解码校准BMP，GdiBlock合成失败为0个StepResult并完成退役。完整owned面板逐项点击、任意用户电脑、真实账号、Windows11人工主题/IME/DPI/选择器/无障碍仍待验证。真实Figma/OpenAI账户与订阅代理未执行。
+
+七份原始下载均匹配GitHub API SHA256，且已安全解压、交叉核对实际宿主与载荷：
+
+| 产物 | artifact ID | 原始下载SHA256 |
+| --- | --- | --- |
+| workbench-win-x64 |13649448205|`fad691b874f66bf1ef522f5be38e9aa12edb81b69a0000da63609351409a1139`|
+| workbench-business-plugins |13649572382|`6399a0f3919baf2c31277900926e5da9b4440d30e91e04b54871166bf3f609f7`|
+| workbench-testing-plugin-0.2.0 |13649496784|`2e405454e52c08c6d9f163e2af72c2258ef6ff80fecf5d63e58ae57442c82abe`|
+| native-verification-evidence |13649680974|`2534059f6c3414b37baf343fbef7d61ab06cf2a33a40dd142225849142936a6a`|
+| workbench-sdk-0.4.0 |13648499828|`d1373f8c7c8e298c443b8cc54bacb318558d56c44363f00a76f1a614498efd5c`|
+| workbench-ui-gallery |13648599630|`6a337f0287bb14a48dff37656a5dc3ecc67120bb281c4d55e9dd9e78b2b7490a`|
+| core-linux-results |13648508800|`d4781265c7920c92f7842bee98b22251a094571d6dd340e014afbf200af1333f`|
+
+[完整宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649448205)90,666,891bytes；实际EXE `9ce9b9c2d9d112edcf41e0487e9200bf8d54b2f33abde45f32833d928661efc7`、DLL `34b57b9cdbfa7d616c5eed6bbc4234349b0947643d3c836333f8f5e3c65a94f5`，ProductVersion0.4.0+b1a3e9c、FileVersion0.4.0.0、AssemblyVersion1.0.0.0。目录实际含.NET10.0.14运行时。SDK0.4.0的两份NuGet/11份源码、Testing生产8/夹具10及共同7项字节/245份Git源码记录、实际PE/依赖/Production helper/当前宿主配套均核对通过。测试内层ZIP `c12a7945629c558138e3ee46642edaa37254e771571888f9850c0082de53f103`；来源夹具内层ZIP `eaad414132ccee5eb83d76c6077d27048746801be005d7caa4014c57a7ccf702`。
+
+[业务配套](https://github.com/ThaoKeeton/project-workbench/actions/runs/42559172825/artifacts/13649572382)仍固定DingTalk0.3.2/UPCAM生产0.1.0（共享core0.4.3），不含正在另行修复的UPCAM0.1.1诊断进度/取消问题。旧包的51项不能充当新包验收；后者须单独核对新版本/源码/哈希并在实际宿主检查。安装与数据路径见[当前操作说明](install-business-plugins.md)。
+
+当前24张原始PNG已逐张解码并核对哈希/尺寸/当前EXE/进程绑定；协调助手仅查看home与upcam-preview两图，其余没有声称逐图查看。25行清单的唯一不可用项仍是独立Docs页，替代为项目上下文编辑器。这些是实际WinUI内容渲染，保留透明图层、裁剪和上轮所列限制，不包含OS背景、标题栏、弹窗，也不构成人工外观验收。UPCAM图为虚构预览，合成acceptance的sent不是真实送达。
+
+保留42539771658、42544171178、42549570595、42555126213各次失败原件：由早期来源断言、B操作原因不可见、明确初始化失败，推进到加载器修复后重试控件表面错误。b1批次是后续实际通过，未改写早期失败。协调器下载后审计另保留PowerShell缓存启动失败和图集误把总25行当24行的检查错误；仅修正本地审计环境/索引分类，无产品测试或Windows批次重复。
+
+产物保留一天，Linux到2026-11-10约04:03UTC、其余约04:21UTC，以Actions页面为准。功能程序始终指b1a3e9c；后续文档提交不被当作新二进制。没有创建release、部署、修改账单或删除产物。Windows11用户人工验收继续单列。
+
+## 历史655d7b6批次及后续过程记录
+
+下列“本轮/当前/待验”均属于相应标注的历史版本；最新结果以上方b1批次为准。
+
 2026-11-08 已核对 [PUBLIC Actions42518602297](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297)，功能源码 `655d7b6496067daad7c5e4cefb1f1da1b8379536`：两个 job 成功，Windows Core1423通过/0失败/0跳过；Linux1422通过/0失败，另2项真实 Windows DPAPI 测试明确跳过。取消先于期限与期限先于取消的两项真实 manager 测试在两端通过。原生启动、运行管理/实际重启、项目工作空间/恢复、已安装 Testing pass/failure/cancel/恢复、DingTalk+UPCAM51项/12个不同实际PID+出生身份、owned驱动27项均通过。后者另核对23份实际journal、13个原生构建镜像和11个可独立解码校准的真实BMP结果；GdiBlock是明确合成的捕获阶段挂起，0个StepResult，进程/IO/callback回收及租约检查通过，不声称真实OS死锁。
 
 [24张原始内容图](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633043095)已下载核对并由协调助手逐张查看：UPCAM preview与三个Testing页面均属本轮同一源码；25行清单中唯一 unavailable 是没有独立导航页的Docs，其替代为项目上下文编辑器。图集原ZIP1,520,907bytes、SHA256 `85927523773e0ccc8f88b444df0bf999c9e66336f064c1212626fc3124edf501`，保留原透明通道，未拼接/修图。不含OS背景材质/标题栏/独立弹窗；透明导航和部分选中项文字可读性有限，部分页面只显示当前视口。虚拟证据内BMP明确SIMULATED且不支持的字形为问号，顶部保存/关闭警告为故意失败场景；owned面板图为空闲状态，不证明面板已执行。UPCAM acceptance的sent/acknowledged为本地fake，不是真实投递。协调助手查看不改写原index的reviewedByHuman=false，更不等于用户Windows11人工验收。
 
 七份下载产物均匹配GitHubAPI声明SHA256。当前[完整宿主](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13633291911)ZIP90,592,610bytes、SHA256 `eee78758d3f38e94abe81a6c13f3252b76ce02c00f13375dd6d925e8dd6a9db4`；实际EXE SHA256 `48598e37f84e1f0ca60b0fadaa33a540876d5b83b6db08da593d8b48e33c35ac`、App DLL `25aa56d72caf6b137250b7be75d4e5c5f1e49a3ed4339081f50a7e209dbfd69b`，与图像/启动器/插件报告匹配。SDK0.4.0两个NuGet、11份SDK源文件、正式Testing0.2.0八文件包及232份当前源码记录、两个业务生产ZIP和安装快照已分别核对。[原生证据](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13632564836)保留原始报告/身份/失败场景。[业务插件配套](https://github.com/ThaoKeeton/project-workbench/actions/runs/42518602297/artifacts/13632778983)仍是钉钉0.3.2/UPCAM0.1.0，安装方式见安装说明。产物只保留一天，以Actions页面有效期为准；没有创建release或部署。
 
-本轮全部业务验证使用隔离合成数据与本地替身，没有真实Webhook、钉钉发送或provider请求。SourceAcceptance独立十文件包、其真实宿主激活/源控件验收与post-Stop释放通道仍未实现；通用用户电脑控制、真实provider、完整owned面板点跑和Windows11键盘/IME/DPI/选择器/无障碍等仍分别待验。下方历史段落的待验状态属于各自标注版本，不覆盖以上已核对范围；用户人工集中验收继续后置。
+本轮全部业务验证使用隔离合成数据与本地替身，没有真实Webhook、钉钉发送或provider请求。在该655d7b6历史批次，SourceAcceptance独立十文件包及其激活/源控件/post-Stop释放通道尚未完成；通用用户电脑控制、真实provider、完整owned面板点跑和Windows11键盘/IME/DPI/选择器/无障碍等仍分别待验。下方历史段落的待验状态属于各自标注版本，不覆盖以上已核对范围；用户人工集中验收继续后置。
 
 当前 gallery 源码只在既有隔离合成探针的断言之后，被动渲染实际显示的 `MainWindow.Content`（宿主导航、页面和插件视图）。它不含 OS 标题栏、独立对话框、桌面或其他窗口。每张候选图由真实 WinUI RenderTargetBitmap、WinRT PNG 编码/解码产生；收集器核对启动器独立观察的 PID/出生与退出 FILETIME、当前 EXE/源码/安装插件哈希、原探针报告、PNG 字节/尺寸/非空像素及固定页面清单。无桌面、失效页面、失败原探针和不存在的 Docs 独立导航页在索引中明确列出；Docs 的可用替代是项目上下文编辑器。Testing 虚拟 SIMULATED BMP 即使出现在真实宿主 PNG 中，仍不成为实际设备截图。Linux 参考编译本身不产生 WinUI 图像；本次图像来自上述同源码 Windows 2025 运行，协调助手已检查当前内容与裁剪限制，用户人工外观验收仍独立待办。Windows 11 的键盘/IME/DPI/选择器/无障碍与真实 provider 仍单独待验。
 
@@ -251,7 +285,7 @@ The host0.4/API1 source builds a separately installable Testing0.2 ZIP with exac
 
 At diagnostic source58f56ef, run42457380425/1 failed without observed runner/steps; ordinary job logs returned404. A later supported commit-check lookup followed by read-only check-annotation retrieval succeeded: both jobs state recent account payments failed OR the spending limit needs to increase. The exact alternative, account amount and available headroom remain unknown; no billing change or rerun was performed. This startup error differs from the five artifact-quota errors retained in historical8692. At that historical run, Core/toolchain/package/native/downstream execution was unavailable and artifacts0 was confirmed. The later public-run authorization and current coordinator observations are recorded above; the old account note is retained as historical evidence, not a current blocker. Historical8692/run42454518257 passed Windows build, freshCore1238 and eight-file installation, then completed9of27 native checks before actual probe exit-532462766; underlying exception remained unavailable. None of those historical counts or hashes is current58 acceptance. The bounded diagnostic source repair passed local real-child regressions and scoped source review only. Those old results cannot close later native27, host/runtime/workspace/virtual/business51checks+12birth-aware instances/SDK/final-delivery or downloaded-byte gates; use the source-bound coordinator results above for current observations. Linux reference checks cannot establish native runtime/PRI success. Windows11 human pickers, IME, DPI, accessibility and real-user-device/provider work remain deferred and unexecuted. Earlier tables and downloaded artifacts on this page retain their historical identities.
 
-SourceAcceptance 第一阶段另外编译 `tests/Workbench.Testing.SourceAcceptance`，通过内部 services/friend 委托同一生产 TestingPlugin；固定合成凭据与终端内存 HTTP 不访问 provider。可移植测试链接同一协议/handler/ownership 与真实 Core/store/supervisor，独立入口由完整 NativeReference 的四项 ReferenceOnly 参数编译。它不进入普通 app/Plugins，也未打包/安装；十文件 fixture profile、真实 WinUI 控件/DPAPI 和 Stop 后仍可释放 IO 的原生协议属于后续验收。HTTP 计数仅为夹具进入/返回，不能证明 provider 送达或 store 提交。凭据范围是 runtime userRoot + pluginId；项目工作区以独立 runtime root 隔离，不能把同根/同插件但不同 projectId 元数据的上下文称为独立凭据库。
+以下为第一阶段历史说明；其待打包/待原生验收状态已由本页首段b1结果更新。SourceAcceptance 第一阶段另外编译 `tests/Workbench.Testing.SourceAcceptance`，通过内部 services/friend 委托同一生产 TestingPlugin；固定合成凭据与终端内存 HTTP 不访问 provider。可移植测试链接同一协议/handler/ownership 与真实 Core/store/supervisor，独立入口由完整 NativeReference 的四项 ReferenceOnly 参数编译。它不进入普通 app/Plugins，也未打包/安装；十文件 fixture profile、真实 WinUI 控件/DPAPI 和 Stop 后仍可释放 IO 的原生协议属于后续验收。HTTP 计数仅为夹具进入/返回，不能证明 provider 送达或 store 提交。凭据范围是 runtime userRoot + pluginId；项目工作区以独立 runtime root 隔离，不能把同根/同插件但不同 projectId 元数据的上下文称为独立凭据库。
 
 独立已安装源码控件检查现已接入 `build.ps1 -IncludeSourceAcceptance` 的同轮八/十文件成对构建。Windows 标准 job 的预算上限为35分钟；实际包 profile/公共 package-store 安装通过后才运行 `scripts/source-acceptance-probe.ps1` 的 seed、verify、stop-figma、stop-ai 四个真实宿主进程。原 production Testing、business、owned、SDK 和24图 gallery 门槛均保留；源码通道不生成图片或自动执行生成用例，也不替代这些门槛。上传前重新验证当前 clean source、实际 host 和8/10包的七项共同字节。仍使用两个标准 jobs、原七种 artifact 名称、保留一天；夹具和源码收据复用两条 native-verification-evidence 上传分支。
 
