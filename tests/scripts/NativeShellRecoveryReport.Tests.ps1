@@ -85,6 +85,12 @@ try {
     $conflictHash = (Get-FileHash -LiteralPath (Join-Path $root $reports[0].relativePath) -Algorithm SHA256).Hash.ToLowerInvariant()
     [IO.File]::WriteAllText((Join-Path $root 'original-catalog.json'), 'synthetic catalog bytes')
     $catalogHash = (Get-FileHash -LiteralPath (Join-Path $root 'original-catalog.json') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sentinelBytes = [Text.Encoding]::UTF8.GetBytes('ProjectWorkbench synthetic unrelated sentinel v1')
+    [IO.File]::WriteAllBytes((Join-Path $root 'unrelated-sentinel-original.bin'), $sentinelBytes)
+    [IO.File]::WriteAllBytes((Join-Path $root 'unrelated-sentinel-final.bin'), $sentinelBytes)
+    $sentinelHash = (Get-FileHash -LiteralPath (Join-Path $root 'unrelated-sentinel-original.bin') -Algorithm SHA256).Hash.ToLowerInvariant()
+    $sentinelPhases = @('before-start','healthy','duplicate-root','cancel','export','collision','first-close','retry-close','corrupt-catalog','corrupt-export','corrupt-recovery','close-pending','final-recovery')
+    $sentinelChecks = @($sentinelPhases | ForEach-Object { [ordered]@{ phase=$_; sha256=$sentinelHash } })
     $processes = @($process)
     foreach ($role in @('duplicate-retry','corrupt-retry','close-pending','restored-start')) {
         $n = $processes.Count; $processes += [ordered]@{ role = $role; processId = (123 + $n); creationFileTime = [long](133444444444444444 + $n); windowHandle = [long](5678 + $n); windowClosed = $true; exitCode = 0; rootReacquired = $true; jobEmpty = $true }
@@ -92,21 +98,45 @@ try {
     foreach ($i in 0..1) {
         $owner = $processes[$i+1]; $reports[$i].processId = $owner.processId; $reports[$i].creationFileTime = $owner.creationFileTime; $reports[$i].windowHandle = $owner.windowHandle
     }
-    $receipt = [ordered]@{ schemaVersion = 1; succeeded = $true; sourceCommit = $commit; executableSha256 = $exe; dllSha256 = $dll; forcedCleanup = $false; processes = $processes; images = @($light,$dark); reports = $reports; cancelWritten = $false; collisionBefore = $conflictHash; collisionAfter = $conflictHash; catalogBefore = $catalogHash; catalogAfter = $catalogHash; pickerPendingAtClose = $true; checks = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
+    $receipt = [ordered]@{ schemaVersion = 1; succeeded = $true; sourceCommit = $commit; executableSha256 = $exe; dllSha256 = $dll; forcedCleanup = $false; processes = $processes; images = @($light,$dark); reports = $reports; cancelWritten = $false; collisionBefore = $conflictHash; collisionAfter = $conflictHash; catalogBefore = $catalogHash; catalogAfter = $catalogHash; sentinelBefore = $sentinelHash; sentinelAfter = $sentinelHash; sentinelChecks = $sentinelChecks; pickerPendingAtClose = $true; checks = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
     $result = Write-Json $receipt 'result.json'
     Test-ShellRecoveryFinal -Path $result -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll | Out-Null; $passed++
-    foreach ($case in @('source', 'exit', 'root', 'close', 'job', 'forced', 'cancel', 'collision', 'checks', 'pending', 'process', 'birth', 'hwnd', 'image', 'missingfinal', 'missingreport', 'reportclassification', 'collision-unbound', 'catalog', 'processmissing', 'duplicaterole', 'duplicateimage', 'finalsource-array', 'finalhash-array', 'collision-array', 'report-process', 'image-role')) {
+    foreach ($case in @('source', 'exit', 'root', 'close', 'job', 'forced', 'cancel', 'collision', 'checks', 'pending', 'process', 'birth', 'hwnd', 'image', 'missingfinal', 'missingreport', 'reportclassification', 'collision-unbound', 'catalog', 'processmissing', 'duplicaterole', 'duplicateimage', 'finalsource-array', 'finalhash-array', 'collision-array', 'report-process', 'image-role', 'sentinel-missing-field', 'sentinel-changed-hash', 'sentinel-array', 'sentinel-missing-checkpoint', 'sentinel-changed-checkpoint', 'sentinel-duplicate-phase', 'sentinel-reordered')) {
         $r = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
         switch ($case) {
             source { $r.sourceCommit = 'f' * 40 }; exit { $r.processes[0].exitCode = 1 }; root { $r.processes[0].rootReacquired = $false }
             close { $r.processes[0].windowClosed = $false }; job { $r.processes[0].jobEmpty = $false }; forced { $r.forcedCleanup = $true }
             cancel { $r.cancelWritten = $true }; collision { $r.collisionAfter = 'd' * 64 }; checks { $r.checks = @('normal') }
             pending { $r.pickerPendingAtClose = $false }; process { $r.processes[0].processId++ }; birth { $r.processes[0].creationFileTime++ }
+            'sentinel-missing-field' { $r.Remove('sentinelBefore') }; 'sentinel-changed-hash' { $r.sentinelAfter = 'd' * 64 }; 'sentinel-array' { $r.sentinelBefore = @($r.sentinelBefore) }
+            'sentinel-missing-checkpoint' { $r.sentinelChecks = @($r.sentinelChecks | Select-Object -Skip 1) }; 'sentinel-changed-checkpoint' { $r.sentinelChecks[3].sha256 = 'd' * 64 }
+            'sentinel-duplicate-phase' { $r.sentinelChecks[1].phase = $r.sentinelChecks[0].phase }; 'sentinel-reordered' { $r.sentinelChecks = @($r.sentinelChecks[1],$r.sentinelChecks[0]) + @($r.sentinelChecks | Select-Object -Skip 2) }
             hwnd { $r.processes[0].windowHandle++ }; image { $r.images = @() }; missingfinal { $r.Remove('succeeded') }; missingreport { $r.reports = @() }; reportclassification { $r.reports[0].code = 'StoreIoFailure' }; 'collision-unbound' { $r.collisionBefore = 'd' * 64; $r.collisionAfter = 'd' * 64 }; catalog { $r.catalogAfter = 'd' * 64 }; processmissing { $r.processes = @($r.processes | Select-Object -First 4) }; duplicaterole { $r.processes[1].role = 'healthy' }; duplicateimage { $r.images[1].sha256 = $r.images[0].sha256 }; 'finalsource-array' { $r.sourceCommit = @($commit) }; 'finalhash-array' { $r.executableSha256 = @($exe) }; 'collision-array' { $r.collisionAfter = @($r.collisionBefore) }; 'report-process' { $r.reports[0].processId = $r.processes[2].processId; $r.reports[0].creationFileTime = $r.processes[2].creationFileTime; $r.reports[0].windowHandle = $r.processes[2].windowHandle }; 'image-role' { $r.images[0].processId = $r.processes[1].processId; $r.images[0].creationFileTime = $r.processes[1].creationFileTime; $r.images[0].windowHandle = $r.processes[1].windowHandle }
         }
         $f = Write-Json $r 'bad-result.json'
         Refuse { Test-ShellRecoveryFinal -Path $f -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } $case
     }
+
+    # Exercise actual evidence files, including same-hash-field tampering and missing inputs.
+    foreach ($name in @('unrelated-sentinel-original.bin','unrelated-sentinel-final.bin','original-catalog.json',('conflict/Workbench-error-' + $report.reportId + '.json'))) {
+        $path = Join-Path $root $name; $original = [IO.File]::ReadAllBytes($path); $away = $path + '.held'
+        Move-Item -LiteralPath $path -Destination $away
+        try { Refuse { Test-ShellRecoveryFinal -Path $result -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } ("missing-file-$name") }
+        finally { Move-Item -LiteralPath $away -Destination $path }
+        [IO.File]::WriteAllText($path, 'changed owned fixture bytes')
+        try { Refuse { Test-ShellRecoveryFinal -Path $result -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } ("changed-file-$name") }
+        finally { [IO.File]::WriteAllBytes($path, $original) }
+    }
+    $sentinelOriginal = Join-Path $root 'unrelated-sentinel-original.bin'; $sentinelFinal = Join-Path $root 'unrelated-sentinel-final.bin'
+    [IO.File]::WriteAllText($sentinelOriginal, 'different but matching sentinel')
+    [IO.File]::WriteAllText($sentinelFinal, 'different but matching sentinel')
+    $alteredHash = (Get-FileHash -LiteralPath $sentinelOriginal -Algorithm SHA256).Hash.ToLowerInvariant()
+    $altered = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $altered.sentinelBefore = $alteredHash; $altered.sentinelAfter = $alteredHash
+    foreach ($check in $altered.sentinelChecks) { $check.sha256 = $alteredHash }
+    $alteredFile = Write-Json $altered 'altered-sentinel-result.json'
+    try { Refuse { Test-ShellRecoveryFinal -Path $alteredFile -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } 'changed-original-and-evidence' }
+    finally { [IO.File]::WriteAllBytes($sentinelOriginal,$sentinelBytes); [IO.File]::WriteAllBytes($sentinelFinal,$sentinelBytes) }
 
     # Synthetic API records exercise source/run/artifact binding only; no download is performed.
     $driverCommit = 'd' * 40; $archiveSha = 'e' * 64

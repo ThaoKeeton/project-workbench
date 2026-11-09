@@ -88,7 +88,7 @@ function Test-ShellRecoveryFinal {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Directory,
         [Parameter(Mandatory)][string]$ExpectedSourceCommit, [Parameter(Mandatory)][string]$ExpectedExeSha256, [Parameter(Mandatory)][string]$ExpectedDllSha256)
     $r = Read-ShellRecoveryJson $Path
-    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','reports','cancelWritten','collisionBefore','collisionAfter','catalogBefore','catalogAfter','pickerPendingAtClose','checks')
+    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','reports','cancelWritten','collisionBefore','collisionAfter','catalogBefore','catalogAfter','sentinelBefore','sentinelAfter','sentinelChecks','pickerPendingAtClose','checks')
     if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or -not $r.succeeded -or
         ($r.sourceCommit -isnot [string] -or $r.sourceCommit -cne $ExpectedSourceCommit) -or $ExpectedSourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or
         -not (Test-ShellHash $ExpectedExeSha256) -or -not (Test-ShellHash $r.executableSha256) -or $r.executableSha256 -cne $ExpectedExeSha256 -or
@@ -96,7 +96,26 @@ function Test-ShellRecoveryFinal {
         $r.forcedCleanup -isnot [bool] -or $r.forcedCleanup -or $r.cancelWritten -isnot [bool] -or $r.cancelWritten -or
         $r.pickerPendingAtClose -isnot [bool] -or -not $r.pickerPendingAtClose -or
         -not (Test-ShellHash $r.collisionBefore) -or -not (Test-ShellHash $r.collisionAfter) -or $r.collisionAfter -cne $r.collisionBefore -or
-        -not (Test-ShellHash $r.catalogBefore) -or -not (Test-ShellHash $r.catalogAfter) -or $r.catalogAfter -cne $r.catalogBefore) { throw 'ShellRecoveryFinalInvalid' }
+        -not (Test-ShellHash $r.catalogBefore) -or -not (Test-ShellHash $r.catalogAfter) -or $r.catalogAfter -cne $r.catalogBefore -or
+        -not (Test-ShellHash $r.sentinelBefore) -or -not (Test-ShellHash $r.sentinelAfter) -or $r.sentinelAfter -cne $r.sentinelBefore) { throw 'ShellRecoveryFinalInvalid' }
+    $expectedSentinel = [Text.Encoding]::UTF8.GetBytes('ProjectWorkbench synthetic unrelated sentinel v1')
+    $sentinelBase64 = [Convert]::ToBase64String($expectedSentinel)
+    foreach ($name in @('unrelated-sentinel-original.bin','unrelated-sentinel-final.bin')) {
+        $path = Join-Path $Directory $name
+        Assert-ShellRecoveryNoLinks $path
+        $item = Get-Item -LiteralPath $path -Force
+        if ($item.PSIsContainer -or $item.Length -ne $expectedSentinel.Length -or
+            [Convert]::ToBase64String([IO.File]::ReadAllBytes($path)) -cne $sentinelBase64 -or
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $r.sentinelBefore) { throw 'ShellRecoverySentinelInvalid' }
+    }
+    $phases = @('before-start','healthy','duplicate-root','cancel','export','collision','first-close','retry-close','corrupt-catalog','corrupt-export','corrupt-recovery','close-pending','final-recovery')
+    if ($r.sentinelChecks -isnot [array] -or $r.sentinelChecks.Count -ne $phases.Count) { throw 'ShellRecoverySentinelInvalid' }
+    for ($i = 0; $i -lt $phases.Count; $i++) {
+        $check = $r.sentinelChecks[$i]
+        Assert-ShellKeys $check @('phase','sha256')
+        if ($check.phase -isnot [string] -or $check.phase -cne $phases[$i] -or
+            -not (Test-ShellHash $check.sha256) -or $check.sha256 -cne $r.sentinelBefore) { throw 'ShellRecoverySentinelInvalid' }
+    }
     $required = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon')
     if ($r.checks -isnot [array] -or $r.checks.Count -ne $required.Count -or @(Compare-Object $required $r.checks -CaseSensitive).Count -ne 0 -or
         $r.processes -isnot [array] -or $r.processes.Count -ne 5 -or $r.images -isnot [array] -or $r.images.Count -ne 2 -or $r.reports -isnot [array] -or $r.reports.Count -ne 2) { throw 'ShellRecoveryChecksInvalid' }

@@ -35,6 +35,11 @@ public sealed class OwnedShellHost : IDisposable
         uint a = GetFileAttributesW(path); if (a != 0xffffffff) return true;
         int e = Marshal.GetLastWin32Error(); if (e == 2 || e == 3) return false; throw new InvalidOperationException();
     }
+    // Creation must fail if any normal profile appeared after preflight.
+    public static void CreateDirectoryExclusive(string path)
+    {
+        if (!CreateDirectoryW(path, IntPtr.Zero)) throw new InvalidOperationException();
+    }
     public static void RejectLinks(string path)
     {
         for (string p = Path.GetFullPath(path); p != null; p = Path.GetDirectoryName(p))
@@ -146,6 +151,7 @@ public sealed class OwnedShellHost : IDisposable
     private delegate bool WindowCallback(IntPtr w, IntPtr u);
     [DllImport("kernel32.dll")] private static extern bool CloseHandle(IntPtr h);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern uint GetFileAttributesW(string p);
+    [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern bool CreateDirectoryW(string path, IntPtr security);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern Handle CreateJobObjectW(IntPtr a,string n);
     [DllImport("kernel32.dll",SetLastError=true)] private static extern bool SetInformationJobObject(Handle j,int k,ref ExtendedLimits v,int l);
     [DllImport("kernel32.dll",CharSet=CharSet.Unicode,SetLastError=true)] private static extern bool CreateProcessW(string e,StringBuilder c,IntPtr a,IntPtr b,bool i,uint f,IntPtr env,string d,ref StartupInfo s,out ProcessInfo p);

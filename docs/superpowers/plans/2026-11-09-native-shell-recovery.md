@@ -50,7 +50,17 @@
 - [ ] Run the affected portable tests and one full current Core suite because the patch changes shared storage exceptions/coordinator classification; retain all failures/skips by name. Run one final fresh NativeReference graph for the combined current App. Preserve earlier source/output roots and source/command/hash receipts. No local Windows runtime success claim.
 - [ ] Check exact diff/Source248plus-new-input inventory and parent patch identity, commit the integrated repair, report all merge choices and actual outputs, then release to a fresh scoped reviewer. No CI/push/main/release, external provider/user-PC/other-repo work or generic automation framework.
 
-### Task 3: Minimal real Windows export/window gate and deliverable
+### Task 3: Reviewed full host producer
+
+**Boundary:** The Task1/2 host producer and its source fixes have been reviewed through the existing five-round producer loop. The reviewed producer source is `94cddc356b310b38c88f6976425722f1a2cd8562`; its bounded diagnostic run `42596739897` passed native smoke and collected client-gallery images. The distinct full standard producer run `42598740616` is pending its actual result and an eligible shipping artifact. Keep the producer source, job bodies, native/Source36/business51/owned27 checks and seven existing artifact slots materially unchanged. No sixth producer fix round is admitted by this boundary.
+
+**Interfaces:** Produces the independently verified host source H1, successful full run R1, original app artifact A1 and its archive digest for Task4. Only Root audits and preserves those actual identities. Host0.4.1, SDK0.4.0, AssemblyVersion1.0.0.0, API/services1 and data schema1 remain unchanged; no host DLL is packaged into plugins.
+
+- [ ] Root inspects the actual full jobs, logs, TRX and original app/assets/PE bytes, confirms the artifact's API identity and archive digest, and preserves the original before expiry. A diagnostic run, local compile or client image is not the shipping artifact or a full-window/export result.
+
+### Task 4: Exact-shipping native recovery consumer and deliverable
+
+**Boundary:** This separate consumer and delivery task follows the reviewed producer; it does not reopen or reset the producer's exhausted five-round source loop. The ordinary merge preserves the producer and the previously prepared consumer histories. H1 is bound to the actual producer run/artifact/host metadata; H2 independently identifies the clean consumer-driver checkout and workflow source, whether H1 and H2 differ or independently verify equal. Root performs fresh consumer review before any explicit light-mode dispatch.
 
 **Files:** Add scripts/native-shell-recovery-probe.ps1 and bounded owned native UIA/capture helpers only as needed; .github/workflows/build.yml, exact host provenance/version tests and current delivery/Windows documentation. If host0.4.1 is used, update only App host version, PluginModels logical host default and exact strict host consumers; both SDK package versions remain0.4.0. No business/plugin source changes.
 

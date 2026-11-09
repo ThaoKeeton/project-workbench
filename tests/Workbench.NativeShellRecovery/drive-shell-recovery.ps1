@@ -23,6 +23,17 @@ function Set-Phase([string]$Name) {
     $stream = [IO.File]::Open($file,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
 }
+# Every checkpoint reads the unrelated file in the owned profile, checks its exact
+# original bytes, then records the SHA-256 of those same bytes.
+function Record-Sentinel([string]$Name) {
+    [OwnedShellHost]::RejectLinks($script:sentinelPath)
+    $actual = [IO.File]::ReadAllBytes($script:sentinelPath)
+    Assert-Condition ([Convert]::ToBase64String($actual) -ceq [Convert]::ToBase64String($script:sentinelBytes))
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { $hash = [BitConverter]::ToString($hasher.ComputeHash($actual)).Replace('-','').ToLowerInvariant() } finally { $hasher.Dispose() }
+    Assert-Condition ($hash -ceq $script:sentinelHash)
+    $null = $script:sentinelChecks.Add(@{ phase=$Name; sha256=$hash })
+}
 function New-Host([string]$Role) {
     $hostRun = [OwnedShellHost]::Start($HostExe); $null = $script:hosts.Add($hostRun)
     $hwnd = Wait-For { $h = $hostRun.Window(); if ($h -ne [IntPtr]::Zero) { $h } } 60
@@ -159,6 +170,20 @@ try {
     $script:canWrite = $true; $script:phaseNumber = 1
     $conflictDir = Join-Path $EvidenceRoot 'conflict'; $catalogDir = Join-Path $EvidenceRoot 'catalog'; $pendingDir = Join-Path $EvidenceRoot 'pending'
     foreach ($dir in @($conflictDir,$catalogDir,$pendingDir)) { Assert-Condition (-not [OwnedShellHost]::PathExists($dir)); [IO.Directory]::CreateDirectory($dir) | Out-Null }
+    # This runner's previously absent normal profile is now created exclusively by
+    # the harness. A preexisting profile is never opened or removed.
+    [OwnedShellHost]::CreateDirectoryExclusive($userRoot)
+    [OwnedShellHost]::RejectLinks($userRoot)
+    $script:sentinelPath = Join-Path $userRoot 'unrelated-synthetic-sentinel.bin'
+    $script:sentinelBytes = [Text.Encoding]::UTF8.GetBytes('ProjectWorkbench synthetic unrelated sentinel v1')
+    $script:sentinelChecks = New-Object System.Collections.ArrayList
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { $script:sentinelHash = [BitConverter]::ToString($hasher.ComputeHash($script:sentinelBytes)).Replace('-','').ToLowerInvariant() } finally { $hasher.Dispose() }
+    foreach ($path in @($script:sentinelPath,(Join-Path $EvidenceRoot 'unrelated-sentinel-original.bin'))) {
+        $stream = [IO.File]::Open($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try { $stream.Write($script:sentinelBytes,0,$script:sentinelBytes.Length) } finally { $stream.Dispose() }
+    }
+    Record-Sentinel 'before-start'
     Set-Phase 'healthy'
     $first = New-Host 'healthy'; $script:current = $first
     $null = Get-HostControl $first '工作台标题栏'
@@ -185,9 +210,11 @@ try {
     $null = Wait-For { $first.host.Validate($first.hwnd); if ($first.window.Current.BoundingRectangle.Width -ge 1100) { $true } }
     Set-Theme $first '浅色'; Capture-Frame $first 'light.png'
     Set-Theme $first '深色'; Capture-Frame $first 'dark.png'
+    Record-Sentinel 'healthy'
     Set-Phase 'lease-conflict'
     $second = New-Host 'duplicate-retry'; $script:current = $second
     $null = Get-HostControl $second '导出脱敏错误报告'
+    Record-Sentinel 'duplicate-root'
     $picker = Show-Picker $second
     $button = Get-HostControl $second '导出脱敏错误报告'; Assert-Condition (-not $button.Current.IsEnabled)
     $second.host.ValidatePopup($second.hwnd,$picker.hwnd); $invoke = $null; if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)) { try { $invoke.Invoke() } catch [System.Windows.Automation.ElementNotEnabledException] { } }
@@ -195,17 +222,22 @@ try {
     Cancel-Picker $second $picker
     $null = Wait-For { if ((Read-HostText $second '错误报告导出状态') -ceq '已取消导出，尚未写入报告。') { $true } }
     Assert-Condition (@(Get-ChildItem -LiteralPath $conflictDir -File).Count -eq 0)
+    Record-Sentinel 'cancel'
     $export = Export-To $second $conflictDir
+    Record-Sentinel 'export'
     $before = (Get-FileHash -LiteralPath $export.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
     $picker = Show-Picker $second; Select-PickerFolder $second $picker $conflictDir
     $null = Wait-For { if ((Read-HostText $second '错误报告导出状态') -ceq '此文件夹已有同名报告，原文件未覆盖。可使用已有报告或选择其他文件夹。') { $true } }
     $after = (Get-FileHash -LiteralPath $export.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); Assert-Condition ($before -ceq $after)
+    Record-Sentinel 'collision'
     $null = $script:reports.Add(@{ relativePath=('conflict/'+$export.Name); stage='WorkspaceOwnership'; code='UserStoreInUse'; category='Storage'; processId=$second.host.Id; creationFileTime=$second.host.Birth; windowHandle=$second.hwnd.ToInt64() })
     Close-Host $first; Reacquire-Roots $userRoot
+    Record-Sentinel 'first-close'
     Assert-Condition ((Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash -ceq ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($catalogBytes)).Replace('-','')))
     Invoke-Host $second '重试打开项目'
     $null = Wait-For { $second.host.Validate($second.hwnd); if ($second.window.Current.Name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $second; Reacquire-Roots $userRoot
+    Record-Sentinel 'retry-close'
     Set-Phase 'corrupt-catalog'
     $copy = Join-Path $EvidenceRoot 'original-catalog.json'; $stream = [IO.File]::Open($copy,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None); try { $stream.Write($catalogBytes,0,$catalogBytes.Length) } finally { $stream.Dispose() }
     $catalogBefore = (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant()
@@ -213,13 +245,16 @@ try {
     [IO.File]::WriteAllBytes($catalogPath,$broken)
     $third = New-Host 'corrupt-retry'; $script:current = $third
     $null = Get-HostControl $third '导出脱敏错误报告'
+    Record-Sentinel 'corrupt-catalog'
     $export = Export-To $third $catalogDir
     $null = $script:reports.Add(@{ relativePath=('catalog/'+$export.Name); stage='CatalogOpen'; code='InvalidCatalog'; category='InvalidData'; processId=$third.host.Id; creationFileTime=$third.host.Birth; windowHandle=$third.hwnd.ToInt64() })
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($broken))
+    Record-Sentinel 'corrupt-export'
     [IO.File]::WriteAllBytes($catalogPath,$catalogBytes)
     Invoke-Host $third '重试打开项目'
     $null = Wait-For { $third.host.Validate($third.hwnd); if ($third.window.Current.Name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $third; Reacquire-Roots $userRoot
+    Record-Sentinel 'corrupt-recovery'
     Set-Phase 'close-pending-picker'
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($catalogBytes))
     [IO.File]::WriteAllBytes($catalogPath,$broken)
@@ -234,15 +269,21 @@ try {
     Assert-Condition (@(Get-ChildItem -LiteralPath $pendingDir -File).Count -eq 0)
     Reacquire-Roots $userRoot
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($broken))
+    Record-Sentinel 'close-pending'
     [IO.File]::WriteAllBytes($catalogPath,$catalogBytes)
     $fifth = New-Host 'restored-start'; $script:current = $fifth
     $null = Wait-For { $fifth.host.Validate($fifth.hwnd); if ($fifth.window.Current.Name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $fifth; Reacquire-Roots $userRoot
+    Record-Sentinel 'final-recovery'
+    $sentinelFinal = [IO.File]::ReadAllBytes($script:sentinelPath)
+    Assert-Condition ([Convert]::ToBase64String($sentinelFinal) -ceq [Convert]::ToBase64String($script:sentinelBytes))
+    $stream = [IO.File]::Open((Join-Path $EvidenceRoot 'unrelated-sentinel-final.bin'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try { $stream.Write($sentinelFinal,0,$sentinelFinal.Length) } finally { $stream.Dispose() }
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($catalogBytes))
     $catalogAfter = (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-Condition ($catalogBefore -ceq $catalogAfter)
     foreach ($record in $script:records) { $record.rootReacquired = $true }
-    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); reports=@($script:reports.ToArray()); cancelWritten=$false; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
+    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); reports=@($script:reports.ToArray()); cancelWritten=$false; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; sentinelBefore=$script:sentinelHash; sentinelAfter=$script:sentinelChecks[$script:sentinelChecks.Count-1].sha256; sentinelChecks=@($script:sentinelChecks.ToArray()); pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
     $script:phase = 'completed'
 } catch {
     $script:result = @{ schemaVersion=1; succeeded=$false; phase=$script:phase; failureCode='NativeGateFailed'; forcedCleanup=$false }
