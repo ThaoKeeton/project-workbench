@@ -24,7 +24,7 @@ function Get-SafeFailure($Record) {
     } catch { return @{ type='Other'; category='Other'; hresult=$null; line=$null } }
 }
 function Set-DiagnosticStage([string]$Stage) {
-    $allowed = @('healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-initial-frame','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker')
+    $allowed = @('healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker')
     if ($Stage -cnotin $allowed) { throw 'DiagnosticStageInvalid' }
     $script:stage = $Stage; $script:lastWaitFailure = $null
     if (-not $script:canWrite) { return }
@@ -107,25 +107,13 @@ function Assert-PickerAfter($Owned,$Picker,$Element) {
         Assert-PickerRoot $Owned $Picker
     }
 }
-# Optional original PrintWindow(2) diagnostic for the exact owned HWND. Its
-# failure never qualifies a native frame and never replaces the primary failure.
-function Capture-InitialDiagnostic($HostRun,[IntPtr]$Window) {
-    try {
-        $path = Join-Path $EvidenceRoot 'diagnostic-window.png'
-        $bounds = $HostRun.Capture($Window,$path)
-        $file = Get-Item -LiteralPath $path
-        if ($file.Length -lt 1 -or $file.Length -gt 16777216) { throw 'NativeAssertionFailed' }
-        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
-        $script:initialFrame = @{ status='captured'; image=@{ name='diagnostic-window.png'; sha256=$hash; bytes=$file.Length; width=($bounds[2]-$bounds[0]); height=($bounds[3]-$bounds[1]); left=$bounds[0]; top=$bounds[1]; right=$bounds[2]; bottom=$bounds[3]; processId=$HostRun.Id; creationFileTime=$HostRun.Birth; windowHandle=$Window.ToInt64(); source='PrintWindow2' }; failure=$null }
-    } catch { $script:initialFrame = @{ status='unavailable'; image=$null; failure=(Get-SafeFailure $_) } }
-}
 function New-Host([string]$Role) {
     $hostRun = [OwnedShellHost]::Start($HostExe); $null = $script:hosts.Add($hostRun)
     if ($Role -ceq 'healthy') { Set-DiagnosticStage 'healthy-window-wait' }
     $hwnd = Wait-For { $h = $hostRun.Window(); if ($h -ne [IntPtr]::Zero) { $h } } 60
     if ($Role -ceq 'healthy') { Set-DiagnosticStage 'healthy-window-identity' }
     $hostRun.Validate($hwnd)
-    if ($Role -ceq 'healthy') { Set-DiagnosticStage 'healthy-initial-frame'; Capture-InitialDiagnostic $hostRun $hwnd; Set-DiagnosticStage 'healthy-uia-root' }
+    if ($Role -ceq 'healthy') { Set-DiagnosticStage 'healthy-uia-root' }
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
     $owned = @{ host = $hostRun; hwnd = $hwnd; window = $window; role = $Role; closed = $false }
     Assert-HostElement $owned $window

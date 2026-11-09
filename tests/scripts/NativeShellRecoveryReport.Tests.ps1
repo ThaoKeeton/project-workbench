@@ -75,7 +75,7 @@ try {
     }
     [IO.File]::WriteAllBytes((Join-Path $root 'diagnostic-window.png'), $png)
     $diagnosticImage = [ordered]@{}; foreach ($key in $image.Keys) { $diagnosticImage[$key] = $image[$key] }; $diagnosticImage.name = 'diagnostic-window.png'
-    $diagnosticFrame = [ordered]@{ status='captured'; image=$diagnosticImage; failure=$null }
+    $diagnosticFrame = [ordered]@{ status='not-attempted'; image=$null; failure=$null }
     $safeFailure = [ordered]@{ type='InvalidOperationException'; category='InvalidOperation'; hresult=[int]-2146233079; line=321 }
     $process = [ordered]@{ role = 'healthy'; processId = 123; creationFileTime = [long]133444444444444444; windowHandle = [long]5678; windowClosed = $true; exitCode = 0; rootReacquired = $true; jobEmpty = $true }
     $light = [ordered]@{}; foreach ($key in $image.Keys) { $light[$key] = $image[$key] }; $light.name = 'light.png'
@@ -127,14 +127,18 @@ try {
     $receipt = [ordered]@{ schemaVersion = 1; succeeded = $true; sourceCommit = $commit; executableSha256 = $exe; dllSha256 = $dll; forcedCleanup = $false; processes = $processes; images = @($light,$dark); diagnosticFrame=$diagnosticFrame; reports = $reports; cancelWritten = $false; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore = $conflictHash; collisionAfter = $conflictHash; catalogBefore = $catalogHash; catalogAfter = $catalogHash; sentinelBefore = $sentinelHash; sentinelAfter = $sentinelHash; sentinelChecks = $sentinelChecks; pickerPendingAtClose = $true; checks = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
     $result = Write-Json $receipt 'result.json'
     Test-ShellRecoveryFinal -Path $result -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll | Out-Null; $passed++
-    foreach ($case in @('source', 'exit', 'root', 'close', 'job', 'forced', 'cancel', 'collision', 'checks', 'pending', 'process', 'birth', 'hwnd', 'image', 'missingfinal', 'missingreport', 'reportclassification', 'collision-unbound', 'catalog', 'processmissing', 'duplicaterole', 'duplicateimage', 'finalsource-array', 'finalhash-array', 'collision-array', 'report-process', 'image-role', 'sentinel-missing-field', 'sentinel-changed-hash', 'sentinel-array', 'sentinel-missing-checkpoint', 'sentinel-changed-checkpoint', 'sentinel-duplicate-phase', 'sentinel-reordered', 'navigation-pending', 'navigation-ambiguous', 'navigation-pid', 'navigation-wrong-view', 'navigation-view-name', 'navigation-view-pid', 'navigation-wrong-destination', 'cancel-snapshot-hash', 'close-snapshot-hash', 'repeat-unavailable', 'repeat-skipped', 'repeat-unexpected-success', 'repeat-lost-popup', 'diagnostic-wrong-owner', 'diagnostic-missing-image', 'diagnostic-raw-failure')) {
+    $claimedCapture = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $claimedCapture.diagnosticFrame = @{ status='captured'; image=$diagnosticImage; failure=$null }
+    $claimedCaptureFile = Write-Json $claimedCapture 'claimed-capture.json'
+    Refuse { Test-ShellRecoveryFinal -Path $claimedCaptureFile -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } 'optional-frame-falsely-claimed'
+    foreach ($case in @('source', 'exit', 'root', 'close', 'job', 'forced', 'cancel', 'collision', 'checks', 'pending', 'process', 'birth', 'hwnd', 'image', 'missingfinal', 'missingreport', 'reportclassification', 'collision-unbound', 'catalog', 'processmissing', 'duplicaterole', 'duplicateimage', 'finalsource-array', 'finalhash-array', 'collision-array', 'report-process', 'image-role', 'sentinel-missing-field', 'sentinel-changed-hash', 'sentinel-array', 'sentinel-missing-checkpoint', 'sentinel-changed-checkpoint', 'sentinel-duplicate-phase', 'sentinel-reordered', 'navigation-pending', 'navigation-ambiguous', 'navigation-pid', 'navigation-wrong-view', 'navigation-view-name', 'navigation-view-pid', 'navigation-wrong-destination', 'cancel-snapshot-hash', 'close-snapshot-hash', 'repeat-unavailable', 'repeat-skipped', 'repeat-unexpected-success', 'repeat-lost-popup', 'diagnostic-unavailable', 'diagnostic-image', 'diagnostic-failure', 'diagnostic-raw-failure')) {
         $r = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
         switch ($case) {
             source { $r.sourceCommit = 'f' * 40 }; exit { $r.processes[0].exitCode = 1 }; root { $r.processes[0].rootReacquired = $false }
             close { $r.processes[0].windowClosed = $false }; job { $r.processes[0].jobEmpty = $false }; forced { $r.forcedCleanup = $true }
             cancel { $r.cancelWritten = $true }; collision { $r.collisionAfter = 'd' * 64 }; checks { $r.checks = @('normal') }
             pending { $r.pickerPendingAtClose = $false }; process { $r.processes[0].processId++ }; birth { $r.processes[0].creationFileTime++ }
-            'diagnostic-wrong-owner' { $r.diagnosticFrame.image.processId++ }; 'diagnostic-missing-image' { $r.diagnosticFrame.image = $null }; 'diagnostic-raw-failure' { $r.diagnosticFrame.status='unavailable'; $r.diagnosticFrame.image=$null; $r.diagnosticFrame.failure=@{ type='Other'; category='Other'; hresult=$null; line=$null; rawMessage='private' } }
+            'diagnostic-unavailable' { $r.diagnosticFrame.status='unavailable'; $r.diagnosticFrame.failure=$safeFailure }; 'diagnostic-image' { $r.diagnosticFrame.image=$diagnosticImage }; 'diagnostic-failure' { $r.diagnosticFrame.failure=$safeFailure }; 'diagnostic-raw-failure' { $r.diagnosticFrame.status='unavailable'; $r.diagnosticFrame.failure=@{ type='Other'; category='Other'; hresult=$null; line=$null; rawMessage='private' } }
             'navigation-pending' { $r.cancelEvidence.navigation.addressSubmitted = $true; $r.cancelEvidence.navigation.witnessVisible = $false; $r.cancelEvidence.navigation.witnessMatches = 0 }
             'navigation-ambiguous' { $r.closeEvidence.navigation.witnessMatches = 2 }; 'navigation-pid' { $r.closeEvidence.navigation.witnessProcessId++ }; 'navigation-wrong-view' { $r.closeEvidence.navigation.viewAutomationId = 'other' }; 'navigation-view-name' { $r.closeEvidence.navigation.viewName = 'Address suggestions' }; 'navigation-view-pid' { $r.closeEvidence.navigation.viewProcessId++ }; 'navigation-wrong-destination' { $r.closeEvidence.navigation.destination = 'conflict' }
             'cancel-snapshot-hash' { $r.cancelEvidence.afterSha256 = 'd' * 64 }; 'close-snapshot-hash' { $r.closeEvidence.beforeSha256 = 'd' * 64 }
@@ -152,32 +156,21 @@ try {
     $failureDiagnostic = [ordered]@{ schemaVersion=1; succeeded=$false; phase='healthy'; failureCode='NativeGateFailed'; forcedCleanup=$false; diagnostic=[ordered]@{ stage='healthy-titlebar'; failure=$safeFailure; lastWaitFailure=$safeFailure; checkpointWriteFailed=$false; cleanupFailure=$null; initialFrame=$diagnosticFrame } }
     $diagnosticFile = Write-Json $failureDiagnostic 'diagnostic-failure.json'
     Test-ShellRecoveryFailureDiagnostic -Path $diagnosticFile -Directory $root | Out-Null; $passed++
-    foreach ($case in @('stage','stage-array','type','category','hresult-string','hresult-range','line-string','line-negative','line-range','raw-message','extra','missing-failure','wait-raw','checkpoint-type','cleanup-raw','frame-status','frame-owner','frame-name','frame-failure')) {
+    foreach ($case in @('stage','stage-array','early-frame-stage','type','category','hresult-string','hresult-range','line-string','line-negative','line-range','raw-message','extra','missing-failure','wait-raw','checkpoint-type','cleanup-raw','frame-status','frame-captured','frame-unavailable','frame-image','frame-failure')) {
         $bad = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
         switch ($case) {
-            stage { $bad.diagnostic.stage = 'path-or-ui-text' }; 'stage-array' { $bad.diagnostic.stage = @('healthy-titlebar') }; type { $bad.diagnostic.failure.type = 'Private.Namespace' }
+            stage { $bad.diagnostic.stage = 'path-or-ui-text' }; 'stage-array' { $bad.diagnostic.stage = @('healthy-titlebar') }; 'early-frame-stage' { $bad.diagnostic.stage = 'healthy-initial-frame' }; type { $bad.diagnostic.failure.type = 'Private.Namespace' }
             category { $bad.diagnostic.failure.category = 'raw message' }; 'hresult-string' { $bad.diagnostic.failure.hresult = '-1' }; 'hresult-range' { $bad.diagnostic.failure.hresult = [long]2147483648 }
             'line-string' { $bad.diagnostic.failure.line = '321' }; 'line-negative' { $bad.diagnostic.failure.line = -1 }; 'line-range' { $bad.diagnostic.failure.line = 1000001 }
             'raw-message' { $bad.diagnostic.failure.message = 'private' }; extra { $bad.diagnostic.path = 'private' }; 'missing-failure' { $bad.diagnostic.failure = $null }
             'wait-raw' { $bad.diagnostic.lastWaitFailure.category = 'private wait' }; 'checkpoint-type' { $bad.diagnostic.checkpointWriteFailed = 'false' }
             'cleanup-raw' { $bad.diagnostic.cleanupFailure = @{ type='Other'; category='Other'; hresult=$null; line=$null; stack='private' } }
-            'frame-status' { $bad.diagnostic.initialFrame.status = 'passed' }; 'frame-owner' { $bad.diagnostic.initialFrame.image.processId = 0 }
-            'frame-name' { $bad.diagnostic.initialFrame.image.name = 'light.png' }; 'frame-failure' { $bad.diagnostic.initialFrame.failure = $safeFailure }
+            'frame-status' { $bad.diagnostic.initialFrame.status = 'passed' }; 'frame-captured' { $bad.diagnostic.initialFrame = @{ status='captured'; image=$diagnosticImage; failure=$null } }
+            'frame-unavailable' { $bad.diagnostic.initialFrame = @{ status='unavailable'; image=$null; failure=$safeFailure } }; 'frame-image' { $bad.diagnostic.initialFrame.image=$diagnosticImage }; 'frame-failure' { $bad.diagnostic.initialFrame.failure = $safeFailure }
         }
         $f=Write-Json $bad 'bad-diagnostic.json'
         Refuse { Test-ShellRecoveryFailureDiagnostic -Path $f -Directory $root } "diagnostic-$case"
     }
-    $diagnosticImagePath = Join-Path $root 'diagnostic-window.png'
-    $diagnosticImageBytes = [IO.File]::ReadAllBytes($diagnosticImagePath)
-    [IO.File]::WriteAllBytes($diagnosticImagePath,[byte[]](1,2,3))
-    try { Refuse { Test-ShellRecoveryFailureDiagnostic -Path $diagnosticFile -Directory $root } 'diagnostic-tampered-image' }
-    finally { [IO.File]::WriteAllBytes($diagnosticImagePath,$diagnosticImageBytes) }
-    $unavailable = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
-    $unavailable.diagnostic.initialFrame = @{ status='unavailable'; image=$null; failure=$safeFailure }
-    $f=Write-Json $unavailable 'diagnostic-unavailable.json'; Test-ShellRecoveryFailureDiagnostic -Path $f -Directory $root | Out-Null; $passed++
-    $unavailable.diagnostic.initialFrame = @{ status='not-attempted'; image=$null; failure=$null }
-    $f=Write-Json $unavailable 'diagnostic-unattempted.json'; Test-ShellRecoveryFailureDiagnostic -Path $f -Directory $root | Out-Null; $passed++
-
     # Preflight classification reads only synthetic fixture metadata, never a real profile.
     $preflightRoot = Join-Path $root 'owned-preflight-profile'
     if ($null -ne (Get-ShellRecoveryPreflightFailure -EnvironmentSafe $true -NormalRoot $preflightRoot)) { throw 'Fresh preflight root was refused.' }; $passed++

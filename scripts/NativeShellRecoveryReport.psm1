@@ -182,17 +182,10 @@ function Assert-ShellRecoverySafeFailure($Failure) {
         ($null -ne $Failure.hresult -and -not (Test-ShellInt $Failure.hresult ([int]::MinValue) ([int]::MaxValue))) -or
         ($null -ne $Failure.line -and -not (Test-ShellInt $Failure.line 1 1000000))) { throw 'ShellRecoverySafeFailureInvalid' }
 }
-function Test-ShellRecoveryDiagnosticFrame($Frame,[string]$Directory,$Healthy) {
+function Test-ShellRecoveryDiagnosticFrame($Frame) {
     Assert-ShellKeys $Frame @('status','image','failure')
-    if ($Frame.status -isnot [string] -or $Frame.status -cnotin @('captured','unavailable','not-attempted')) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
-    if ($Frame.status -ceq 'captured') {
-        if ($null -ne $Frame.failure -or $Frame.image -isnot [Collections.IDictionary] -or $Frame.image.name -isnot [string] -or $Frame.image.name -cne 'diagnostic-window.png') { throw 'ShellRecoveryDiagnosticFrameInvalid' }
-        $identity = if ($null -ne $Healthy) { $Healthy } else { $Frame.image }
-        Test-ShellRecoveryImage -Directory $Directory -Image $Frame.image -Identity $identity
-    } elseif ($Frame.status -ceq 'unavailable') {
-        if ($null -ne $Frame.image -or $null -eq $Frame.failure) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
-        Assert-ShellRecoverySafeFailure $Frame.failure
-    } elseif ($null -ne $Frame.image -or $null -ne $Frame.failure) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
+    if ($Frame.status -isnot [string] -or $Frame.status -cne 'not-attempted' -or
+        $null -ne $Frame.image -or $null -ne $Frame.failure) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
 }
 function Test-ShellRecoveryFailureDiagnostic {
     [CmdletBinding()]
@@ -200,7 +193,7 @@ function Test-ShellRecoveryFailureDiagnostic {
     $r = Read-ShellRecoveryJson $Path
     Assert-ShellKeys $r @('schemaVersion','succeeded','phase','failureCode','forcedCleanup','diagnostic')
     $phases = @('preflight','healthy','lease-conflict','corrupt-catalog','close-pending-picker','cleanup')
-    $stages = @('preflight','healthy','healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-initial-frame','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker','cleanup','completed')
+    $stages = @('preflight','healthy','healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker','cleanup','completed')
     if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or $r.succeeded -or $r.phase -isnot [string] -or $r.phase -cnotin $phases -or
         $r.failureCode -isnot [string] -or $r.failureCode -cne 'NativeGateFailed' -or $r.forcedCleanup -isnot [bool]) { throw 'ShellRecoveryFailureDiagnosticInvalid' }
     $d = $r.diagnostic
@@ -209,7 +202,7 @@ function Test-ShellRecoveryFailureDiagnostic {
     Assert-ShellRecoverySafeFailure $d.failure
     if ($null -ne $d.lastWaitFailure) { Assert-ShellRecoverySafeFailure $d.lastWaitFailure }
     if ($null -ne $d.cleanupFailure) { Assert-ShellRecoverySafeFailure $d.cleanupFailure }
-    Test-ShellRecoveryDiagnosticFrame $d.initialFrame $Directory $null
+    Test-ShellRecoveryDiagnosticFrame $d.initialFrame
     return $r
 }
 function Test-ShellRecoveryFinal {
@@ -259,7 +252,7 @@ function Test-ShellRecoveryFinal {
     }
     $healthy = @($r.processes | Where-Object { $_.role -ceq 'healthy' })
     if ($healthy.Count -ne 1) { throw 'ShellRecoveryProcessInvalid' }
-    Test-ShellRecoveryDiagnosticFrame $r.diagnosticFrame $Directory $healthy[0]
+    Test-ShellRecoveryDiagnosticFrame $r.diagnosticFrame
     $catalogPath = Join-Path $Directory 'original-catalog.json'
     Assert-ShellRecoveryNoLinks $catalogPath
     $catalogFile = Get-Item -LiteralPath $catalogPath -Force
