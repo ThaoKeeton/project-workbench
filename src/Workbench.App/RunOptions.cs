@@ -23,10 +23,17 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
 
     public void TraceStartup(string stage)
     {
-        StartupDiagnostics.ObserveStartup(stage);
-        if (ReportPath is null) return;
-        _startupStages.Add(new { stage, threadId = Environment.CurrentManagedThreadId, utc = DateTimeOffset.UtcNow });
-        WriteReport(new { succeeded = false, stage, userRoot = UserRoot, startupStages = StartupStages });
+        try
+        {
+            StartupDiagnostics.ObserveStartup(stage);
+            if (ReportPath is null) return;
+            _startupStages.Add(new { stage, threadId = Environment.CurrentManagedThreadId, utc = DateTimeOffset.UtcNow });
+            WriteReport(new { succeeded = false, stage, userRoot = UserRoot, startupStages = StartupStages });
+        }
+        catch (Exception) when (SmokeTest && stage.StartsWith("native-smoke-", StringComparison.Ordinal))
+        {
+            // These isolated-smoke checkpoints are best effort, including during window cleanup.
+        }
     }
 
     public static RunOptions Parse(string[] args)

@@ -4,10 +4,17 @@ on:
   push:
     branches: [main, feat/native-plugin-workbench]
   workflow_dispatch:
+    inputs:
+      native_diagnostic_only:
+        description: 'Run isolated native smoke diagnostics; this does not qualify a delivery.'
+        type: boolean
+        default: false
+        required: false
 permissions:
   contents: read
 jobs:
   core-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.native_diagnostic_only != true }}
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -69,6 +76,7 @@ jobs:
           if-no-files-found: error
           retention-days: 1
   native-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.native_diagnostic_only != true }}
     runs-on: windows-2025
     timeout-minutes: 35
     steps:
@@ -269,4 +277,50 @@ jobs:
           name: workbench-win-x64
           path: artifacts/native/app/
           if-no-files-found: error
+          retention-days: 1
+  native-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.native_diagnostic_only == true }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Smoke and client-gallery report regressions
+        shell: pwsh
+        run: |
+          ./tests/scripts/NativeSmokeReport.Tests.ps1
+          ./tests/scripts/NativeGalleryReport.Tests.ps1
+      - name: Smoke checkpoint filesystem regressions
+        run: dotnet test tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj -c Release --nologo --filter "FullyQualifiedName~Workbench.Core.Tests.RunOptionsTests.Smoke_checkpoint" --logger "trx;LogFileName=smoke-checkpoints.trx" --results-directory artifacts/tests
+      - name: Publish native host and curated samples for diagnostics
+        id: diagnostic_publish
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Run isolated native smoke once
+        if: ${{ always() && steps.diagnostic_publish.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
+      - name: Collect strict client-content gallery
+        if: ${{ always() && steps.diagnostic_publish.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/collect-native-gallery.ps1
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: native-diagnostic-evidence
+          path: |
+            artifacts/native/native-smoke.json
+            artifacts/native/native-smoke.gallery-binding.json
+            artifacts/native/native-stdout.log
+            artifacts/native/native-stderr.log
+            artifacts/native/native-crash-events.json
+            artifacts/native/gallery/
+            artifacts/native/genuine-gallery/
+            artifacts/native/testing-plugin/provenance.json
+            artifacts/tests/*.trx
+          if-no-files-found: warn
           retention-days: 1

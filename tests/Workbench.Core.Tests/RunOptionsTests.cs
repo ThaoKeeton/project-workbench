@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Workbench.App;
 using Xunit;
 
@@ -5,6 +6,103 @@ namespace Workbench.Core.Tests;
 
 public sealed class RunOptionsTests
 {
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(3)]
+    public async Task Smoke_checkpoint_locked_report_does_not_interrupt_occupied_cleanup_or_replace_failure(int lockBefore)
+    {
+        using var disk = new TestDirectory();
+        var report = Path.Combine(disk.Root, "smoke.json");
+        var options = new RunOptions(true, disk.User, report);
+        var original = new InvalidOperationException("Synthetic occupied-window body failure");
+        var closed = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var closeAttempted = false;
+        var closedWaitCompleted = false;
+        FileStream? locked = null;
+
+        void Checkpoint(string stage, int position)
+        {
+            if (position == lockBefore)
+            {
+                locked = new FileStream(report, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                var ioFailure = Record.Exception(() => File.WriteAllText(report, "blocked"));
+                Assert.True(ioFailure is IOException or UnauthorizedAccessException,
+                    "The test must cause an actual report write failure.");
+            }
+            options.TraceStartup(stage);
+        }
+
+        var observed = await Record.ExceptionAsync(async () =>
+        {
+            try { throw original; }
+            finally
+            {
+                try
+                {
+                    // A portable stand-in for the WinUI close/Closed sequence; the real
+                    // RunOptions report writer and the actual checkpoint names are used.
+                    Checkpoint("native-smoke-occupied-close-begin", 0);
+                    closeAttempted = true;
+                    closed.SetResult();
+                    Checkpoint("native-smoke-occupied-close-complete", 1);
+                    Checkpoint("native-smoke-occupied-closed-wait-begin", 2);
+                    await closed.Task.WaitAsync(TimeSpan.FromSeconds(1));
+                    closedWaitCompleted = true;
+                    Checkpoint("native-smoke-occupied-closed-wait-complete", 3);
+                }
+                finally { locked?.Dispose(); }
+            }
+        });
+
+        Assert.True(closeAttempted, $"Close was not attempted; observed {observed?.GetType().Name}.");
+        Assert.True(closedWaitCompleted, $"Closed was not awaited; observed {observed?.GetType().Name}.");
+        Assert.Same(original, observed);
+    }
+
+    [Fact]
+    public void Smoke_checkpoint_unwritable_report_does_not_throw()
+    {
+        using var disk = new TestDirectory();
+        var report = Path.Combine(disk.Root, "occupied-report");
+        Directory.CreateDirectory(report);
+        var ioFailure = Record.Exception(() => File.WriteAllText(report, "blocked"));
+        Assert.True(ioFailure is IOException or UnauthorizedAccessException);
+        var options = new RunOptions(true, disk.User, report);
+        Assert.Null(Record.Exception(() => options.TraceStartup("native-smoke-live-card-begin")));
+    }
+
+    [Fact]
+    public void Smoke_checkpoint_persists_on_a_writable_report()
+    {
+        using var disk = new TestDirectory();
+        var report = Path.Combine(disk.Root, "smoke.json");
+        var options = new RunOptions(true, disk.User, report);
+        options.TraceStartup("native-smoke-occupied-close-begin");
+        options.TraceStartup("native-smoke-occupied-close-complete");
+
+        using var saved = JsonDocument.Parse(File.ReadAllText(report));
+        Assert.Equal("native-smoke-occupied-close-complete", saved.RootElement.GetProperty("stage").GetString());
+        var stages = saved.RootElement.GetProperty("startupStages");
+        Assert.Equal(2, stages.GetArrayLength());
+        Assert.Equal("native-smoke-occupied-close-begin", stages[0].GetProperty("stage").GetString());
+        Assert.Equal("native-smoke-occupied-close-complete", stages[1].GetProperty("stage").GetString());
+    }
+
+    [Theory]
+    [InlineData(false, "native-smoke-occupied-close-begin")]
+    [InlineData(true, "host-initialization-completed")]
+    public void Smoke_checkpoint_exception_handling_does_not_change_other_startup_writes(bool smokeTest, string stage)
+    {
+        using var disk = new TestDirectory();
+        var report = Path.Combine(disk.Root, "occupied-report");
+        Directory.CreateDirectory(report);
+        var options = new RunOptions(smokeTest, disk.User, report);
+        var observed = Record.Exception(() => options.TraceStartup(stage));
+        Assert.True(observed is IOException or UnauthorizedAccessException);
+    }
+
     [Theory]
     [InlineData("seed")]
     [InlineData("verify")]
