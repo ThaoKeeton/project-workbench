@@ -368,7 +368,7 @@ jobs:
         with:
           name: shell-recovery-consumer-evidence
           path: artifacts/native/shell-recovery-probes/
-          if-no-files-found: warn
+          if-no-files-found: error
           retention-days: 1
   invalid-selection:
     if: ${{ github.event_name == 'workflow_dispatch' && ((inputs.mode != 'full' && inputs.mode != 'shipping-recovery') || (inputs.mode == 'shipping-recovery' && inputs.native_diagnostic_only == true)) }}

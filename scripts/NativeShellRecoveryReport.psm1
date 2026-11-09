@@ -38,6 +38,96 @@ function Test-ShellInt($Value, [long]$Min, [long]$Max) {
     return (($Value -is [int] -or $Value -is [long]) -and $Value -ge $Min -and $Value -le $Max)
 }
 function Test-ShellHash($Value) { return ($Value -is [string] -and $Value -cmatch '\A[0-9a-f]{64}\z') }
+# Only attributes are inspected; a preexisting normal root is never opened or enumerated.
+function Get-ShellRecoveryPreflightFailure {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][bool]$EnvironmentSafe, [Parameter(Mandatory)][string]$NormalRoot)
+    if (-not $EnvironmentSafe) { return 'UnsafeEnvironment' }
+    $root = [IO.Path]::GetFullPath($NormalRoot)
+    try { $null = [IO.File]::GetAttributes($root); return 'NormalRootExists' }
+    catch [IO.FileNotFoundException] { }
+    catch [IO.DirectoryNotFoundException] { }
+    for ($part = [IO.Path]::GetDirectoryName($root); $part; $part = [IO.Path]::GetDirectoryName($part)) {
+        try { $attributes = [IO.File]::GetAttributes($part) }
+        catch [IO.FileNotFoundException] { continue }
+        catch [IO.DirectoryNotFoundException] { continue }
+        if (($attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { return 'UnsafeProfilePath' }
+    }
+    return $null
+}
+function Test-ShellRecoveryFailureOutcome {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Outcome)
+    Assert-ShellKeys $Outcome @('schemaVersion','succeeded','hostSource','driverSource','producerRunId','artifactId','archiveSha256','executableSha256','dllSha256','phase','failureCode','forcedCleanup','pickerCleanup','unverified')
+    $phases = @{ environment=@('UnsafeEnvironment'); 'profile-preflight'=@('NormalRootExists','UnsafeProfilePath','ProfileCheckFailed'); 'input-validation'=@('InputInvalid') }
+    if (-not (Test-ShellInt $Outcome.schemaVersion 1 1) -or $Outcome.succeeded -isnot [bool] -or $Outcome.succeeded -or
+        $Outcome.phase -isnot [string] -or $Outcome.phase -cnotin @('environment','profile-preflight','input-validation') -or -not $phases.ContainsKey($Outcome.phase) -or
+        $Outcome.failureCode -isnot [string] -or $Outcome.failureCode -cnotin $phases[$Outcome.phase] -or
+        $null -ne $Outcome.forcedCleanup -or $Outcome.pickerCleanup -isnot [string] -or $Outcome.pickerCleanup -cne 'unverified') { throw 'ShellRecoveryFailureOutcomeInvalid' }
+    foreach ($key in @('hostSource','driverSource')) { if ($null -ne $Outcome[$key] -and ($Outcome[$key] -isnot [string] -or $Outcome[$key] -cnotmatch '\A[0-9a-f]{40}\z')) { throw 'ShellRecoveryFailureOutcomeInvalid' } }
+    foreach ($key in @('archiveSha256','executableSha256','dllSha256')) { if ($null -ne $Outcome[$key] -and -not (Test-ShellHash $Outcome[$key])) { throw 'ShellRecoveryFailureOutcomeInvalid' } }
+    foreach ($key in @('producerRunId','artifactId')) { if ($null -ne $Outcome[$key] -and -not (Test-ShellInt $Outcome[$key] 1 ([long]::MaxValue))) { throw 'ShellRecoveryFailureOutcomeInvalid' } }
+    $unverified = @('blocking-file','acl-denial','drag','snap','high-dpi','high-contrast','taskbar','windows-11','visual-review')
+    if ($Outcome.unverified -isnot [array] -or $Outcome.unverified.Count -ne $unverified.Count -or @(Compare-Object $unverified $Outcome.unverified -CaseSensitive).Count -ne 0) { throw 'ShellRecoveryFailureOutcomeInvalid' }
+}
+function Test-ShellRecoveryNoWriteEvidence($Evidence, [string]$Phase, [string]$Directory, $Reports) {
+    Assert-ShellKeys $Evidence @('navigation','beforeFile','afterFile','beforeSha256','afterSha256')
+    $expectedDestination = if ($Phase -ceq 'cancel') { 'cancel' } else { 'pending' }
+    $navigation = $Evidence.navigation
+    Assert-ShellKeys $navigation @('destination','witness','addressSubmitted','witnessVisible','witnessMatches','witnessControlType','viewAutomationId','viewControlType','viewName','viewProcessId','popupProcessId','witnessProcessId','popupWindowHandle')
+    if ($navigation.destination -isnot [string] -or $navigation.destination -cne $expectedDestination -or
+        $navigation.witness -isnot [string] -or $navigation.witness -cnotmatch '\Awitness-[0-9a-f]{32}\z' -or
+        $navigation.addressSubmitted -isnot [bool] -or -not $navigation.addressSubmitted -or
+        $navigation.witnessVisible -isnot [bool] -or -not $navigation.witnessVisible -or
+        -not (Test-ShellInt $navigation.witnessMatches 1 1) -or $navigation.witnessControlType -isnot [string] -or $navigation.witnessControlType -cne 'ListItem' -or
+        $navigation.viewAutomationId -isnot [string] -or $navigation.viewAutomationId -cne '1' -or $navigation.viewControlType -isnot [string] -or $navigation.viewControlType -cne 'List' -or
+        $navigation.viewName -isnot [string] -or $navigation.viewName -cnotin @('Items View','项目视图','文件夹视图') -or
+        -not (Test-ShellInt $navigation.popupProcessId 1 ([int]::MaxValue)) -or -not (Test-ShellInt $navigation.viewProcessId 1 ([int]::MaxValue)) -or -not (Test-ShellInt $navigation.witnessProcessId 1 ([int]::MaxValue)) -or
+        $navigation.popupProcessId -ne $navigation.viewProcessId -or $navigation.popupProcessId -ne $navigation.witnessProcessId -or -not (Test-ShellInt $navigation.popupWindowHandle 1 ([long]::MaxValue))) { throw 'ShellRecoveryNavigationInvalid' }
+    $beforeName = if ($Phase -ceq 'cancel') { 'cancel-before.json' } else { 'close-before.json' }
+    $afterName = if ($Phase -ceq 'cancel') { 'cancel-after.json' } else { 'close-after.json' }
+    if ($Evidence.beforeFile -isnot [string] -or $Evidence.beforeFile -cne $beforeName -or $Evidence.afterFile -isnot [string] -or $Evidence.afterFile -cne $afterName -or
+        -not (Test-ShellHash $Evidence.beforeSha256) -or -not (Test-ShellHash $Evidence.afterSha256) -or $Evidence.beforeSha256 -cne $Evidence.afterSha256) { throw 'ShellRecoverySnapshotInvalid' }
+    foreach ($fileName in @($beforeName,$afterName)) {
+        $filePath = Join-Path $Directory $fileName
+        Assert-ShellRecoveryNoLinks $filePath
+        if ((Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Evidence.beforeSha256) { throw 'ShellRecoverySnapshotInvalid' }
+    }
+    $snapshot = Read-ShellRecoveryJson (Join-Path $Directory $beforeName) 32768
+    Assert-ShellKeys $snapshot @('schemaVersion','entries')
+    if (-not (Test-ShellInt $snapshot.schemaVersion 1 1) -or $snapshot.entries -isnot [array] -or $snapshot.entries.Count -gt 16) { throw 'ShellRecoverySnapshotInvalid' }
+    $paths = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+    $scopes = @('cancel','conflict','catalog','pending'); $witnesses = @{}; $files = @()
+    foreach ($entry in $snapshot.entries) {
+        Assert-ShellKeys $entry @('path','kind','length','sha256')
+        if ($entry.path -isnot [string] -or -not $paths.Add($entry.path) -or $entry.kind -isnot [string] -or
+            -not (Test-ShellInt $entry.length 0 1048576)) { throw 'ShellRecoverySnapshotInvalid' }
+        if ($entry.path -cin $scopes) {
+            if ($entry.kind -cne 'directory' -or $entry.length -ne 0 -or $null -ne $entry.sha256) { throw 'ShellRecoverySnapshotInvalid' }
+        } elseif ($entry.path -cmatch '\A(cancel|conflict|catalog|pending)/(witness-[0-9a-f]{32})\z') {
+            $scope = $Matches[1]; $witness = $Matches[2]
+            if ($entry.kind -cne 'directory' -or $entry.length -ne 0 -or $null -ne $entry.sha256 -or $witnesses.ContainsKey($scope) -or $witness -cin $witnesses.Values) { throw 'ShellRecoverySnapshotInvalid' }
+            $witnesses[$scope] = $witness
+            $witnessPath = Join-Path $Directory $entry.path; Assert-ShellRecoveryNoLinks $witnessPath
+            $witnessDir = Get-Item -LiteralPath $witnessPath -Force
+            if (-not $witnessDir.PSIsContainer -or @(Get-ChildItem -LiteralPath $witnessPath -Force).Count -ne 0) { throw 'ShellRecoverySnapshotInvalid' }
+        } elseif ($entry.path -cmatch '\A(conflict|catalog)/Workbench-error-[0-9a-f]{32}\.json\z') {
+            if ($entry.kind -cne 'file' -or $entry.length -lt 1 -or -not (Test-ShellHash $entry.sha256)) { throw 'ShellRecoverySnapshotInvalid' }
+            $files += $entry
+        } else { throw 'ShellRecoverySnapshotInvalid' }
+    }
+    foreach ($scope in $scopes) { if (-not $paths.Contains($scope) -or -not $witnesses.ContainsKey($scope)) { throw 'ShellRecoverySnapshotInvalid' } }
+    if ($witnesses[$expectedDestination] -cne $navigation.witness) { throw 'ShellRecoveryNavigationInvalid' }
+    if ($Phase -ceq 'cancel') { if ($files.Count -ne 0) { throw 'ShellRecoverySnapshotInvalid' } }
+    else {
+        if ($files.Count -ne 2) { throw 'ShellRecoverySnapshotInvalid' }
+        foreach ($report in $Reports) {
+            $record = @($files | Where-Object { $_.path -ceq $report.relativePath })
+            $filePath = Join-Path $Directory $report.relativePath
+            if ($record.Count -ne 1 -or $record[0].length -ne (Get-Item -LiteralPath $filePath).Length -or $record[0].sha256 -cne (Get-FileHash -LiteralPath $filePath -Algorithm SHA256).Hash.ToLowerInvariant()) { throw 'ShellRecoverySnapshotInvalid' }
+        }
+    }
+}
 function Test-ShellRecoveryExport {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$ExpectedSourceCommit,
@@ -88,7 +178,7 @@ function Test-ShellRecoveryFinal {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Directory,
         [Parameter(Mandatory)][string]$ExpectedSourceCommit, [Parameter(Mandatory)][string]$ExpectedExeSha256, [Parameter(Mandatory)][string]$ExpectedDllSha256)
     $r = Read-ShellRecoveryJson $Path
-    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','reports','cancelWritten','collisionBefore','collisionAfter','catalogBefore','catalogAfter','sentinelBefore','sentinelAfter','sentinelChecks','pickerPendingAtClose','checks')
+    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','reports','cancelWritten','cancelEvidence','closeEvidence','repeatEvidence','collisionBefore','collisionAfter','catalogBefore','catalogAfter','sentinelBefore','sentinelAfter','sentinelChecks','pickerPendingAtClose','checks')
     if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or -not $r.succeeded -or
         ($r.sourceCommit -isnot [string] -or $r.sourceCommit -cne $ExpectedSourceCommit) -or $ExpectedSourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or
         -not (Test-ShellHash $ExpectedExeSha256) -or -not (Test-ShellHash $r.executableSha256) -or $r.executableSha256 -cne $ExpectedExeSha256 -or
@@ -157,6 +247,13 @@ function Test-ShellRecoveryFinal {
         if ($matches.Count -ne 1 -or $matches[0].role -cne 'healthy') { throw 'ShellRecoveryImageIdentityInvalid' }
         Test-ShellRecoveryImage -Directory $Directory -Image $image -Identity $matches[0]
     }
+    Test-ShellRecoveryNoWriteEvidence $r.cancelEvidence 'cancel' $Directory $r.reports
+    Test-ShellRecoveryNoWriteEvidence $r.closeEvidence 'close' $Directory $r.reports
+    Assert-ShellKeys $r.repeatEvidence @('patternAvailable','attempted','outcome','popupRetained')
+    if ($r.repeatEvidence.patternAvailable -isnot [bool] -or -not $r.repeatEvidence.patternAvailable -or
+        $r.repeatEvidence.attempted -isnot [bool] -or -not $r.repeatEvidence.attempted -or
+        $r.repeatEvidence.outcome -isnot [string] -or $r.repeatEvidence.outcome -cne 'ElementNotEnabled' -or
+        $r.repeatEvidence.popupRetained -isnot [bool] -or -not $r.repeatEvidence.popupRetained) { throw 'ShellRecoveryRepeatInvalid' }
     return $r
 }
 
@@ -289,4 +386,4 @@ function Expand-ShellRecoveryArchive {
         return @{ archiveSha256=$ExpectedSha256; archiveBytes=[long]$item.Length; expandedBytes=$expanded; entryCount=$zip.Entries.Count }
     } finally { $zip.Dispose() }
 }
-Export-ModuleMember -Function Test-ShellRecoveryExport,Test-ShellRecoveryImage,Test-ShellRecoveryFinal,Test-ShellRecoveryDriverSource,Test-ShellRecoveryProducer,Test-ShellRecoveryHostVersion,Expand-ShellRecoveryArchive
+Export-ModuleMember -Function Test-ShellRecoveryExport,Test-ShellRecoveryImage,Test-ShellRecoveryFinal,Test-ShellRecoveryDriverSource,Test-ShellRecoveryProducer,Test-ShellRecoveryHostVersion,Expand-ShellRecoveryArchive,Get-ShellRecoveryPreflightFailure,Test-ShellRecoveryFailureOutcome

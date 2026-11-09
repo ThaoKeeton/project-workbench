@@ -1,4 +1,4 @@
-#requires -Version 5.1
+﻿#requires -Version 5.1
 [CmdletBinding()]
 param([Parameter(Mandatory=$true)][string]$HostExe, [Parameter(Mandatory=$true)][string]$EvidenceRoot,
       [Parameter(Mandatory=$true)][string]$ExpectedSourceCommit, [Parameter(Mandatory=$true)][string]$ExeHash,
@@ -133,7 +133,49 @@ function Cancel-Picker($Owned,$Picker) {
     Assert-PickerElement $Owned $Picker $cancel; $name = $cancel.Current.Name; Assert-PickerElement $Owned $Picker $cancel
     Picker-Invoke $Owned $Picker $name
 }
-function Select-PickerFolder($Owned,$Picker,[string]$Directory,[switch]$Closing) {
+# The randomly named child directory exists only in the harness-owned destination.
+# Observing its visible ListItem is independent of the edit value just submitted.
+function Wait-PickerWitness($Owned,$Picker,[string]$Scope) {
+    $witness = $script:witnesses[$Scope]
+    $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,$witness)
+    $viewIdCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::AutomationIdProperty,'1')
+    $viewTypeCondition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty,[System.Windows.Automation.ControlType]::List)
+    $viewCondition = New-Object System.Windows.Automation.AndCondition($viewIdCondition,$viewTypeCondition)
+    $clock = [Diagnostics.Stopwatch]::StartNew()
+    while ($clock.Elapsed.TotalSeconds -lt 30) {
+        Assert-PickerElement $Owned $Picker $Picker.window
+        $views = $Picker.window.FindAll([System.Windows.Automation.TreeScope]::Descendants,$viewCondition)
+        Assert-PickerElement $Owned $Picker $Picker.window
+        if ($views.Count -gt 1) { throw 'PickerContentsAmbiguous' }
+        if ($views.Count -eq 0) { Start-Sleep -Milliseconds 200; continue }
+        $view = $views.Item(0); Assert-PickerElement $Owned $Picker $view
+        $viewPid = $view.Current.ProcessId; $viewName = $view.Current.Name; $viewVisible = -not $view.Current.IsOffscreen
+        Assert-PickerElement $Owned $Picker $view
+        if ($viewName -cnotin @('Items View','项目视图','文件夹视图')) { throw 'PickerContentsIdentityInvalid' }
+        if (-not $viewVisible) { Start-Sleep -Milliseconds 200; continue }
+        $items = $view.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
+        Assert-PickerElement $Owned $Picker $view
+        $matches = New-Object System.Collections.ArrayList
+        foreach ($item in $items) {
+            Assert-PickerElement $Owned $Picker $item
+            $kind = $item.Current.ControlType; $visible = -not $item.Current.IsOffscreen; $itemPid = $item.Current.ProcessId
+            Assert-PickerElement $Owned $Picker $item
+            if ($kind -eq [System.Windows.Automation.ControlType]::ListItem) { $null = $matches.Add(@{ item=$item; visible=$visible; processId=$itemPid }) }
+        }
+        if ($matches.Count -gt 1) { throw 'PickerWitnessAmbiguous' }
+        if ($matches.Count -eq 1 -and $matches[0].visible) {
+            $observation = $matches[0]
+            [OwnedShellHost]::AssertFolderObservation($true,$observation.visible,$matches.Count)
+            Assert-PickerElement $Owned $Picker $observation.item
+            Assert-PickerElement $Owned $Picker $view
+            return @{ destination=$Scope; witness=$witness; addressSubmitted=$true; witnessVisible=$observation.visible; witnessMatches=$matches.Count; witnessControlType='ListItem'; viewAutomationId='1'; viewControlType='List'; viewName=$viewName; viewProcessId=$viewPid; popupProcessId=$Picker.processId; witnessProcessId=$observation.processId; popupWindowHandle=$Picker.hwnd.ToInt64() }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    throw 'PickerNavigationUnconfirmed'
+}
+function Navigate-PickerFolder($Owned,$Picker,[string]$Scope) {
+    $directory = Join-Path $EvidenceRoot $Scope
     Assert-PickerElement $Owned $Picker $Picker.window
     $all = $Picker.window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
     Assert-PickerElement $Owned $Picker $Picker.window
@@ -154,25 +196,45 @@ function Select-PickerFolder($Owned,$Picker,[string]$Directory,[switch]$Closing)
     }
     Assert-Condition ($addresses.Count -eq 1)
     $address = $addresses[0]
-    Assert-PickerElement $Owned $Picker $address.item; try { $address.value.SetValue($Directory) } finally { Assert-PickerAfter $Owned $Picker $address.item }
+    Assert-PickerElement $Owned $Picker $address.item; try { $address.value.SetValue($directory) } finally { Assert-PickerAfter $Owned $Picker $address.item }
     Assert-PickerElement $Owned $Picker $address.item; $editHandle = [IntPtr]$address.item.Current.NativeWindowHandle; Assert-PickerElement $Owned $Picker $address.item
     $Owned.host.SubmitPickerAddress($Owned.hwnd,$Picker.hwnd,$editHandle)
     Assert-PickerAfter $Owned $Picker $address.item
-    $expectedFolder = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
-    $null = Wait-For {
-        Assert-PickerElement $Owned $Picker $address.item; $value = $address.value.Current.Value; Assert-PickerElement $Owned $Picker $address.item
-        $actualFolder = [IO.Path]::GetFullPath($value).TrimEnd('\')
-        Assert-PickerElement $Owned $Picker $Picker.window; $button = Find-Named $Picker.window '将错误报告保存到此文件夹'
-        Assert-PickerElement $Owned $Picker $button; $enabled = $button.Current.IsEnabled; Assert-PickerElement $Owned $Picker $button
-        if ([string]::Equals($actualFolder,$expectedFolder,[StringComparison]::OrdinalIgnoreCase) -and $enabled) { $true }
-    } 30
-    Picker-Invoke $Owned $Picker '将错误报告保存到此文件夹' -Closing:$Closing
+    return Wait-PickerWitness $Owned $Picker $Scope
 }
-function Export-To($Owned,[string]$Directory) {
+function Save-OutputSnapshot([string]$Name) {
+    if ($Name -cnotin @('cancel-before.json','cancel-after.json','close-before.json','close-after.json')) { throw 'OutputSnapshotNameInvalid' }
+    $entries = New-Object System.Collections.ArrayList
+    foreach ($scope in @('cancel','conflict','catalog','pending')) {
+        $dir = Join-Path $EvidenceRoot $scope; [OwnedShellHost]::RejectLinks($dir)
+        $parent = Get-Item -LiteralPath $dir -Force; Assert-Condition $parent.PSIsContainer
+        $null = $entries.Add([ordered]@{ path=$scope; kind='directory'; length=0; sha256=$null })
+        foreach ($item in @(Get-ChildItem -LiteralPath $dir -Force | Sort-Object Name)) {
+            [OwnedShellHost]::RejectLinks($item.FullName); $path = $scope + '/' + $item.Name
+            if ($item.PSIsContainer) {
+                if ($item.Name -cne $script:witnesses[$scope] -or @(Get-ChildItem -LiteralPath $item.FullName -Force).Count -ne 0) { throw 'OutputSnapshotEntryInvalid' }
+                $null = $entries.Add([ordered]@{ path=$path; kind='directory'; length=0; sha256=$null })
+            } else {
+                if ($item.Name -cnotmatch '\A(Workbench-error-[0-9a-f]{32}\.json|\.Workbench-error-[0-9a-f]{32}\.tmp)\z' -or $item.Length -lt 1 -or $item.Length -gt 1048576) { throw 'OutputSnapshotEntryInvalid' }
+                $null = $entries.Add([ordered]@{ path=$path; kind='file'; length=[long]$item.Length; sha256=(Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash.ToLowerInvariant() })
+            }
+        }
+    }
+    $snapshot = [ordered]@{ schemaVersion=1; entries=@($entries.ToArray()) }
+    $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($snapshot | ConvertTo-Json -Depth 6 -Compress))
+    $path = Join-Path $EvidenceRoot $Name; $stream = [IO.File]::Open($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+    try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+    $hasher = [Security.Cryptography.SHA256]::Create()
+    try { return [BitConverter]::ToString($hasher.ComputeHash($bytes)).Replace('-','').ToLowerInvariant() } finally { $hasher.Dispose() }
+}
+function Export-To($Owned,[string]$Scope) {
     $picker = Show-Picker $Owned
-    Select-PickerFolder $Owned $picker $Directory
-    $null = Wait-For { $files = @(Get-ChildItem -LiteralPath $Directory -Filter 'Workbench-error-*.json' -File); if ($files.Count -eq 1) { $files[0] } } 30
-    return @(Get-ChildItem -LiteralPath $Directory -Filter 'Workbench-error-*.json' -File)[0]
+    $null = Navigate-PickerFolder $Owned $picker $Scope
+    $null = Wait-PickerWitness $Owned $picker $Scope
+    Picker-Invoke $Owned $picker '将错误报告保存到此文件夹'
+    $directory = Join-Path $EvidenceRoot $Scope
+    $null = Wait-For { $files = @(Get-ChildItem -LiteralPath $directory -Filter 'Workbench-error-*.json' -File); if ($files.Count -eq 1) { $files[0] } } 30
+    return @(Get-ChildItem -LiteralPath $directory -Filter 'Workbench-error-*.json' -File)[0]
 }
 function Capture-Frame($Owned,[string]$Name) {
     $path = Join-Path $EvidenceRoot $Name; $bounds = $Owned.host.Capture($Owned.hwnd,$path)
@@ -235,7 +297,12 @@ try {
     Assert-Condition ($ExpectedSourceCommit -cmatch '\A[0-9a-f]{40}\z' -and $ExeHash -cmatch '\A[0-9a-f]{64}\z' -and $DllHash -cmatch '\A[0-9a-f]{64}\z')
     $script:canWrite = $true; $script:phaseNumber = 1
     $conflictDir = Join-Path $EvidenceRoot 'conflict'; $catalogDir = Join-Path $EvidenceRoot 'catalog'; $pendingDir = Join-Path $EvidenceRoot 'pending'
-    foreach ($dir in @($conflictDir,$catalogDir,$pendingDir)) { Assert-Condition (-not [OwnedShellHost]::PathExists($dir)); [IO.Directory]::CreateDirectory($dir) | Out-Null }
+    $script:witnesses = @{}
+    foreach ($scope in @('cancel','conflict','catalog','pending')) {
+        $dir = Join-Path $EvidenceRoot $scope; Assert-Condition (-not [OwnedShellHost]::PathExists($dir)); [OwnedShellHost]::CreateDirectoryExclusive($dir)
+        $witness = 'witness-' + [Guid]::NewGuid().ToString('N'); $script:witnesses[$scope] = $witness
+        [OwnedShellHost]::CreateDirectoryExclusive((Join-Path $dir $witness))
+    }
     # This runner's previously absent normal profile is now created exclusively by
     # the harness. A preexisting profile is never opened or removed.
     [OwnedShellHost]::CreateDirectoryExclusive($userRoot)
@@ -289,20 +356,32 @@ try {
     $null = Get-HostControl $second '导出脱敏错误报告'
     Record-Sentinel 'duplicate-root'
     $picker = Show-Picker $second
+    $cancelNavigation = Navigate-PickerFolder $second $picker 'cancel'
+    $cancelBefore = Save-OutputSnapshot 'cancel-before.json'
     $button = Get-HostControl $second '导出脱敏错误报告'
     Assert-HostElement $second $button; $enabled = $button.Current.IsEnabled; Assert-HostElement $second $button; Assert-Condition (-not $enabled)
     Assert-PickerRoot $second $picker; $invoke = $null
     Assert-HostElement $second $button; $available = $button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invoke); Assert-HostElement $second $button
-    if ($available) { Assert-HostElement $second $button; try { $invoke.Invoke() } catch [System.Windows.Automation.ElementNotEnabledException] { } finally { Assert-HostAfter $second $button } }
-    Assert-Condition ($second.host.Popup($second.hwnd) -eq $picker.hwnd)
+    if (-not $available) { [OwnedShellHost]::AssertRepeatObservation($false,$false,'Unavailable',$true) }
+    $attempted = $true; $repeatOutcome = 'Returned'
+    Assert-HostElement $second $button
+    try { $invoke.Invoke() }
+    catch { if ($_.Exception.GetBaseException() -is [System.Windows.Automation.ElementNotEnabledException]) { $repeatOutcome = 'ElementNotEnabled' } else { throw } }
+    finally { Assert-HostAfter $second $button }
+    $popupRetained = ($second.host.Popup($second.hwnd) -eq $picker.hwnd)
+    [OwnedShellHost]::AssertRepeatObservation($available,$attempted,$repeatOutcome,$popupRetained)
+    $repeatEvidence = @{ patternAvailable=$available; attempted=$attempted; outcome=$repeatOutcome; popupRetained=$popupRetained }
+    $cancelNavigation = Wait-PickerWitness $second $picker 'cancel'
     Cancel-Picker $second $picker
     $null = Wait-For { if ((Read-HostText $second '错误报告导出状态') -ceq '已取消导出，尚未写入报告。') { $true } }
-    Assert-Condition (@(Get-ChildItem -LiteralPath $conflictDir -File).Count -eq 0)
+    $cancelAfter = Save-OutputSnapshot 'cancel-after.json'
+    $cancelWritten = ($cancelBefore -cne $cancelAfter); Assert-Condition (-not $cancelWritten)
+    $cancelEvidence = @{ navigation=$cancelNavigation; beforeFile='cancel-before.json'; afterFile='cancel-after.json'; beforeSha256=$cancelBefore; afterSha256=$cancelAfter }
     Record-Sentinel 'cancel'
-    $export = Export-To $second $conflictDir
+    $export = Export-To $second 'conflict'
     Record-Sentinel 'export'
     $before = (Get-FileHash -LiteralPath $export.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
-    $picker = Show-Picker $second; Select-PickerFolder $second $picker $conflictDir
+    $picker = Show-Picker $second; $null = Navigate-PickerFolder $second $picker 'conflict'; $null = Wait-PickerWitness $second $picker 'conflict'; Picker-Invoke $second $picker '将错误报告保存到此文件夹'
     $null = Wait-For { if ((Read-HostText $second '错误报告导出状态') -ceq '此文件夹已有同名报告，原文件未覆盖。可使用已有报告或选择其他文件夹。') { $true } }
     $after = (Get-FileHash -LiteralPath $export.FullName -Algorithm SHA256).Hash.ToLowerInvariant(); Assert-Condition ($before -ceq $after)
     Record-Sentinel 'collision'
@@ -322,7 +401,7 @@ try {
     $third = New-Host 'corrupt-retry'; $script:current = $third
     $null = Get-HostControl $third '导出脱敏错误报告'
     Record-Sentinel 'corrupt-catalog'
-    $export = Export-To $third $catalogDir
+    $export = Export-To $third 'catalog'
     $null = $script:reports.Add(@{ relativePath=('catalog/'+$export.Name); stage='CatalogOpen'; code='InvalidCatalog'; category='InvalidData'; processId=$third.host.Id; creationFileTime=$third.host.Birth; windowHandle=$third.hwnd.ToInt64() })
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($broken))
     Record-Sentinel 'corrupt-export'
@@ -335,16 +414,20 @@ try {
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($catalogBytes))
     [IO.File]::WriteAllBytes($catalogPath,$broken)
     $fourth = New-Host 'close-pending'; $script:current = $fourth; $picker = Show-Picker $fourth
+    $closeNavigation = Navigate-PickerFolder $fourth $picker 'pending'
+    $closeBefore = Save-OutputSnapshot 'close-before.json'
     $pattern = $null; Assert-HostElement $fourth $fourth.window
     $available = $fourth.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$pattern)
     Assert-HostElement $fourth $fourth.window; Assert-Condition $available
     Assert-PickerRoot $fourth $picker; Assert-HostElement $fourth $fourth.window; try { $pattern.Close() } finally { Assert-HostAfter $fourth $fourth.window }
     Assert-Condition (-not $fourth.host.Exited); Assert-PickerRoot $fourth $picker; Assert-RootHeld $userRoot
-    Select-PickerFolder $fourth $picker $pendingDir -Closing
+    $closeNavigation = Wait-PickerWitness $fourth $picker 'pending'
+    Picker-Invoke $fourth $picker '将错误报告保存到此文件夹' -Closing
     $null = Wait-For { if ($fourth.host.Exited) { $true } } 45
     Assert-Condition ($fourth.host.ExitCode -eq 0 -and -not [OwnedShellHost]::WindowExists($fourth.hwnd) -and $fourth.host.LiveCount() -eq 0)
     $null = $script:records.Add(@{ role=$fourth.role; processId=$fourth.host.Id; creationFileTime=$fourth.host.Birth; windowHandle=$fourth.hwnd.ToInt64(); windowClosed=$true; exitCode=0; rootReacquired=$false; jobEmpty=$true })
-    Assert-Condition (@(Get-ChildItem -LiteralPath $pendingDir -File).Count -eq 0)
+    $closeAfter = Save-OutputSnapshot 'close-after.json'; Assert-Condition ($closeBefore -ceq $closeAfter)
+    $closeEvidence = @{ navigation=$closeNavigation; beforeFile='close-before.json'; afterFile='close-after.json'; beforeSha256=$closeBefore; afterSha256=$closeAfter }
     Reacquire-Roots $userRoot
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($broken))
     Record-Sentinel 'close-pending'
@@ -361,7 +444,7 @@ try {
     $catalogAfter = (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-Condition ($catalogBefore -ceq $catalogAfter)
     foreach ($record in $script:records) { $record.rootReacquired = $true }
-    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); reports=@($script:reports.ToArray()); cancelWritten=$false; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; sentinelBefore=$script:sentinelHash; sentinelAfter=$script:sentinelChecks[$script:sentinelChecks.Count-1].sha256; sentinelChecks=@($script:sentinelChecks.ToArray()); pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
+    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); reports=@($script:reports.ToArray()); cancelWritten=$cancelWritten; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; sentinelBefore=$script:sentinelHash; sentinelAfter=$script:sentinelChecks[$script:sentinelChecks.Count-1].sha256; sentinelChecks=@($script:sentinelChecks.ToArray()); pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
     $script:phase = 'completed'
 } catch {
     $script:result = @{ schemaVersion=1; succeeded=$false; phase=$script:phase; failureCode='NativeGateFailed'; forcedCleanup=$false }

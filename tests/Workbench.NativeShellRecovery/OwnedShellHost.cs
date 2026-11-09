@@ -34,6 +34,16 @@ public sealed class OwnedShellHost : IDisposable
     {
         if (expected <= 0 || actual <= 0 || expected != actual) throw new InvalidOperationException();
     }
+    // These pure policies cannot manufacture a native observation; the driver
+    // supplies values from the checked picker and an actual repeat invocation.
+    public static void AssertFolderObservation(bool addressSubmitted, bool witnessVisible, int witnessMatches)
+    {
+        if (!addressSubmitted || !witnessVisible || witnessMatches != 1) throw new InvalidOperationException();
+    }
+    public static void AssertRepeatObservation(bool patternAvailable, bool attempted, string outcome, bool popupRetained)
+    {
+        if (!patternAvailable || !attempted || outcome != "ElementNotEnabled" || !popupRetained) throw new InvalidOperationException();
+    }
     public static bool PathExists(string path)
     {
         uint a = GetFileAttributesW(path); if (a != 0xffffffff) return true;

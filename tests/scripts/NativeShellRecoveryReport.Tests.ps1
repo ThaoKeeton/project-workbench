@@ -98,16 +98,42 @@ try {
     foreach ($i in 0..1) {
         $owner = $processes[$i+1]; $reports[$i].processId = $owner.processId; $reports[$i].creationFileTime = $owner.creationFileTime; $reports[$i].windowHandle = $owner.windowHandle
     }
-    $receipt = [ordered]@{ schemaVersion = 1; succeeded = $true; sourceCommit = $commit; executableSha256 = $exe; dllSha256 = $dll; forcedCleanup = $false; processes = $processes; images = @($light,$dark); reports = $reports; cancelWritten = $false; collisionBefore = $conflictHash; collisionAfter = $conflictHash; catalogBefore = $catalogHash; catalogAfter = $catalogHash; sentinelBefore = $sentinelHash; sentinelAfter = $sentinelHash; sentinelChecks = $sentinelChecks; pickerPendingAtClose = $true; checks = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
+    $witnesses = @{ cancel=('witness-' + ('c' * 32)); conflict=('witness-' + ('d' * 32)); catalog=('witness-' + ('e' * 32)); pending=('witness-' + ('f' * 32)) }
+    foreach ($scope in @('cancel','conflict','catalog','pending')) { [IO.Directory]::CreateDirectory((Join-Path $root ($scope + '/' + $witnesses[$scope]))) | Out-Null }
+    $entries = @()
+    foreach ($scope in @('cancel','conflict','catalog','pending')) {
+        $entries += [ordered]@{ path=$scope; kind='directory'; length=0; sha256=$null }
+        $entries += [ordered]@{ path=($scope + '/' + $witnesses[$scope]); kind='directory'; length=0; sha256=$null }
+    }
+    $catalogExportPath = Join-Path $root $reports[1].relativePath
+    $closeEntries = @($entries) + @(
+        [ordered]@{ path=$reports[0].relativePath; kind='file'; length=(Get-Item (Join-Path $root $reports[0].relativePath)).Length; sha256=$conflictHash },
+        [ordered]@{ path=$reports[1].relativePath; kind='file'; length=(Get-Item $catalogExportPath).Length; sha256=(Get-FileHash $catalogExportPath -Algorithm SHA256).Hash.ToLowerInvariant() }
+    )
+    $cancelSnapshot = [ordered]@{ schemaVersion=1; entries=$entries }
+    $closeSnapshot = [ordered]@{ schemaVersion=1; entries=$closeEntries }
+    $cancelBeforeFile = Write-Json $cancelSnapshot 'cancel-before.json'; $cancelAfterFile = Write-Json $cancelSnapshot 'cancel-after.json'
+    $closeBeforeFile = Write-Json $closeSnapshot 'close-before.json'; $closeAfterFile = Write-Json $closeSnapshot 'close-after.json'
+    $cancelHash = (Get-FileHash $cancelBeforeFile -Algorithm SHA256).Hash.ToLowerInvariant(); $closeHash = (Get-FileHash $closeBeforeFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    $cancelNavigation = [ordered]@{ destination='cancel'; witness=$witnesses.cancel; addressSubmitted=$true; witnessVisible=$true; witnessMatches=1; witnessControlType='ListItem'; viewAutomationId='1'; viewControlType='List'; viewName='Items View'; viewProcessId=900; popupProcessId=900; witnessProcessId=900; popupWindowHandle=[long]901 }
+    $closeNavigation = [ordered]@{ destination='pending'; witness=$witnesses.pending; addressSubmitted=$true; witnessVisible=$true; witnessMatches=1; witnessControlType='ListItem'; viewAutomationId='1'; viewControlType='List'; viewName='Items View'; viewProcessId=902; popupProcessId=902; witnessProcessId=902; popupWindowHandle=[long]903 }
+    $cancelEvidence = [ordered]@{ navigation=$cancelNavigation; beforeFile='cancel-before.json'; afterFile='cancel-after.json'; beforeSha256=$cancelHash; afterSha256=$cancelHash }
+    $closeEvidence = [ordered]@{ navigation=$closeNavigation; beforeFile='close-before.json'; afterFile='close-after.json'; beforeSha256=$closeHash; afterSha256=$closeHash }
+    $repeatEvidence = [ordered]@{ patternAvailable=$true; attempted=$true; outcome='ElementNotEnabled'; popupRetained=$true }
+    $receipt = [ordered]@{ schemaVersion = 1; succeeded = $true; sourceCommit = $commit; executableSha256 = $exe; dllSha256 = $dll; forcedCleanup = $false; processes = $processes; images = @($light,$dark); reports = $reports; cancelWritten = $false; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore = $conflictHash; collisionAfter = $conflictHash; catalogBefore = $catalogHash; catalogAfter = $catalogHash; sentinelBefore = $sentinelHash; sentinelAfter = $sentinelHash; sentinelChecks = $sentinelChecks; pickerPendingAtClose = $true; checks = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
     $result = Write-Json $receipt 'result.json'
     Test-ShellRecoveryFinal -Path $result -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll | Out-Null; $passed++
-    foreach ($case in @('source', 'exit', 'root', 'close', 'job', 'forced', 'cancel', 'collision', 'checks', 'pending', 'process', 'birth', 'hwnd', 'image', 'missingfinal', 'missingreport', 'reportclassification', 'collision-unbound', 'catalog', 'processmissing', 'duplicaterole', 'duplicateimage', 'finalsource-array', 'finalhash-array', 'collision-array', 'report-process', 'image-role', 'sentinel-missing-field', 'sentinel-changed-hash', 'sentinel-array', 'sentinel-missing-checkpoint', 'sentinel-changed-checkpoint', 'sentinel-duplicate-phase', 'sentinel-reordered')) {
+    foreach ($case in @('source', 'exit', 'root', 'close', 'job', 'forced', 'cancel', 'collision', 'checks', 'pending', 'process', 'birth', 'hwnd', 'image', 'missingfinal', 'missingreport', 'reportclassification', 'collision-unbound', 'catalog', 'processmissing', 'duplicaterole', 'duplicateimage', 'finalsource-array', 'finalhash-array', 'collision-array', 'report-process', 'image-role', 'sentinel-missing-field', 'sentinel-changed-hash', 'sentinel-array', 'sentinel-missing-checkpoint', 'sentinel-changed-checkpoint', 'sentinel-duplicate-phase', 'sentinel-reordered', 'navigation-pending', 'navigation-ambiguous', 'navigation-pid', 'navigation-wrong-view', 'navigation-view-name', 'navigation-view-pid', 'navigation-wrong-destination', 'cancel-snapshot-hash', 'close-snapshot-hash', 'repeat-unavailable', 'repeat-skipped', 'repeat-unexpected-success', 'repeat-lost-popup')) {
         $r = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
         switch ($case) {
             source { $r.sourceCommit = 'f' * 40 }; exit { $r.processes[0].exitCode = 1 }; root { $r.processes[0].rootReacquired = $false }
             close { $r.processes[0].windowClosed = $false }; job { $r.processes[0].jobEmpty = $false }; forced { $r.forcedCleanup = $true }
             cancel { $r.cancelWritten = $true }; collision { $r.collisionAfter = 'd' * 64 }; checks { $r.checks = @('normal') }
             pending { $r.pickerPendingAtClose = $false }; process { $r.processes[0].processId++ }; birth { $r.processes[0].creationFileTime++ }
+            'navigation-pending' { $r.cancelEvidence.navigation.addressSubmitted = $true; $r.cancelEvidence.navigation.witnessVisible = $false; $r.cancelEvidence.navigation.witnessMatches = 0 }
+            'navigation-ambiguous' { $r.closeEvidence.navigation.witnessMatches = 2 }; 'navigation-pid' { $r.closeEvidence.navigation.witnessProcessId++ }; 'navigation-wrong-view' { $r.closeEvidence.navigation.viewAutomationId = 'other' }; 'navigation-view-name' { $r.closeEvidence.navigation.viewName = 'Address suggestions' }; 'navigation-view-pid' { $r.closeEvidence.navigation.viewProcessId++ }; 'navigation-wrong-destination' { $r.closeEvidence.navigation.destination = 'conflict' }
+            'cancel-snapshot-hash' { $r.cancelEvidence.afterSha256 = 'd' * 64 }; 'close-snapshot-hash' { $r.closeEvidence.beforeSha256 = 'd' * 64 }
+            'repeat-unavailable' { $r.repeatEvidence.patternAvailable = $false }; 'repeat-skipped' { $r.repeatEvidence.attempted = $false }; 'repeat-unexpected-success' { $r.repeatEvidence.outcome = 'Returned' }; 'repeat-lost-popup' { $r.repeatEvidence.popupRetained = $false }
             'sentinel-missing-field' { $r.Remove('sentinelBefore') }; 'sentinel-changed-hash' { $r.sentinelAfter = 'd' * 64 }; 'sentinel-array' { $r.sentinelBefore = @($r.sentinelBefore) }
             'sentinel-missing-checkpoint' { $r.sentinelChecks = @($r.sentinelChecks | Select-Object -Skip 1) }; 'sentinel-changed-checkpoint' { $r.sentinelChecks[3].sha256 = 'd' * 64 }
             'sentinel-duplicate-phase' { $r.sentinelChecks[1].phase = $r.sentinelChecks[0].phase }; 'sentinel-reordered' { $r.sentinelChecks = @($r.sentinelChecks[1],$r.sentinelChecks[0]) + @($r.sentinelChecks | Select-Object -Skip 2) }
@@ -115,6 +141,68 @@ try {
         }
         $f = Write-Json $r 'bad-result.json'
         Refuse { Test-ShellRecoveryFinal -Path $f -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } $case
+    }
+
+    # Preflight classification reads only synthetic fixture metadata, never a real profile.
+    $preflightRoot = Join-Path $root 'owned-preflight-profile'
+    if ($null -ne (Get-ShellRecoveryPreflightFailure -EnvironmentSafe $true -NormalRoot $preflightRoot)) { throw 'Fresh preflight root was refused.' }; $passed++
+    [IO.Directory]::CreateDirectory($preflightRoot) | Out-Null
+    $preflightMarker = Join-Path $preflightRoot 'untouched.bin'; $preflightBytes = [byte[]](1,0,255,9); [IO.File]::WriteAllBytes($preflightMarker,$preflightBytes)
+    $preflightFailure = Get-ShellRecoveryPreflightFailure -EnvironmentSafe $true -NormalRoot $preflightRoot
+    if ($preflightFailure -cne 'NormalRootExists') { throw 'Existing profile did not refuse.' }; $passed++
+    if ((Get-ShellRecoveryPreflightFailure -EnvironmentSafe $false -NormalRoot $preflightRoot) -cne 'UnsafeEnvironment') { throw 'Unsafe environment did not refuse.' }; $passed++
+    if ([Convert]::ToBase64String([IO.File]::ReadAllBytes($preflightMarker)) -cne [Convert]::ToBase64String($preflightBytes)) { throw 'Preflight changed synthetic profile.' }; $passed++
+    $failure = [ordered]@{ schemaVersion=1; succeeded=$false; hostSource=$commit; driverSource=$null; producerRunId=[long]12345; artifactId=[long]67890; archiveSha256=('e' * 64); executableSha256=$null; dllSha256=$null; phase='profile-preflight'; failureCode=$preflightFailure; forcedCleanup=$null; pickerCleanup='unverified'; unverified=@('blocking-file','acl-denial','drag','snap','high-dpi','high-contrast','taskbar','windows-11','visual-review') }
+    Test-ShellRecoveryFailureOutcome -Outcome $failure; $passed++
+    $failureFile = Write-Json $failure 'preflight-failure.json'
+    $failureText = [IO.File]::ReadAllText($failureFile)
+    if ($failureText.Contains($preflightRoot)) { throw 'Preflight receipt exposed the synthetic profile path.' }
+    Test-ShellRecoveryFailureOutcome -Outcome ($failureText | ConvertFrom-Json -AsHashtable); $passed++
+    $environmentFailure = $failure | ConvertTo-Json -Depth 6 | ConvertFrom-Json -AsHashtable
+    $environmentFailure.phase = 'environment'; $environmentFailure.failureCode = 'UnsafeEnvironment'
+    Test-ShellRecoveryFailureOutcome -Outcome $environmentFailure; $passed++
+    $inputFailure = $failure | ConvertTo-Json -Depth 6 | ConvertFrom-Json -AsHashtable
+    $inputFailure.phase = 'input-validation'; $inputFailure.failureCode = 'InputInvalid'
+    Test-ShellRecoveryFailureOutcome -Outcome $inputFailure; $passed++
+    $profileParent = Join-Path $root 'profile-parent'; [IO.Directory]::CreateDirectory($profileParent) | Out-Null
+    $profileLink = Join-Path $root 'profile-parent-link'; [IO.Directory]::CreateSymbolicLink($profileLink,$profileParent) | Out-Null
+    if ((Get-ShellRecoveryPreflightFailure -EnvironmentSafe $true -NormalRoot (Join-Path $profileLink 'new-profile')) -cne 'UnsafeProfilePath') { throw 'Linked profile ancestor did not refuse.' }; $passed++
+    foreach ($case in @('extra-path','succeeded','wrong-code','wrong-phase','wrong-phase-case','wrong-source','wrong-id','raw-error','bad-cleanup')) {
+        $bad = $failure | ConvertTo-Json -Depth 6 | ConvertFrom-Json -AsHashtable
+        switch ($case) {
+            'extra-path' { $bad.path = 'private' }; succeeded { $bad.succeeded = $true }; 'wrong-code' { $bad.failureCode = 'Anything' }; 'wrong-phase' { $bad.phase = 'environment' }; 'wrong-phase-case' { $bad.phase = 'PROFILE-PREFLIGHT' }
+            'wrong-source' { $bad.hostSource += "`n" }; 'wrong-id' { $bad.producerRunId = '12345' }; 'raw-error' { $bad.failureCode = 'private exception message' }; 'bad-cleanup' { $bad.pickerCleanup = 'passed' }
+        }
+        Refuse { Test-ShellRecoveryFailureOutcome -Outcome $bad } "failure-$case"
+    }
+    foreach ($name in @('cancel-before.json','cancel-after.json','close-before.json','close-after.json')) {
+        $path = Join-Path $root $name; $original = [IO.File]::ReadAllBytes($path)
+        [IO.File]::WriteAllText($path,'changed owned output snapshot')
+        try { Refuse { Test-ShellRecoveryFinal -Path $result -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } "snapshot-file-$name" }
+        finally { [IO.File]::WriteAllBytes($path,$original) }
+    }
+
+    # Even internally consistent replacement hashes cannot legitimize unknown staging output or a missing original report.
+    foreach ($case in @('cancel-extra-stage','close-missing-report','missing-witness')) {
+        $beforeName = if ($case -ceq 'cancel-extra-stage') { 'cancel-before.json' } else { 'close-before.json' }
+        $afterName = if ($case -ceq 'cancel-extra-stage') { 'cancel-after.json' } else { 'close-after.json' }
+        $beforePath = Join-Path $root $beforeName; $afterPath = Join-Path $root $afterName
+        $beforeBytes = [IO.File]::ReadAllBytes($beforePath); $afterBytes = [IO.File]::ReadAllBytes($afterPath)
+        $snapshot = [Text.Encoding]::UTF8.GetString($beforeBytes) | ConvertFrom-Json -AsHashtable
+        switch ($case) {
+            'cancel-extra-stage' { $snapshot.entries += @{ path=('cancel/.Workbench-error-' + ('9' * 32) + '.tmp'); kind='file'; length=1; sha256=('9' * 64) } }
+            'close-missing-report' { $snapshot.entries = @($snapshot.entries | Where-Object { $_.path -cne $reports[0].relativePath }) }
+            'missing-witness' { $snapshot.entries = @($snapshot.entries | Where-Object { $_.path -cne ('pending/' + $witnesses.pending) }) }
+        }
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($snapshot | ConvertTo-Json -Depth 12 -Compress))
+        [IO.File]::WriteAllBytes($beforePath,$bytes); [IO.File]::WriteAllBytes($afterPath,$bytes)
+        $hash = (Get-FileHash $beforePath -Algorithm SHA256).Hash.ToLowerInvariant()
+        $changed = $receipt | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+        $check = if ($case -ceq 'cancel-extra-stage') { $changed.cancelEvidence } else { $changed.closeEvidence }
+        $check.beforeSha256=$hash; $check.afterSha256=$hash
+        $changedFile=Write-Json $changed 'altered-snapshot-result.json'
+        try { Refuse { Test-ShellRecoveryFinal -Path $changedFile -Directory $root -ExpectedSourceCommit $commit -ExpectedExeSha256 $exe -ExpectedDllSha256 $dll } $case }
+        finally { [IO.File]::WriteAllBytes($beforePath,$beforeBytes); [IO.File]::WriteAllBytes($afterPath,$afterBytes) }
     }
 
     # Exercise actual evidence files, including same-hash-field tampering and missing inputs.

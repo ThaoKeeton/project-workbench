@@ -6,7 +6,7 @@ param([AllowEmptyString()][string]$ProducerRunId = '', [AllowEmptyString()][stri
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $repo = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
-$canWrite = $false; $phase = 'preflight'; $driver = $null; $api = $null; $downloadClient = $null
+$canWrite = $false; $phase = 'evidence-preflight'; $failureCode = 'ShellRecoveryFailed'; $driver = $null; $api = $null; $downloadClient = $null
 $driverSource = $null; $exeHash = $null; $dllHash = $null; $producer = $null
 $unverified = @('blocking-file','acl-denial','drag','snap','high-dpi','high-contrast','taskbar','windows-11','visual-review')
 $safeHost = $null; $safeRun = $null; $safeArtifact = $null; $safeArchive = $null
@@ -27,7 +27,12 @@ using System.Runtime.InteropServices;
 public static class ShellRecoveryExclusiveDirectory {
     [DllImport("kernel32.dll", CharSet=CharSet.Unicode, SetLastError=true)]
     private static extern bool CreateDirectoryW(string path, IntPtr security);
-    public static void Create(string path) { if (!CreateDirectoryW(path, IntPtr.Zero)) throw new InvalidOperationException(); }
+    [DllImport("libc", EntryPoint="mkdir", SetLastError=true)]
+    private static extern int Mkdir(string path, uint mode);
+    public static void Create(string path) {
+        bool ok = RuntimeInformation.IsOSPlatform(OSPlatform.Windows) ? CreateDirectoryW(path, IntPtr.Zero) : Mkdir(path, 448) == 0;
+        if (!ok) throw new InvalidOperationException();
+    }
     public static async System.Threading.Tasks.Task<long> Drain(System.IO.TextReader reader) {
         var buffer = new char[4096]; long count = 0; int n;
         while ((n = await reader.ReadAsync(buffer, 0, buffer.Length).ConfigureAwait(false)) > 0) count = Math.Min(65537, count + n);
@@ -37,6 +42,7 @@ public static class ShellRecoveryExclusiveDirectory {
 '@
 }
 function Write-NewJson([string]$Name,$Value) {
+    Reject-Links $EvidenceRoot
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($Value | ConvertTo-Json -Depth 10))
     $stream = [IO.File]::Open((Join-Path $EvidenceRoot $Name),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
     try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
@@ -88,26 +94,43 @@ function Save-ArtifactArchive([string]$Path) {
     } finally { $response.Dispose() }
 }
 try {
-    if (-not $IsWindows -or $env:CI -cne 'true' -or $env:GITHUB_ACTIONS -cne 'true' -or $env:RUNNER_ENVIRONMENT -cne 'github-hosted' -or -not [Environment]::UserInteractive) { throw 'UnsafeEnvironment' }
     if ($ProducerRunId -cmatch '\A[1-9][0-9]{0,17}\z') { $safeRun=[long]$ProducerRunId }
     if ($ArtifactId -cmatch '\A[1-9][0-9]{0,17}\z') { $safeArtifact=[long]$ArtifactId }
     if ($HostSource -cmatch '\A[0-9a-f]{40}\z') { $safeHost=$HostSource }
     if ($ArchiveSha256 -cmatch '\A[0-9a-f]{64}\z') { $safeArchive=$ArchiveSha256 }
+    # Establish a fresh, allowed output before environment/profile refusal, without
+    # inspecting the contents of a preexisting normal profile or an unsafe caller path.
     $EvidenceRoot = [IO.Path]::GetFullPath($EvidenceRoot)
-    $userRoot = [IO.Path]::Combine([Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData),'ProjectWorkbench')
-    Reject-Links $userRoot; Reject-Links $EvidenceRoot
-    if (Exists-Exact $userRoot) { throw 'NormalRootExists' }
-    $prefix = $userRoot.TrimEnd('\') + '\'
-    if ($EvidenceRoot.Equals($userRoot,[StringComparison]::OrdinalIgnoreCase) -or $EvidenceRoot.StartsWith($prefix,[StringComparison]::OrdinalIgnoreCase) -or (Exists-Exact $EvidenceRoot)) { throw 'EvidenceNotFresh' }
-    $allowedArtifact = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts/native')).TrimEnd('\') + '\'
-    $allowedTemp = [IO.Path]::GetFullPath($env:RUNNER_TEMP).TrimEnd('\') + '\'
-    if (-not ($EvidenceRoot.StartsWith($allowedArtifact,[StringComparison]::OrdinalIgnoreCase) -or $EvidenceRoot.StartsWith($allowedTemp,[StringComparison]::OrdinalIgnoreCase))) { throw 'EvidenceOutsideAllowedRoot' }
+    $localData = [Environment]::GetFolderPath([Environment+SpecialFolder]::LocalApplicationData)
+    if ([string]::IsNullOrWhiteSpace($localData)) { throw 'NormalRootUnavailable' }
+    $userRoot = [IO.Path]::GetFullPath([IO.Path]::Combine($localData,'ProjectWorkbench'))
+    $separator = [IO.Path]::DirectorySeparatorChar
+    $comparison = if ($IsWindows) { [StringComparison]::OrdinalIgnoreCase } else { [StringComparison]::Ordinal }
+    $evidencePrefix = $EvidenceRoot.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)) + $separator
+    $profilePrefix = $userRoot.TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)) + $separator
+    if ($EvidenceRoot.Equals($userRoot,$comparison) -or $EvidenceRoot.StartsWith($profilePrefix,$comparison) -or $userRoot.StartsWith($evidencePrefix,$comparison)) { throw 'EvidenceOverlapsProfile' }
+    $environmentSafe = ($IsWindows -and $env:CI -ceq 'true' -and $env:GITHUB_ACTIONS -ceq 'true' -and $env:RUNNER_ENVIRONMENT -ceq 'github-hosted' -and [Environment]::UserInteractive)
+    $allowedArtifact = [IO.Path]::GetFullPath((Join-Path $repo 'artifacts/native')).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)) + $separator
+    $allowedTemp = $null; $runnerTemp = [Environment]::GetEnvironmentVariable('RUNNER_TEMP')
+    if ($environmentSafe -and -not [string]::IsNullOrWhiteSpace($runnerTemp)) { $allowedTemp = [IO.Path]::GetFullPath($runnerTemp).TrimEnd([char[]]@([IO.Path]::DirectorySeparatorChar,[IO.Path]::AltDirectorySeparatorChar)) + $separator }
+    if (-not ($EvidenceRoot.StartsWith($allowedArtifact,$comparison) -or ($null -ne $allowedTemp -and $EvidenceRoot.StartsWith($allowedTemp,$comparison)))) { throw 'EvidenceOutsideAllowedRoot' }
+    Reject-Links $EvidenceRoot
+    if (Exists-Exact $EvidenceRoot) { throw 'EvidenceNotFresh' }
     [IO.Directory]::CreateDirectory([IO.Path]::GetDirectoryName($EvidenceRoot)) | Out-Null
+    Reject-Links $EvidenceRoot
     [ShellRecoveryExclusiveDirectory]::Create($EvidenceRoot)
+    $canWrite = $true; $phase = 'evidence-initialization'; $failureCode = 'EvidenceInitializationFailed'
     $marker = [IO.File]::Open((Join-Path $EvidenceRoot '.owned'),[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None); $marker.Dispose()
-    $canWrite = $true; $phase = 'input-validation'
-    if ($null -eq $safeRun -or $null -eq $safeArtifact -or $null -eq $safeHost -or $null -eq $safeArchive) { throw 'InputInvalid' }
+    $phase = 'preflight-initialization'; $failureCode = 'PreflightInitializationFailed'
     Import-Module (Join-Path $PSScriptRoot 'NativeShellRecoveryReport.psm1') -Force
+    $phase = 'environment'; $failureCode = 'UnsafeEnvironment'
+    if (-not $environmentSafe) { throw 'UnsafeEnvironment' }
+    $phase = 'profile-preflight'; $failureCode = 'ProfileCheckFailed'
+    $reason = Get-ShellRecoveryPreflightFailure -EnvironmentSafe $environmentSafe -NormalRoot $userRoot
+    if ($null -ne $reason) { $failureCode = $reason; throw 'ProfilePreflightRefused' }
+    $phase = 'input-validation'; $failureCode = 'InputInvalid'
+    if ($null -eq $safeRun -or $null -eq $safeArtifact -or $null -eq $safeHost -or $null -eq $safeArchive) { throw 'InputInvalid' }
+    $phase = 'driver-identity'; $failureCode = 'ShellRecoveryFailed'
     $candidateSource = (& git -C $repo rev-parse HEAD)
     if ($LASTEXITCODE -ne 0) { throw 'DriverSourceInvalid' }
     Test-ShellRecoveryDriverSource -ActualSource $candidateSource -ExpectedSource $env:GITHUB_SHA
@@ -177,7 +200,11 @@ try {
     Write-Host 'Owned shell recovery checks passed launcher validation; original frames require visual review.'
 } catch {
     if ($canWrite) {
-        try { Write-NewJson 'final.json' @{ schemaVersion=1; succeeded=$false; hostSource=$safeHost; driverSource=$driverSource; producerRunId=$safeRun; artifactId=$safeArtifact; archiveSha256=$safeArchive; executableSha256=$exeHash; dllSha256=$dllHash; phase=$phase; failureCode='ShellRecoveryFailed'; forcedCleanup=$null; pickerCleanup='unverified'; unverified=$unverified } } catch { [Console]::Error.WriteLine('Could not write the sanitized final receipt.') }
+        try {
+            $outcome = @{ schemaVersion=1; succeeded=$false; hostSource=$safeHost; driverSource=$driverSource; producerRunId=$safeRun; artifactId=$safeArtifact; archiveSha256=$safeArchive; executableSha256=$exeHash; dllSha256=$dllHash; phase=$phase; failureCode=$failureCode; forcedCleanup=$null; pickerCleanup='unverified'; unverified=$unverified }
+            if ($phase -cin @('environment','profile-preflight','input-validation')) { Test-ShellRecoveryFailureOutcome -Outcome $outcome }
+            Write-NewJson 'final.json' $outcome
+        } catch { [Console]::Error.WriteLine('Could not write the sanitized final receipt.') }
     }
     [Console]::Error.WriteLine('Owned shell recovery gate failed; partial evidence remains available.')
     exit 1
