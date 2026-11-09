@@ -30,6 +30,10 @@ Expect $directory 40 257 16 $false 'requested width above ICO limit'
 Expect $directory 39 16 16 $false 'truncated other frame'
 Expect $directory[0..36] 40 16 16 $false 'truncated directory'
 Expect ([byte[]]@(0,0,1)) 3 16 16 $false 'truncated ICO header; directory only, no Windows payload decode'
+Expect ([byte[]]@(60,115,118,103,32,120)) 6 16 16 $false 'in-memory SVG-like prefix is not an ICO directory'
+$nonIcon=[byte[]]$directory.Clone()
+$nonIcon[0]=60; $nonIcon[1]=115; $nonIcon[2]=118; $nonIcon[3]=103
+Expect $nonIcon 40 16 16 $false 'in-memory non-ICO signature with otherwise valid directory and bounds'
 $bad=[byte[]]$directory.Clone(); $bad[2]=2
 Expect $bad 40 16 16 $false 'not an icon directory'
 $bad=[byte[]]$directory.Clone(); $bad[18]=1
@@ -44,6 +48,13 @@ Expect $boundedSingleByte 23 16 16 $true 'directory bounds only; no Windows Load
 Expect $max 23 256 256 $true 'zero directory dimensions mean 256'
 Expect $max 23 255 255 $false '255 is not 256'
 Write-Host "Icon directory policy: $passed synthetic boundary cases passed; no Windows LoadImageW or corrupt-payload decoding."
+
+# Run the native regression's malformed-directory checks as pure in-memory
+# policy checks; this does not execute HICON or other Windows paths.
+$memoryChecks=[IconComparisonRegression].GetMethod('CheckMalformedDirectories', [Reflection.BindingFlags]'NonPublic,Static')
+if ($null -eq $memoryChecks) { throw 'Native regression in-memory directory checks are missing.' }
+$null=$memoryChecks.Invoke($null,[object[]]@())
+Write-Host 'Native regression in-memory directory checks passed; no Windows payload decoding.'
 
 # Execute the real driver's receipt builder with bounded synthetic trace data.
 # This verifies emission and the process-local switch observation, not GDI.

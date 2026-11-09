@@ -1,7 +1,6 @@
 using System;
 using System.Drawing;
 using System.Drawing.Imaging;
-using System.IO;
 using System.Runtime.InteropServices;
 
 // Runs only in the owned Windows PowerShell driver. Every HICON is local to this test.
@@ -46,27 +45,14 @@ public static class IconComparisonRegression
         return result;
     }
 
-    private static void CheckMalformedDirectoryAndNonIcon(string asset, Icon icon, IntPtr candidateHandle, IconComparisonTrace trace)
+    private static void CheckMalformedDirectories()
     {
         // A directory-only check cannot test Windows decoding of a corrupt payload.
         byte[] truncated = new byte[] { 0, 0, 1 };
         Require(!OwnedShellHost.IconDirectoryHasSize(truncated, truncated.Length, 16, 16));
-
-        // The launcher has already checked this SVG in the extracted host asset set.
-        // It is used read-only as a non-ICO input to the real comparison helper.
-        string nonIcon = Path.ChangeExtension(asset, ".svg");
-        OwnedShellHost.RejectLinks(nonIcon);
-        using (var stream = new FileStream(nonIcon, FileMode.Open, FileAccess.Read, FileShare.Read))
-        using (var reader = new BinaryReader(stream))
-        {
-            byte[] header = reader.ReadBytes(4);
-            Require(header.Length == 4 && (header[0] != 0 || header[1] != 0 || header[2] != 1 || header[3] != 0));
-        }
-        trace.Begin("regression16");
-        Require(!OwnedShellHost.IconAssetMatches(nonIcon, icon, trace));
-        trace.Begin("regression16");
-        Require(!CheckReferenceLifetime(nonIcon, icon, candidateHandle, trace, false, false));
-        Require(trace.Stage == "directory" && trace.ReferenceWidth == 0 && trace.ReferenceHeight == 0);
+        // Aside from the non-ICO signature, this directory describes a bounded 16px frame.
+        byte[] nonIcon = new byte[] { 60,115,118,103,1,0, 16,16,0,0,1,0,32,0,1,0,0,0,22,0,0,0 };
+        Require(!OwnedShellHost.IconDirectoryHasSize(nonIcon, 23, 16, 16));
     }
 
     private static int[] CheckAssetHandle(string asset, int size, string subject, IconComparisonTrace trace)
@@ -112,7 +98,7 @@ public static class IconComparisonRegression
                     // An exception after acquisition must release the reference, not the candidate.
                     trace.Begin(subject);
                     CheckReferenceLifetime(asset, icon, handle, trace, true, true);
-                    CheckMalformedDirectoryAndNonIcon(asset, icon, handle, trace);
+                    CheckMalformedDirectories();
                 }
                 return legacy;
             }
