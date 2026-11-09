@@ -1,0 +1,273 @@
+Set-StrictMode -Version Latest
+# Reuse the bounded CRC/inflate/pixel validator for GDI's RGB/RGBA8 PNG output.
+Import-Module (Join-Path $PSScriptRoot 'NativeGalleryReport.psm1') -ErrorAction Stop
+
+function Read-ShellRecoveryJson([string]$Path, [int]$Limit = 65536) {
+    try {
+        $item = Get-Item -LiteralPath $Path -Force
+        if ($item.PSIsContainer -or $item.LinkType -or $item.Length -lt 2 -or $item.Length -gt $Limit) { throw 'invalid' }
+        $bytes = [IO.File]::ReadAllBytes($item.FullName)
+        $document = [Text.Json.JsonDocument]::Parse([ReadOnlyMemory[byte]]::new($bytes))
+        try {
+            Assert-ShellJsonElement $document.RootElement 0
+        } finally { $document.Dispose() }
+        $text = [Text.UTF8Encoding]::new($false,$true).GetString($bytes)
+        return ConvertFrom-Json -InputObject $text -AsHashtable -DateKind String -NoEnumerate
+    } catch { throw 'ShellRecoveryJsonInvalid' }
+}
+function Assert-ShellJsonElement([Text.Json.JsonElement]$Value, [int]$Depth) {
+    if ($Depth -gt 5) { throw 'invalid' }
+    if ($Value.ValueKind -eq [Text.Json.JsonValueKind]::Object) {
+        $names = [Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        foreach ($property in $Value.EnumerateObject()) {
+            if (-not $names.Add($property.Name)) { throw 'invalid' }
+            Assert-ShellJsonElement $property.Value ($Depth + 1)
+        }
+    } elseif ($Value.ValueKind -eq [Text.Json.JsonValueKind]::Array) {
+        if ($Value.GetArrayLength() -gt 32) { throw 'invalid' }
+        foreach ($item in $Value.EnumerateArray()) { Assert-ShellJsonElement $item ($Depth + 1) }
+    }
+}
+function Assert-ShellKeys($Object, [string[]]$Names) {
+    if ($Object -isnot [Collections.IDictionary] -or $Object.Count -ne $Names.Count) { throw 'ShellRecoveryShapeInvalid' }
+    foreach ($name in $Names) {
+        if (@($Object.Keys | Where-Object { $_ -ceq $name }).Count -ne 1) { throw 'ShellRecoveryShapeInvalid' }
+    }
+}
+function Test-ShellInt($Value, [long]$Min, [long]$Max) {
+    return (($Value -is [int] -or $Value -is [long]) -and $Value -ge $Min -and $Value -le $Max)
+}
+function Test-ShellHash($Value) { return ($Value -is [string] -and $Value -cmatch '\A[0-9a-f]{64}\z') }
+function Test-ShellRecoveryExport {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$ExpectedSourceCommit,
+        [Parameter(Mandatory)][string]$Stage, [Parameter(Mandatory)][string]$Code, [Parameter(Mandatory)][string]$Category)
+    $r = Read-ShellRecoveryJson $Path 8192
+    Assert-ShellKeys $r @('schemaVersion','product','reportId','createdUtc','applicationVersion','buildCommit','runtimeVersion','operatingSystemVersion','processArchitecture','stage','errorCode','category','systemErrorCode')
+    if (-not (Test-ShellInt $r.schemaVersion 1 1) -or ($r.product -isnot [string] -or $r.product -cne 'ProjectWorkbench') -or
+        $r.reportId -isnot [string] -or $r.reportId -cnotmatch '\A[0-9a-f]{32}\z' -or
+        $ExpectedSourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or ($r.buildCommit -isnot [string] -or $r.buildCommit -cne $ExpectedSourceCommit) -or
+        ($r.applicationVersion -isnot [string] -or $r.applicationVersion -cne '0.4.1.0') -or ($r.processArchitecture -isnot [string] -or $r.processArchitecture -cne 'X64')) { throw 'ShellRecoveryExportIdentityInvalid' }
+    foreach ($field in @('runtimeVersion','operatingSystemVersion')) {
+        if ($r[$field] -isnot [string] -or $r[$field] -cnotmatch '\A(0|[1-9][0-9]{0,4})(\.(0|[1-9][0-9]{0,4})){1,3}\z') { throw 'ShellRecoveryExportVersionInvalid' }
+    }
+    $when = [DateTimeOffset]::MinValue
+    if ($r.createdUtc -isnot [string] -or $r.createdUtc -cnotmatch '\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?(Z|\+00:00)\z' -or
+        -not [DateTimeOffset]::TryParse($r.createdUtc, [Globalization.CultureInfo]::InvariantCulture, [Globalization.DateTimeStyles]::None, [ref]$when) -or $when.Offset -ne [TimeSpan]::Zero) { throw 'ShellRecoveryExportTimeInvalid' }
+    $permitted = @{
+        WorkspaceOwnership = @{ UserStoreInUse = 'Storage' }
+        CatalogOpen = @{ InvalidCatalog = 'InvalidData'; RecoveryRequired = 'InvalidData' }
+    }
+    if (-not $permitted.ContainsKey($Stage) -or -not $permitted[$Stage].ContainsKey($Code) -or $permitted[$Stage][$Code] -cne $Category -or
+        ($r.stage -isnot [string] -or $r.stage -cne $Stage) -or ($r.errorCode -isnot [string] -or $r.errorCode -cne $Code) -or ($r.category -isnot [string] -or $r.category -cne $Category) -or
+        ($null -ne $r.systemErrorCode -and ($r.systemErrorCode -isnot [string] -or $r.systemErrorCode -cnotmatch '\A0x[0-9A-F]{8}\z'))) { throw 'ShellRecoveryExportClassificationInvalid' }
+    return $r
+}
+function Test-ShellRecoveryImage {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Directory, [Parameter(Mandatory)]$Image, [Parameter(Mandatory)]$Identity)
+    Assert-ShellKeys $Image @('name','sha256','bytes','width','height','left','top','right','bottom','processId','creationFileTime','windowHandle','source')
+    foreach ($key in @('processId','creationFileTime','windowHandle')) {
+        if (-not (Test-ShellInt $Image[$key] 1 ([long]::MaxValue)) -or $Image[$key] -cne $Identity[$key]) { throw 'ShellRecoveryImageIdentityInvalid' }
+    }
+    if ($Image.name -isnot [string] -or $Image.name -cnotmatch '\A[a-z0-9-]+\.png\z' -or ($Image.source -isnot [string] -or $Image.source -cne 'PrintWindow2') -or
+        -not (Test-ShellHash $Image.sha256) -or -not (Test-ShellInt $Image.bytes 1 16777216) -or
+        -not (Test-ShellInt $Image.width 1 4096) -or -not (Test-ShellInt $Image.height 1 4096)) { throw 'ShellRecoveryImageInvalid' }
+    foreach ($key in @('left','top','right','bottom')) { if (-not (Test-ShellInt $Image[$key] -32768 32768)) { throw 'ShellRecoveryImageBoundsInvalid' } }
+    if (($Image.right - $Image.left) -ne $Image.width -or ($Image.bottom - $Image.top) -ne $Image.height) { throw 'ShellRecoveryImageBoundsInvalid' }
+    $path = Join-Path $Directory $Image.name
+    try {
+        $file = Get-Item -LiteralPath $path -Force
+        if ($file.PSIsContainer -or $file.LinkType -or $file.Length -ne $Image.bytes -or
+            (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant() -cne $Image.sha256 -or
+            -not [NativeGalleryPngV1]::Valid([IO.File]::ReadAllBytes($path), $Image.width, $Image.height)) { throw 'invalid' }
+    } catch { throw 'ShellRecoveryImageInvalid' }
+}
+function Test-ShellRecoveryFinal {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Directory,
+        [Parameter(Mandatory)][string]$ExpectedSourceCommit, [Parameter(Mandatory)][string]$ExpectedExeSha256, [Parameter(Mandatory)][string]$ExpectedDllSha256)
+    $r = Read-ShellRecoveryJson $Path
+    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','reports','cancelWritten','collisionBefore','collisionAfter','catalogBefore','catalogAfter','pickerPendingAtClose','checks')
+    if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or -not $r.succeeded -or
+        ($r.sourceCommit -isnot [string] -or $r.sourceCommit -cne $ExpectedSourceCommit) -or $ExpectedSourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or
+        -not (Test-ShellHash $ExpectedExeSha256) -or -not (Test-ShellHash $r.executableSha256) -or $r.executableSha256 -cne $ExpectedExeSha256 -or
+        -not (Test-ShellHash $ExpectedDllSha256) -or -not (Test-ShellHash $r.dllSha256) -or $r.dllSha256 -cne $ExpectedDllSha256 -or
+        $r.forcedCleanup -isnot [bool] -or $r.forcedCleanup -or $r.cancelWritten -isnot [bool] -or $r.cancelWritten -or
+        $r.pickerPendingAtClose -isnot [bool] -or -not $r.pickerPendingAtClose -or
+        -not (Test-ShellHash $r.collisionBefore) -or -not (Test-ShellHash $r.collisionAfter) -or $r.collisionAfter -cne $r.collisionBefore -or
+        -not (Test-ShellHash $r.catalogBefore) -or -not (Test-ShellHash $r.catalogAfter) -or $r.catalogAfter -cne $r.catalogBefore) { throw 'ShellRecoveryFinalInvalid' }
+    $required = @('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon')
+    if ($r.checks -isnot [array] -or $r.checks.Count -ne $required.Count -or @(Compare-Object $required $r.checks -CaseSensitive).Count -ne 0 -or
+        $r.processes -isnot [array] -or $r.processes.Count -ne 5 -or $r.images -isnot [array] -or $r.images.Count -ne 2 -or $r.reports -isnot [array] -or $r.reports.Count -ne 2) { throw 'ShellRecoveryChecksInvalid' }
+    $identities = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    $roles = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($p in $r.processes) {
+        Assert-ShellKeys $p @('role','processId','creationFileTime','windowHandle','windowClosed','exitCode','rootReacquired','jobEmpty')
+        if ($p.role -isnot [string] -or $p.role -cnotin @('healthy','duplicate-retry','corrupt-retry','close-pending','restored-start') -or -not $roles.Add($p.role)) { throw 'ShellRecoveryProcessInvalid' }
+        foreach ($key in @('processId','creationFileTime','windowHandle')) { if (-not (Test-ShellInt $p[$key] 1 ([long]::MaxValue))) { throw 'ShellRecoveryProcessInvalid' } }
+        foreach ($key in @('windowClosed','rootReacquired','jobEmpty')) { if ($p[$key] -isnot [bool] -or -not $p[$key]) { throw 'ShellRecoveryRetirementInvalid' } }
+        if (-not (Test-ShellInt $p.exitCode 0 0) -or -not $identities.Add("$($p.processId):$($p.creationFileTime):$($p.windowHandle)")) { throw 'ShellRecoveryRetirementInvalid' }
+    }
+    $catalogPath = Join-Path $Directory 'original-catalog.json'
+    Assert-ShellRecoveryNoLinks $catalogPath
+    $catalogFile = Get-Item -LiteralPath $catalogPath -Force
+    if ($catalogFile.PSIsContainer -or $catalogFile.Length -lt 1 -or $catalogFile.Length -gt 1048576 -or (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $r.catalogBefore) { throw 'ShellRecoveryCatalogInvalid' }
+    if ($r.images[0].sha256 -ceq $r.images[1].sha256) { throw 'ShellRecoveryImageSetInvalid' }
+    if (@(Compare-Object @('light.png','dark.png') @($r.images | ForEach-Object name) -CaseSensitive).Count -ne 0) { throw 'ShellRecoveryImageSetInvalid' }
+    $kinds = [Collections.Generic.HashSet[string]]::new([StringComparer]::Ordinal)
+    foreach ($report in $r.reports) {
+        Assert-ShellKeys $report @('relativePath','stage','code','category','processId','creationFileTime','windowHandle')
+        if ($report.relativePath -isnot [string] -or $report.relativePath -cnotmatch '\A(conflict|catalog)/Workbench-error-([0-9a-f]{32})\.json\z') { throw 'ShellRecoveryReportPathInvalid' }
+        $kind = $Matches[1]; $id = $Matches[2]
+        foreach ($key in @('processId','creationFileTime','windowHandle')) { if (-not (Test-ShellInt $report[$key] 1 ([long]::MaxValue))) { throw 'ShellRecoveryReportOwnerInvalid' } }
+        $expectedRole = if ($kind -ceq 'conflict') { 'duplicate-retry' } else { 'corrupt-retry' }
+        $owner = @($r.processes | Where-Object { $_.role -ceq $expectedRole -and $_.processId -eq $report.processId -and $_.creationFileTime -eq $report.creationFileTime -and $_.windowHandle -eq $report.windowHandle })
+        if ($owner.Count -ne 1) { throw 'ShellRecoveryReportOwnerInvalid' }
+        if (-not $kinds.Add($kind)) { throw 'ShellRecoveryReportSetInvalid' }
+        $folder = Get-Item -LiteralPath (Join-Path $Directory $kind) -Force
+        if (-not $folder.PSIsContainer -or $folder.LinkType) { throw 'ShellRecoveryReportPathInvalid' }
+        if (($kind -ceq 'conflict' -and ($report.stage -cne 'WorkspaceOwnership' -or $report.code -cne 'UserStoreInUse' -or $report.category -cne 'Storage')) -or
+            ($kind -ceq 'catalog' -and ($report.stage -cne 'CatalogOpen' -or $report.code -cnotin @('InvalidCatalog','RecoveryRequired') -or $report.category -cne 'InvalidData'))) { throw 'ShellRecoveryReportClassificationInvalid' }
+        $export = Test-ShellRecoveryExport -Path (Join-Path $Directory $report.relativePath) -ExpectedSourceCommit $ExpectedSourceCommit -Stage $report.stage -Code $report.code -Category $report.category
+        if ($export.reportId -cne $id) { throw 'ShellRecoveryReportNameInvalid' }
+        if ($kind -ceq 'conflict' -and (Get-FileHash -LiteralPath (Join-Path $Directory $report.relativePath) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $r.collisionBefore) { throw 'ShellRecoveryCollisionInvalid' }
+    }
+    foreach ($image in $r.images) {
+        $matches = @($r.processes | Where-Object { $_.processId -eq $image.processId -and $_.creationFileTime -eq $image.creationFileTime -and $_.windowHandle -eq $image.windowHandle })
+        if ($matches.Count -ne 1 -or $matches[0].role -cne 'healthy') { throw 'ShellRecoveryImageIdentityInvalid' }
+        Test-ShellRecoveryImage -Directory $Directory -Image $image -Identity $matches[0]
+    }
+    return $r
+}
+
+# Bind the driver's actual checkout to the workflow source independently of H1.
+function Test-ShellRecoveryDriverSource {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$ActualSource, [Parameter(Mandatory)]$ExpectedSource)
+    if ($ActualSource -isnot [string] -or $ExpectedSource -isnot [string] -or
+        $ActualSource -cnotmatch '\A[0-9a-f]{40}\z' -or $ExpectedSource -cnotmatch '\A[0-9a-f]{40}\z' -or
+        $ActualSource -cne $ExpectedSource) { throw 'DriverSourceInvalid' }
+}
+
+# The API response comes only from the fixed repository. This pure check is also
+# exercised against synthetic mutations before any artifact is downloaded.
+function Test-ShellRecoveryProducer {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)]$Run, [Parameter(Mandatory)]$Artifact,
+        [Parameter(Mandatory)][string]$RunId, [Parameter(Mandatory)][string]$ArtifactId,
+        [Parameter(Mandatory)][string]$HostSource, [Parameter(Mandatory)][string]$DriverSource,
+        [Parameter(Mandatory)][string]$ArchiveSha256)
+    if ($RunId -cnotmatch '\A[1-9][0-9]{0,17}\z' -or $ArtifactId -cnotmatch '\A[1-9][0-9]{0,17}\z' -or
+        $HostSource -cnotmatch '\A[0-9a-f]{40}\z' -or $DriverSource -cnotmatch '\A[0-9a-f]{40}\z' -or
+        -not (Test-ShellHash $ArchiveSha256)) { throw 'ShellProducerInputInvalid' }
+    if ($Run -isnot [Collections.IDictionary] -or $Artifact -isnot [Collections.IDictionary] -or
+        $Run.repository -isnot [Collections.IDictionary] -or $Artifact.workflow_run -isnot [Collections.IDictionary]) { throw 'ShellProducerMetadataInvalid' }
+    if (-not (Test-ShellInt $Run.id 1 ([long]::MaxValue)) -or $Run.id -ne [long]$RunId -or
+        ($Run.status -isnot [string] -or $Run.status -cne 'completed') -or ($Run.conclusion -isnot [string] -or $Run.conclusion -cne 'success') -or ($Run.event -isnot [string] -or $Run.event -cne 'workflow_dispatch') -or
+        -not (Test-ShellInt $Run.workflow_id 409147502 409147502) -or -not (Test-ShellInt $Run.run_attempt 1 100) -or ($Run.head_sha -isnot [string] -or $Run.head_sha -cne $HostSource) -or
+        ($Run.repository.full_name -isnot [string] -or $Run.repository.full_name -cne 'ThaoKeeton/project-workbench') -or -not (Test-ShellInt $Run.repository.id 1 ([long]::MaxValue))) { throw 'ShellProducerRunInvalid' }
+    if (-not (Test-ShellInt $Artifact.id 1 ([long]::MaxValue)) -or $Artifact.id -ne [long]$ArtifactId -or
+        ($Artifact.name -isnot [string] -or $Artifact.name -cne 'workbench-win-x64') -or
+        ($Artifact.digest -isnot [string] -or $Artifact.digest -cne "sha256:$ArchiveSha256") -or $Artifact.expired -isnot [bool] -or $Artifact.expired -or
+        -not (Test-ShellInt $Artifact.size_in_bytes 1 1073741824) -or
+        -not (Test-ShellInt $Artifact.workflow_run.id 1 ([long]::MaxValue)) -or $Artifact.workflow_run.id -ne [long]$RunId -or
+        ($Artifact.workflow_run.head_sha -isnot [string] -or $Artifact.workflow_run.head_sha -cne $HostSource) -or
+        -not (Test-ShellInt $Artifact.workflow_run.repository_id 1 ([long]::MaxValue)) -or $Artifact.workflow_run.repository_id -ne $Run.repository.id -or
+        -not (Test-ShellInt $Artifact.workflow_run.head_repository_id 1 ([long]::MaxValue)) -or $Artifact.workflow_run.head_repository_id -ne $Run.repository.id) { throw 'ShellProducerArtifactInvalid' }
+    $expires = [DateTimeOffset]::MinValue
+    if ($Artifact.expires_at -isnot [string] -or $Artifact.expires_at -cnotmatch '\A\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?(Z|\+00:00)\z' -or
+        -not [DateTimeOffset]::TryParse($Artifact.expires_at,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::None,[ref]$expires) -or
+        $expires.Offset -ne [TimeSpan]::Zero -or $expires -le [DateTimeOffset]::UtcNow) { throw 'ShellProducerExpiryInvalid' }
+    return @{ hostSource=$HostSource; driverSource=$DriverSource; producerRunId=[long]$RunId; artifactId=[long]$ArtifactId;
+        runAttempt=[int]$Run.run_attempt; repositoryId=[long]$Run.repository.id; artifactName='workbench-win-x64'; artifactExpiresUtc=$Artifact.expires_at; artifactApiBytes=[long]$Artifact.size_in_bytes; artifactApiDigest=$Artifact.digest; archiveSha256=$ArchiveSha256 }
+}
+function Test-ShellRecoveryHostVersion {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$ProductVersion, [Parameter(Mandatory)][string]$FileVersion,
+          [Parameter(Mandatory)][string]$AssemblyVersion, [Parameter(Mandatory)][string]$HostSource)
+    if ($HostSource -cnotmatch '\A[0-9a-f]{40}\z' -or $ProductVersion -cne "0.4.1+$HostSource" -or
+        $FileVersion -cne '0.4.1.0' -or $AssemblyVersion -cne '1.0.0.0') { throw 'ShellRecoveryHostIdentityInvalid' }
+}
+if (-not ('ShellRecoveryZipCopy' -as [type])) {
+Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+public static class ShellRecoveryZipCopy {
+    public static void Copy(Stream source, Stream destination, long length, uint expected) {
+        var table = new uint[256];
+        for (uint n = 0; n < 256; n++) { uint c=n; for(int j=0;j<8;j++) c=(c&1)!=0 ? 0xedb88320u^(c>>1) : c>>1; table[n]=c; }
+        uint crc=0xffffffffu; long total=0; var buffer=new byte[65536]; int count;
+        while((count=source.Read(buffer,0,buffer.Length))>0) {
+            total=checked(total+count); if(total>length) throw new InvalidDataException();
+            for(int i=0;i<count;i++) crc=table[(crc^buffer[i])&255]^(crc>>8);
+            destination.Write(buffer,0,count);
+        }
+        if(total!=length || ~crc!=expected) throw new InvalidDataException();
+    }
+}
+'@
+}
+function Assert-ShellRecoveryNoLinks([string]$Path) {
+    for ($part=[IO.Path]::GetFullPath($Path); $part; $part=[IO.Path]::GetDirectoryName($part)) {
+        $item = Get-Item -LiteralPath $part -Force -ErrorAction SilentlyContinue
+        if ($null -ne $item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'ShellRecoveryLinkRefused' }
+    }
+}
+function Expand-ShellRecoveryArchive {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Archive,[Parameter(Mandatory)][string]$Destination,[Parameter(Mandatory)][string]$ExpectedSha256)
+    if (-not (Test-ShellHash $ExpectedSha256)) { throw 'ShellRecoveryArchiveIdentityInvalid' }
+    $archivePath=[IO.Path]::GetFullPath($Archive); $target=[IO.Path]::GetFullPath($Destination)
+    Assert-ShellRecoveryNoLinks $archivePath; Assert-ShellRecoveryNoLinks $target
+    if (Test-Path -LiteralPath $target) { throw 'ShellRecoveryArchiveDestinationExists' }
+    $item=Get-Item -LiteralPath $archivePath -Force
+    if ($item.PSIsContainer -or $item.Length -lt 22 -or $item.Length -gt 1073741824 -or
+        (Get-FileHash -LiteralPath $archivePath -Algorithm SHA256).Hash.ToLowerInvariant() -cne $ExpectedSha256) { throw 'ShellRecoveryArchiveInvalid' }
+    $zip=[IO.Compression.ZipFile]::OpenRead($archivePath)
+    try {
+        if ($zip.Entries.Count -lt 5 -or $zip.Entries.Count -gt 4096) { throw 'ShellRecoveryArchiveInvalid' }
+        $names=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $files=[Collections.Generic.HashSet[string]]::new([StringComparer]::OrdinalIgnoreCase)
+        $expanded=0L
+        foreach ($entry in $zip.Entries) {
+            $name=$entry.FullName; $isDirectory=$name.EndsWith('/',[StringComparison]::Ordinal)
+            $clean=if ($isDirectory) { $name.Substring(0,$name.Length-1) } else { $name }
+            if ($name.Length -gt 1024 -or [string]::IsNullOrEmpty($clean) -or $name.Contains('\') -or $name.StartsWith('/') -or
+                -not $names.Add($clean) -or $entry.IsEncrypted -or ($entry.ExternalAttributes -band [int][IO.FileAttributes]::ReparsePoint) -ne 0) { throw 'ShellRecoveryArchiveEntryInvalid' }
+            $mode=($entry.ExternalAttributes -shr 16) -band 0xf000
+            if ($mode -notin @(0,0x8000,0x4000) -or ($isDirectory -and $mode -eq 0x8000) -or (-not $isDirectory -and $mode -eq 0x4000)) { throw 'ShellRecoveryArchiveEntryInvalid' }
+            foreach ($segment in $clean.Split('/')) {
+                if (-not $segment -or $segment -in @('.','..') -or $segment.Length -gt 128 -or $segment.EndsWith('.') -or $segment.EndsWith(' ') -or
+                    $segment -match '[\x00-\x1f<>:"|?*]' -or $segment -match '\A(?i:CON|PRN|AUX|NUL|COM[1-9]|LPT[1-9])(\..*)?\z') { throw 'ShellRecoveryArchiveEntryInvalid' }
+            }
+            if ($isDirectory) { if ($entry.Length -ne 0) { throw 'ShellRecoveryArchiveEntryInvalid' } }
+            else {
+                if ($entry.Length -lt 0 -or $entry.Length -gt 536870912) { throw 'ShellRecoveryArchiveEntryInvalid' }
+                $expanded += $entry.Length; if ($expanded -gt 2147483648) { throw 'ShellRecoveryArchiveEntryInvalid' }
+                $null=$files.Add($clean)
+            }
+        }
+        foreach ($name in $names) {
+            $parts=$name.Split('/')
+            for ($i=1;$i -lt $parts.Length;$i++) { if ($files.Contains(($parts[0..($i-1)] -join '/'))) { throw 'ShellRecoveryArchiveEntryInvalid' } }
+        }
+        foreach ($required in @('Workbench.App.exe','Workbench.App.dll','Workbench.App.pri','Assets/Workbench.ico','Assets/Workbench.svg')) {
+            if (-not $files.Contains($required)) { throw 'ShellRecoveryArchiveContentsInvalid' }
+        }
+        [IO.Directory]::CreateDirectory($target) | Out-Null
+        foreach ($entry in $zip.Entries) {
+            $name=$entry.FullName
+            if ($name.EndsWith('/')) { [IO.Directory]::CreateDirectory((Join-Path $target $name)) | Out-Null; continue }
+            $path=Join-Path $target $name; $parent=[IO.Path]::GetDirectoryName($path)
+            [IO.Directory]::CreateDirectory($parent) | Out-Null; Assert-ShellRecoveryNoLinks $parent
+            $inputStream=$entry.Open()
+            try {
+                $output=[IO.File]::Open($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+                try { [ShellRecoveryZipCopy]::Copy($inputStream,$output,$entry.Length,$entry.Crc32) } finally { $output.Dispose() }
+            } finally { $inputStream.Dispose() }
+        }
+        return @{ archiveSha256=$ExpectedSha256; archiveBytes=[long]$item.Length; expandedBytes=$expanded; entryCount=$zip.Entries.Count }
+    } finally { $zip.Dispose() }
+}
+Export-ModuleMember -Function Test-ShellRecoveryExport,Test-ShellRecoveryImage,Test-ShellRecoveryFinal,Test-ShellRecoveryDriverSource,Test-ShellRecoveryProducer,Test-ShellRecoveryHostVersion,Expand-ShellRecoveryArchive
