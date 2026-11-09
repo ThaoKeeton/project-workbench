@@ -19,13 +19,17 @@ internal static partial class TestingSourceAcceptanceProbe
     private const string Id = "com.projectworkbench.testing.source-acceptance";
     private const string Setting = "source-acceptance-release-v1";
     private const string Marker = "ProjectWorkbench installed synthetic source acceptance schema1";
+    private const string CrossMarker = "ProjectWorkbench installed synthetic cross-repository source acceptance schema2";
     private const string Model = "gpt-5.4-mini-2026-03-17";
     private static readonly JsonSerializerOptions Json = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private static string Delivery => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "source-acceptance-fixture"));
     private static string PackageZip => Path.Combine(Delivery, "workbench-testing-source-acceptance-0.2.0.zip");
+    private static string ProductionDelivery => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "source-paired-production"));
+    private static string SdkDelivery => Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "..", "source-sdk-packages"));
     private static string MarkerPath(string root) => Path.Combine(root, "isolated-source-acceptance.json");
     private static string StatePath(string root) => Path.Combine(root, "source-acceptance-state.json");
-    private sealed record Binding(int SchemaVersion, string Marker, string RunId, string PackageSha256, string SourceCommit, string HostExeSha256, string HostDllSha256);
+    private sealed record Binding(int SchemaVersion, string Marker, string RunId, string PackageSha256, string SourceCommit, string HostExeSha256, string HostDllSha256,
+        SourceAcceptanceCrossBinding? Cross = null);
     private sealed record Counters(long Entered, long Accepted, long Settled, long Unexpected, bool LimitExceeded, bool CancellationObserved);
     private sealed record FixtureState(int SchemaVersion, string FixtureId, string PluginId, string InstanceId, string ProjectId, long Generation,
         string Provider, string Scenario, string Phase, string Outcome, Counters Figma, Counters Ai);
@@ -106,11 +110,21 @@ internal static partial class TestingSourceAcceptanceProbe
                     var leases = new List<FileStream>();
                     try { foreach (var root in roots) leases.Add(HostRuntime.AcquireLease(root)); }
                     finally { foreach (var lease in leases) lease.Dispose(); }
-                    options.WriteReport(new { schemaVersion = 1, kind = "SourceAcceptanceNative", succeeded = true, phase = options.SourceAcceptanceProbe,
-                        userRoot = options.UserRoot, binding.SourceCommit, binding.PackageSha256, binding.HostExeSha256, binding.HostDllSha256,
-                        processId = Environment.ProcessId, processCreationFileTimeUtc = birth, actualWindowClosed = true, rootsRetired = true, roots,
-                        osDescription = System.Runtime.InteropServices.RuntimeInformation.OSDescription, processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
-                        checks = session.Checks, observations = session.Observations, holds = session.Holds, records = session.Records, evidence, completedUtc = DateTimeOffset.UtcNow });
+                    if (binding.Cross is { } cross)
+                        options.WriteReport(new { schemaVersion = 2, kind = "SourceAcceptanceNative", succeeded = true, phase = options.SourceAcceptanceProbe,
+                            userRoot = options.UserRoot, binding.SourceCommit, binding.PackageSha256, binding.HostExeSha256, binding.HostDllSha256,
+                            hostSourceCommit = cross.HostCommit, sdkSourceCommit = cross.SdkCommit, pairedProductionSha256 = cross.ProductionZipSha256,
+                            sdkManifestSha256 = cross.SdkManifestSha256, sdkCorePackageSha256 = cross.SdkCorePackageSha256, sdkWinUiPackageSha256 = cross.SdkWinUiPackageSha256,
+                            hostCoreSdkSha256 = cross.HostCoreSdkSha256, hostWinUiSdkSha256 = cross.HostWinUiSdkSha256,
+                            processId = Environment.ProcessId, processCreationFileTimeUtc = birth, actualWindowClosed = true, rootsRetired = true, roots,
+                            osDescription = System.Runtime.InteropServices.RuntimeInformation.OSDescription, processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+                            checks = session.Checks, observations = session.Observations, holds = session.Holds, records = session.Records, evidence, completedUtc = DateTimeOffset.UtcNow });
+                    else
+                        options.WriteReport(new { schemaVersion = 1, kind = "SourceAcceptanceNative", succeeded = true, phase = options.SourceAcceptanceProbe,
+                            userRoot = options.UserRoot, binding.SourceCommit, binding.PackageSha256, binding.HostExeSha256, binding.HostDllSha256,
+                            processId = Environment.ProcessId, processCreationFileTimeUtc = birth, actualWindowClosed = true, rootsRetired = true, roots,
+                            osDescription = System.Runtime.InteropServices.RuntimeInformation.OSDescription, processArchitecture = System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture.ToString(),
+                            checks = session.Checks, observations = session.Observations, holds = session.Holds, records = session.Records, evidence, completedUtc = DateTimeOffset.UtcNow });
                 }
                 catch (Exception) { Environment.ExitCode = 1; WriteFailure(options, session, birth, "SourceClosedLeaseFailed"); }
             };
@@ -208,7 +222,26 @@ internal static partial class TestingSourceAcceptanceProbe
         var version = FileVersionInfo.GetVersionInfo(dll).ProductVersion ?? "";
         var source = version.Split('+').Last();
         Require(Hex(source, 40), "SourceHostCommitMissing");
-        using var metadata = JsonDocument.Parse(await ReadBytesAsync(Path.Combine(Delivery, "provenance.json"), 2 * 1024 * 1024));
+        var fixtureMetadata = await ReadBytesAsync(Path.Combine(Delivery, "provenance.json"), 2 * 1024 * 1024);
+        using var metadata = JsonDocument.Parse(fixtureMetadata);
+        if (metadata.RootElement.TryGetProperty("hostSourceCommit", out _))
+        {
+            Require(version == "0.4.0+" + source, "SourceHostCommitMissing");
+            var productionMetadata = await ReadBytesAsync(Path.Combine(ProductionDelivery, "provenance.json"), 2 * 1024 * 1024);
+            var sdkManifest = await ReadBytesAsync(Path.Combine(SdkDelivery, "manifest.json"), 2 * 1024 * 1024);
+            var fixtureZip = await ReadBytesAsync(PackageZip, 64 * 1024 * 1024);
+            var productionZip = await ReadBytesAsync(Path.Combine(ProductionDelivery, "workbench-testing-plugin-0.2.0.zip"), 64 * 1024 * 1024);
+            var sdkCorePackage = await ReadBytesAsync(Path.Combine(SdkDelivery, "Workbench.Sdk.0.4.0.nupkg"), 64 * 1024 * 1024);
+            var sdkWinUiPackage = await ReadBytesAsync(Path.Combine(SdkDelivery, "Workbench.WinUI.Sdk.0.4.0.nupkg"), 64 * 1024 * 1024);
+            var hostExe = await ReadBytesAsync(exe, 64 * 1024 * 1024); var hostDll = await ReadBytesAsync(dll, 64 * 1024 * 1024);
+            var hostCoreSdk = await ReadBytesAsync(Path.Combine(AppContext.BaseDirectory, "Workbench.Sdk.dll"), 64 * 1024 * 1024);
+            var hostWinUiSdk = await ReadBytesAsync(Path.Combine(AppContext.BaseDirectory, "Workbench.WinUI.Sdk.dll"), 64 * 1024 * 1024);
+            var observed = new SourceAcceptanceCrossObserved(source, Hash(fixtureZip), fixtureZip.LongLength, Hash(productionZip), productionZip.LongLength,
+                Hash(hostExe), Hash(hostDll), Hash(sdkCorePackage), sdkCorePackage.LongLength, Hash(sdkWinUiPackage), sdkWinUiPackage.LongLength,
+                Hash(hostCoreSdk), Hash(hostWinUiSdk), Hash(sdkManifest));
+            var cross = SourceAcceptanceCrossIdentity.Validate(fixtureMetadata, productionMetadata, sdkManifest, observed);
+            return new(2, CrossMarker, Path.GetFileName(root), cross.FixtureZipSha256, cross.PluginCommit, cross.HostExeSha256, cross.HostDllSha256, cross);
+        }
         Require(metadata.RootElement.GetProperty("sourceCommit").GetString() == source && !metadata.RootElement.GetProperty("sourceTreeDirty").GetBoolean(), "SourcePackageCommitChanged");
         return new(1, Marker, Path.GetFileName(root), await HashFileAsync(PackageZip, 64 * 1024 * 1024), source,
             await HashFileAsync(exe, 64 * 1024 * 1024), await HashFileAsync(dll, 64 * 1024 * 1024));
