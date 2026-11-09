@@ -43,6 +43,10 @@ internal static partial class TestingSourceAcceptanceProbe
         internal List<string> Checks { get; } = [];
         internal List<Observation> Observations { get; } = [];
         internal List<HeldEvidence> Holds { get; } = [];
+        internal SourceOperation Operation { get; set; }
+        internal SourceOperationResult OperationResult { get; set; }
+        internal SourceOperationReason OperationReason { get; set; }
+        internal PluginDiagnosticCode? OperationDiagnosticCode { get; set; }
         internal Records Records { get; set; } = new(null, null, null, null, "", null);
         internal ProjectTestStore Store => Window.Workspace.Scope!.Testing;
         internal string Root => Window.SmokeRuntime.UserRoot;
@@ -117,7 +121,8 @@ internal static partial class TestingSourceAcceptanceProbe
             // Closed never gets synthesized on a failed action; bounded sidecar preserves safe phase progress.
             try { await WriteNewAsync(options.ReportPath + ".evidence.json", JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1,
                 kind = "SourceAcceptanceFailure", phase = options.SourceAcceptanceProbe, processId = Environment.ProcessId,
-                processCreationFileTimeUtc = birth, checks = session.Checks, failure = FailureCode(error), diagnostic = FailureIdentity(error) }, Json)); }
+                processCreationFileTimeUtc = birth, checks = session.Checks, failure = FailureCode(error), diagnostic = FailureIdentity(error),
+                operation = OperationIdentity(session.Operation, session.OperationResult, session.OperationReason, session.OperationDiagnosticCode) }, Json)); }
             catch (Exception) { /* Preserve the original failure and prior evidence. */ }
             throw;
         }
@@ -158,6 +163,44 @@ internal static partial class TestingSourceAcceptanceProbe
         // Preserve failure admission, but never let even a supplied assertion message become diagnostic data.
         if (!condition) throw new SourceProbeFailure(SourceProbeFailureKind.Assertion, file, line);
     }
+    private enum SourceOperation { None, SecondaryDialog, SecondaryInstall, SecondaryDiscover, FixtureDiscovery, FixtureSetting, FixtureEnable, FixtureContribution, SecondaryIsolation, ReturnPrimary }
+    private enum SourceOperationResult { NotStarted, CallbackNotEntered, Started, Completed, Refused, CallbackFaulted, RuntimeChanged, InvalidDiscovery }
+    private enum SourceOperationReason { None, Unknown, MaintenanceOwnershipUnreadable, InstalledOrPending, PathExistsOrLoaded, ImportFailed }
+    private sealed record SourceOperationIdentity(string Stage, string Result, string Reason, string? DiagnosticCode);
+    private static SourceOperationIdentity OperationIdentity(SourceOperation operation, SourceOperationResult result,
+        SourceOperationReason reason = SourceOperationReason.None, PluginDiagnosticCode? diagnosticCode = null) => new(operation switch
+    {
+        SourceOperation.None => "None", SourceOperation.SecondaryDialog => "SecondaryDialog", SourceOperation.SecondaryInstall => "SecondaryInstall",
+        SourceOperation.SecondaryDiscover => "SecondaryDiscover", SourceOperation.FixtureDiscovery => "FixtureDiscovery", SourceOperation.FixtureSetting => "FixtureSetting",
+        SourceOperation.FixtureEnable => "FixtureEnable", SourceOperation.FixtureContribution => "FixtureContribution", SourceOperation.SecondaryIsolation => "SecondaryIsolation",
+        SourceOperation.ReturnPrimary => "ReturnPrimary", _ => "Unknown"
+    }, result switch
+    {
+        SourceOperationResult.NotStarted => "NotStarted", SourceOperationResult.CallbackNotEntered => "CallbackNotEntered", SourceOperationResult.Started => "Started",
+        SourceOperationResult.Completed => "Completed", SourceOperationResult.Refused => "Refused", SourceOperationResult.CallbackFaulted => "CallbackFaulted",
+        SourceOperationResult.RuntimeChanged => "RuntimeChanged", SourceOperationResult.InvalidDiscovery => "InvalidDiscovery", _ => "Unknown"
+    }, reason switch
+    {
+        SourceOperationReason.None => "None", SourceOperationReason.MaintenanceOwnershipUnreadable => "MaintenanceOwnershipUnreadable",
+        SourceOperationReason.InstalledOrPending => "InstalledOrPending", SourceOperationReason.PathExistsOrLoaded => "PathExistsOrLoaded",
+        SourceOperationReason.ImportFailed => "ImportFailed", _ => "Unknown"
+    }, diagnosticCode switch
+    {
+        null => null, PluginDiagnosticCode.InvalidManifest => "InvalidManifest", PluginDiagnosticCode.InvalidPackage => "InvalidPackage",
+        PluginDiagnosticCode.IncompatibleApi => "IncompatibleApi", PluginDiagnosticCode.IncompatibleHost => "IncompatibleHost", PluginDiagnosticCode.MissingAssembly => "MissingAssembly",
+        PluginDiagnosticCode.DuplicatePluginId => "DuplicatePluginId", PluginDiagnosticCode.Untrusted => "Untrusted", PluginDiagnosticCode.PackageChanged => "PackageChanged",
+        PluginDiagnosticCode.LoadFailed => "LoadFailed", PluginDiagnosticCode.InitializationFailed => "InitializationFailed", PluginDiagnosticCode.StopFailed => "StopFailed",
+        PluginDiagnosticCode.CommandFailed => "CommandFailed", PluginDiagnosticCode.SettingsCorrupt => "SettingsCorrupt", PluginDiagnosticCode.StateCorrupt => "StateCorrupt",
+        PluginDiagnosticCode.StatePersistenceFailed => "StatePersistenceFailed", PluginDiagnosticCode.InstallationFailed => "InstallationFailed", PluginDiagnosticCode.StopTimedOut => "StopTimedOut",
+        PluginDiagnosticCode.BackgroundTaskFailed => "BackgroundTaskFailed", PluginDiagnosticCode.RuntimeStateCorrupt => "RuntimeStateCorrupt",
+        PluginDiagnosticCode.RuntimeStatePersistenceFailed => "RuntimeStatePersistenceFailed", PluginDiagnosticCode.SecretStorageFailed => "SecretStorageFailed",
+        PluginDiagnosticCode.PackageMaintenanceFailed => "PackageMaintenanceFailed", PluginDiagnosticCode.PackageMaintenancePending => "PackageMaintenancePending", _ => "Unknown"
+    });
+    private static void SetOperation(Session s, SourceOperation operation, SourceOperationResult result)
+    { s.Operation = operation; s.OperationResult = result; s.OperationReason = SourceOperationReason.None; s.OperationDiagnosticCode = null; }
+    private static void RequireJoinedAction(bool entered, bool runtimeMatched, bool succeeded, bool stillCurrent,
+        [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+        => Require(entered && runtimeMatched && succeeded && stillCurrent, "SourceJoinedActionIncomplete", file, line);
     private static async Task<Binding> CurrentBindingAsync(string root)
     {
         var dll = Path.Combine(AppContext.BaseDirectory, "Workbench.App.dll");

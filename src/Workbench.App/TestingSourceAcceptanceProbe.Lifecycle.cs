@@ -151,22 +151,33 @@ internal static partial class TestingSourceAcceptanceProbe
     }
     private static async Task PrepareSecondaryAsync(Session s)
     {
+        SetOperation(s, SourceOperation.SecondaryDialog, SourceOperationResult.Started);
         var pending = s.Window.WorkspaceNewDialogAsync();
         try
         {
             await PollAsync(() => Task.FromResult(s.Window.WorkspaceDialog is { IsLoaded: true } dialog && Descendants<Button>(dialog).Any()));
             var dialog = s.Window.WorkspaceDialog!;
             Find<TextBox>((DependencyObject)dialog.Content, "项目名称").Text = "Synthetic source acceptance B";
-            var create = Descendants<Button>(dialog).Single(button => Equals(button.Content, "创建并打开")); Require(create.IsEnabled, "SourceNewProjectDisabled"); Invoke(create);
+            var create = Descendants<Button>(dialog).Where(button => Equals(button.Content, "创建并打开")).ToArray();
+            Require(create.Length == 1 && create[0].IsEnabled, "SourceNewProjectDisabled"); Invoke(create[0]);
         }
         finally { await pending; } // Own and join actual dialog/transition rather than an observation-only wait.
-        Require(s.ProjectId != "default" && s.Window.Workspace.CanUseCurrentRuntime && !s.Window.SmokeActionBusy, "SourceSecondaryProjectNotOpened");
+        Require(Hex(s.ProjectId, 32) && s.Root == Path.Combine(s.Options.UserRoot, ".workspaces", "projects", s.ProjectId)
+            && s.Window.Workspace.CanUseCurrentRuntime && !s.Window.SmokeActionBusy, "SourceSecondaryProjectNotOpened");
+        s.OperationResult = SourceOperationResult.Completed;
         s.Records = s.Records with { SecondaryId = s.ProjectId };
-        await s.Window.WorkspaceActionAsync(async runtime =>
+        await ObservedWorkspaceActionAsync(s, SourceOperation.SecondaryInstall, async runtime =>
         {
-            Require((await runtime.Packages.InstallAsync(PackageZip)).Succeeded, "SourceSecondaryInstallFailed"); await runtime.Manager.DiscoverAsync();
+            var installed = await runtime.Packages.InstallAsync(PackageZip);
+            if (!installed.Succeeded) { s.OperationReason = InstallRefusalReason(installed); return false; }
+            SetOperation(s, SourceOperation.SecondaryDiscover, SourceOperationResult.Started);
+            await runtime.Manager.DiscoverAsync(); return true;
         });
-        await EnableAsync(s); await AssertEmptySecondaryAsync(s); await SelectProjectAsync(s, "default");
+        await EnableAsync(s);
+        SetOperation(s, SourceOperation.SecondaryIsolation, SourceOperationResult.Started);
+        await AssertEmptySecondaryAsync(s); s.OperationResult = SourceOperationResult.Completed;
+        SetOperation(s, SourceOperation.ReturnPrimary, SourceOperationResult.Started);
+        await SelectProjectAsync(s, "default"); s.OperationResult = SourceOperationResult.Completed;
         var page = await EnableAsync(s); AssertResetForm(page); AssertFresh(await StateAsync(s.Window.SmokeManager));
     }
     private static async Task AssertEmptySecondaryAsync(Session s)
@@ -185,7 +196,8 @@ internal static partial class TestingSourceAcceptanceProbe
     private static void SelectProject(MainWindow window, string id)
     {
         var selector = window.WorkspaceSelector; Require(selector.IsEnabled, "SourceProjectSelectorDisabled");
-        selector.SelectedItem = selector.Items.OfType<ComboBoxItem>().Single(item => (string)item.Tag == id);
+        var choices = selector.Items.OfType<ComboBoxItem>().Where(item => (string)item.Tag == id).ToArray();
+        Require(choices.Length == 1, "SourceProjectSelectionUnavailable"); selector.SelectedItem = choices[0];
     }
     private static Task SelectProjectAsync(Session s, string id)
     {

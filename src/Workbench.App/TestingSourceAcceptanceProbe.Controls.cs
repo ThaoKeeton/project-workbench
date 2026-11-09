@@ -32,24 +32,86 @@ internal static partial class TestingSourceAcceptanceProbe
     }
     private static Task ReadyAsync(FrameworkElement page) => PollAsync(() => Task.FromResult(Find<Button>(page, FigmaButton).IsEnabled
         && Find<TextBox>(page, "Figma 文件 key").IsEnabled && !Find<Button>(page, CancelButton).IsEnabled));
+    private static PluginSnapshot InstalledFixture(IReadOnlyList<PluginSnapshot> plugins)
+    {
+        var fixtures = plugins.Where(p => p.Manifest?.Id == Id).ToArray();
+        Require(fixtures.Length == 1 && plugins.Count == 1, "SourceUnexpectedInstalledPackage");
+        var installed = fixtures[0];
+        Require(installed.Manifest is { Version: "0.2.0", MinimumHostVersion: "0.4.0", ApiVersion: 1,
+            EntryAssembly: "Workbench.Testing.SourceAcceptance.dll", EntryType: "Workbench.Testing.SourceAcceptance.SourceAcceptancePlugin" }, "SourceInstalledIdentityInvalid");
+        return installed;
+    }
+    private static SourceOperationReason InstallRefusalReason(PluginOperationResult result) => result.Succeeded ? SourceOperationReason.None : result.Message switch
+    {
+        "Package maintenance ownership cannot be read safely." => SourceOperationReason.MaintenanceOwnershipUnreadable,
+        "The plugin ID is already installed or has pending maintenance." => SourceOperationReason.InstalledOrPending,
+        "The installation path exists or was loaded in this process." => SourceOperationReason.PathExistsOrLoaded,
+        "Package import failed." => SourceOperationReason.ImportFailed,
+        _ => SourceOperationReason.Unknown
+    };
+    private static PluginDiagnosticCode? EnableRefusalCode(IReadOnlyList<PluginSnapshot> plugins)
+    {
+        var fixtures = plugins.Where(p => p.Manifest?.Id == Id).ToArray();
+        return fixtures.Length == 1 ? fixtures[0].Diagnostics.LastOrDefault()?.Code : null;
+    }
+    private static async Task ObservedWorkspaceActionAsync(Session s, SourceOperation operation, Func<HostRuntime, Task<bool>> action)
+    {
+        var original = s.Window.SmokeRuntime; var manager = original.Manager; var scope = original.Scope;
+        var root = original.UserRoot; var projectId = s.ProjectId; var generation = s.Window.Workspace.RuntimeGeneration;
+        bool Current() => ReferenceEquals(s.Window.SmokeRuntime, original) && ReferenceEquals(s.Window.SmokeManager, manager)
+            && ReferenceEquals(s.Window.Workspace.Scope, scope) && s.Root == root && s.Window.Workspace.ActiveProject?.Id == projectId
+            && s.Window.Workspace.RuntimeGeneration == generation && s.Window.Workspace.CanUseCurrentRuntime;
+        var entered = false; var runtimeMatched = false; var succeeded = false;
+        SetOperation(s, operation, SourceOperationResult.CallbackNotEntered);
+        await s.Window.WorkspaceActionAsync(async runtime =>
+        {
+            entered = true;
+            runtimeMatched = ReferenceEquals(runtime, original) && ReferenceEquals(runtime.Manager, manager) && ReferenceEquals(runtime.Scope, scope) && Current();
+            if (!runtimeMatched) { s.OperationResult = SourceOperationResult.RuntimeChanged; return; }
+            s.OperationResult = SourceOperationResult.Started;
+            try
+            {
+                succeeded = await action(runtime);
+                s.OperationResult = succeeded ? SourceOperationResult.Completed : SourceOperationResult.Refused;
+            }
+            catch { s.OperationResult = SourceOperationResult.CallbackFaulted; throw; }
+        }); // Join the real host action; its normal failure notice does not rethrow callback failures.
+        var stillCurrent = Current();
+        if (!stillCurrent) s.OperationResult = SourceOperationResult.RuntimeChanged;
+        RequireJoinedAction(entered, runtimeMatched, succeeded, stillCurrent);
+    }
     private static async Task<FrameworkElement> EnableAsync(Session s)
     {
         var manager = s.Window.SmokeManager;
-        var installed = manager.Plugins.Single(p => p.Manifest?.Id == Id);
-        Require(installed.Manifest is { Version: "0.2.0", MinimumHostVersion: "0.4.0", ApiVersion: 1,
-            EntryAssembly: "Workbench.Testing.SourceAcceptance.dll", EntryType: "Workbench.Testing.SourceAcceptance.SourceAcceptancePlugin" }, "SourceInstalledIdentityInvalid");
-        Require(manager.Plugins.Count == 1, "SourceUnexpectedInstalledPackage");
+        SetOperation(s, SourceOperation.FixtureDiscovery, SourceOperationResult.InvalidDiscovery);
+        var installed = InstalledFixture(manager.Plugins);
+        Require(installed.State == PluginState.Enabled || installed.State == PluginState.Disabled && !installed.IsLoaded && !installed.IsTrusted && !installed.DesiredEnabled,
+            "SourceFreshDiscoveryInvalid");
+        s.OperationResult = SourceOperationResult.Completed;
         if (installed.State != PluginState.Enabled)
         {
-            Require(installed.State == PluginState.Disabled && !installed.IsLoaded && !installed.IsTrusted && !installed.DesiredEnabled, "SourceFreshDiscoveryInvalid");
+            SetOperation(s, SourceOperation.FixtureSetting, SourceOperationResult.Started);
             await manager.GetSettings(Id).SetAsync(Setting, s.Binding.RunId);
-            await s.Window.WorkspaceActionAsync(async runtime => Require((await runtime.Manager.EnableAsync(Id, confirmTrust: true)).Succeeded, "SourceEnableFailed"));
+            s.OperationResult = SourceOperationResult.Completed;
+            await ObservedWorkspaceActionAsync(s, SourceOperation.FixtureEnable, async runtime =>
+            {
+                var activation = await runtime.Manager.EnableAsync(Id, confirmTrust: true);
+                if (!activation.Succeeded) s.OperationDiagnosticCode = EnableRefusalCode(runtime.Manager.Plugins);
+                return activation.Succeeded;
+            });
         }
+        SetOperation(s, SourceOperation.FixtureSetting, SourceOperationResult.Started);
         var optIn = await manager.GetSettings(Id).GetAsync(Setting, JsonSerializer.SerializeToElement(""));
         Require(optIn.ValueKind == JsonValueKind.String && optIn.GetString() == s.Binding.RunId, "SourceOptInSettingChanged");
+        s.OperationResult = SourceOperationResult.Completed;
+        SetOperation(s, SourceOperation.FixtureDiscovery, SourceOperationResult.InvalidDiscovery);
+        var enabled = InstalledFixture(manager.Plugins);
+        Require(enabled is { State: PluginState.Enabled, IsLoaded: true, IsTrusted: true, DesiredEnabled: true }, "SourceNormalContributionUnavailable");
+        s.OperationResult = SourceOperationResult.Completed;
+        SetOperation(s, SourceOperation.FixtureContribution, SourceOperationResult.Started);
         var page = await PageAsync(s.Window);
-        Require(page.IsLoaded && page.XamlRoot is not null && manager.Plugins.Single(p => p.Manifest?.Id == Id) is { State: PluginState.Enabled, IsLoaded: true, IsTrusted: true, DesiredEnabled: true }, "SourceNormalContributionUnavailable");
-        await ReadyAsync(page); return page;
+        Require(page.IsLoaded && page.XamlRoot is not null, "SourceNormalContributionUnavailable");
+        await ReadyAsync(page); s.OperationResult = SourceOperationResult.Completed; return page;
     }
     private static void FillForm(FrameworkElement page)
     {
