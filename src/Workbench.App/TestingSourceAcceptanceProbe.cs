@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Runtime.CompilerServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -116,7 +117,7 @@ internal static partial class TestingSourceAcceptanceProbe
             // Closed never gets synthesized on a failed action; bounded sidecar preserves safe phase progress.
             try { await WriteNewAsync(options.ReportPath + ".evidence.json", JsonSerializer.SerializeToUtf8Bytes(new { schemaVersion = 1,
                 kind = "SourceAcceptanceFailure", phase = options.SourceAcceptanceProbe, processId = Environment.ProcessId,
-                processCreationFileTimeUtc = birth, checks = session.Checks, failure = FailureCode(error) }, Json)); }
+                processCreationFileTimeUtc = birth, checks = session.Checks, failure = FailureCode(error), diagnostic = FailureIdentity(error) }, Json)); }
             catch (Exception) { /* Preserve the original failure and prior evidence. */ }
             throw;
         }
@@ -129,6 +130,34 @@ internal static partial class TestingSourceAcceptanceProbe
         TimeoutException => "SourceObservationExpired", OperationCanceledException => "SourceObservationCanceled",
         IOException or UnauthorizedAccessException => "SourceStorageFailed", PluginTestingException => "SourceStoreFailed", _ => "SourceAssertionFailed"
     };
+    private enum SourceProbeFailureKind { Assertion, ControlLookup }
+    private sealed record SourceProbeFailureIdentity(string Kind, string? SourceFile = null, int? SourceLine = null);
+    // Only this sealed first-party exception carries a compiled caller location. Never expose exception/control text or absolute paths.
+    private sealed class SourceProbeFailure : InvalidOperationException
+    {
+        internal SourceProbeFailureIdentity Diagnostic { get; }
+        internal SourceProbeFailure(SourceProbeFailureKind kind, string file, int line) : base("Source native probe failed.")
+        {
+            var category = kind switch { SourceProbeFailureKind.Assertion => "Assertion", SourceProbeFailureKind.ControlLookup => "ControlLookup", _ => "Unknown" };
+            var name = Path.GetFileName(file) switch
+            {
+                "TestingSourceAcceptanceProbe.cs" => "TestingSourceAcceptanceProbe.cs",
+                "TestingSourceAcceptanceProbe.Controls.cs" => "TestingSourceAcceptanceProbe.Controls.cs",
+                "TestingSourceAcceptanceProbe.Records.cs" => "TestingSourceAcceptanceProbe.Records.cs",
+                "TestingSourceAcceptanceProbe.Lifecycle.cs" => "TestingSourceAcceptanceProbe.Lifecycle.cs",
+                _ => null
+            };
+            Diagnostic = category != "Unknown" && name is not null && line is > 0 and <= 100000
+                ? new(category, name, line) : new(category);
+        }
+    }
+    private static SourceProbeFailureIdentity FailureIdentity(Exception error)
+        => error is SourceProbeFailure own ? own.Diagnostic : new("Unknown");
+    private static void Require(bool condition, string message, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0)
+    {
+        // Preserve failure admission, but never let even a supplied assertion message become diagnostic data.
+        if (!condition) throw new SourceProbeFailure(SourceProbeFailureKind.Assertion, file, line);
+    }
     private static async Task<Binding> CurrentBindingAsync(string root)
     {
         var dll = Path.Combine(AppContext.BaseDirectory, "Workbench.App.dll");

@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml;
@@ -20,6 +21,11 @@ internal static partial class TestingSourceAcceptanceProbe
     private const string LastCriterion = "Synthetic confirmation is reviewed manually.";
     private static readonly (string Id, string Value)[] Secrets = [("figma-token", "source-acceptance-figma-token"), ("openai-api-key", "source-acceptance-openai-key")];
     private static async Task<FrameworkElement> PageAsync(MainWindow window) => await window.SmokeNavigateAsync("view", Id, "testing");
+    private static T Find<T>(DependencyObject root, string name, [CallerFilePath] string file = "", [CallerLineNumber] int line = 0) where T : DependencyObject
+    {
+        try { return NativeRuntimeProbe.Find<T>(root, name); }
+        catch (InvalidOperationException) { throw new SourceProbeFailure(SourceProbeFailureKind.ControlLookup, file, line); }
+    }
     private static void Click(FrameworkElement page, string name)
     {
         var button = Find<Button>(page, name); Require(button.IsEnabled, "SourceControlDisabled"); Invoke(button);
@@ -56,10 +62,17 @@ internal static partial class TestingSourceAcceptanceProbe
         Find<TextBox>(page, "Figma 节点 2 验收条件").Text = LastCriterion;
         AssertForm(page);
     }
+    // TextBox/RichEdit returns CR on Windows. Compare only CRLF/CR/LF line boundaries; never change accepted controls or source bytes.
+    private static string CriterionLineEndings(string text) => text.Replace("\r\n", "\n", StringComparison.Ordinal).Replace('\r', '\n');
     private static void AssertForm(FrameworkElement page)
-        => Require(Find<TextBox>(page, "Figma 文件 key").Text == "SourceAcceptanceFile1" && Find<TextBox>(page, "Figma 版本").Text == "source-v1"
-            && Find<TextBox>(page, "Figma 节点 1 ID").Text == "2:3" && Find<TextBox>(page, "Figma 节点 1 验收条件").Text.Replace("\r\n", "\n") == FirstCriteria
-            && Find<TextBox>(page, "Figma 节点 2 ID").Text == "1:2" && Find<TextBox>(page, "Figma 节点 2 验收条件").Text == LastCriterion, "SourceFormChanged");
+    {
+        Require(Find<TextBox>(page, "Figma 文件 key").Text == "SourceAcceptanceFile1", "SourceFormChanged");
+        Require(Find<TextBox>(page, "Figma 版本").Text == "source-v1", "SourceFormChanged");
+        Require(Find<TextBox>(page, "Figma 节点 1 ID").Text == "2:3", "SourceFormChanged");
+        Require(CriterionLineEndings(Find<TextBox>(page, "Figma 节点 1 验收条件").Text) == FirstCriteria, "SourceFormChanged");
+        Require(Find<TextBox>(page, "Figma 节点 2 ID").Text == "1:2", "SourceFormChanged");
+        Require(Find<TextBox>(page, "Figma 节点 2 验收条件").Text == LastCriterion, "SourceFormChanged");
+    }
     private static void AssertResetForm(FrameworkElement page)
         => Require(Find<TextBox>(page, "Figma 文件 key").Text == "" && Find<TextBox>(page, "Figma 版本").Text == ""
             && Find<TextBox>(page, "Figma 节点 1 ID").Text == "" && Find<TextBox>(page, "Figma 节点 1 验收条件").Text == ""
