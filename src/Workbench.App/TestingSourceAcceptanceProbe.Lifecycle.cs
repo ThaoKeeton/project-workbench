@@ -225,9 +225,9 @@ internal static partial class TestingSourceAcceptanceProbe
             await PollAsync(() => Task.FromResult(!s.Window.SmokeActionBusy), 15);
             Require(s.ProjectId == held.ProjectId && s.Window.Workspace.Transition.TargetProjectId == s.Records.SecondaryId && held.Manager.HasPendingProjectWork, "SourcePreparationDidNotRetainTarget");
             await ReleaseOpenAsync(held); released = true; await SettleOpenAsync(held);
-            var notice = Find<InfoBar>((DependencyObject)s.Window.Content, "操作结果与错误");
-            Require(notice.ActionButton is Button retry && retry.IsEnabled, "SourceSwitchRetryUnavailable");
-            Invoke((Button)notice.ActionButton);
+            var retry = Find<Button>(s.Window.WorkspaceRoot, "重试打开项目");
+            Require(retry.IsEnabled && retry.IsLoaded && retry.XamlRoot is not null, "SourceSwitchRetryUnavailable");
+            Invoke(retry);
             await PollAsync(() => Task.FromResult(!s.Window.SmokeActionBusy && s.Window.Workspace.CanUseCurrentRuntime && s.ProjectId == s.Records.SecondaryId), 40);
             await AssertEmptySecondaryAsync(s); await AssertPreservedAsync(held.Root, files);
             var originalStore = new ProjectTestStore(held.Root, held.ProjectId); var retired = await InventoryAsync(originalStore);
