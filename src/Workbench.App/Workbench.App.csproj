@@ -21,8 +21,8 @@
     <FileVersion>0.4.1.0</FileVersion>
   </PropertyGroup>
   <ItemGroup>
-    <Content Include="Assets/Workbench.svg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-    <Content Include="Assets/Workbench.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Update="Assets/Workbench.svg" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
+    <Content Update="Assets/Workbench.ico" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.8.260921001" />
     <ProjectReference Include="../Workbench.Core/Workbench.Core.csproj" />
     <ProjectReference Include="../Workbench.WinUI.Sdk/Workbench.WinUI.Sdk.csproj" />

@@ -104,6 +104,7 @@ jobs:
         shell: pwsh
         run: |
           ./tests/scripts/DeliveryHostVersion.Tests.ps1
+          ./tests/scripts/NativeShellAssets.Tests.ps1
           ./tests/scripts/BusinessPluginDelivery.Tests.ps1 -AppDirectory ./artifacts/native/app
       - name: Independent testing package integrity and actual package-store install
         id: testing_package
