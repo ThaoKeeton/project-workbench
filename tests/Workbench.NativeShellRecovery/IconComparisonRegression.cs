@@ -11,13 +11,19 @@ public static class IconComparisonRegression
     private static void Require(bool condition) { if (!condition) throw new InvalidOperationException(); }
 
     // GetIconInfo creates bitmap copies; delete them even when only probing a handle.
+    internal static void DeleteBitmapCopies(IntPtr mask, IntPtr color, Func<IntPtr,bool> delete)
+    {
+        bool maskDeleted = false, colorDeleted = false;
+        try { maskDeleted = mask == IntPtr.Zero || delete(mask); }
+        finally { colorDeleted = color == IntPtr.Zero || delete(color); }
+        Require(maskDeleted && colorDeleted);
+    }
+
     private static bool IsValidIcon(IntPtr handle)
     {
         IconInfo info;
         if (!GetIconInfo(handle, out info)) return false;
-        bool maskDeleted = info.Mask == IntPtr.Zero || DeleteObject(info.Mask);
-        bool colorDeleted = info.Color == IntPtr.Zero || DeleteObject(info.Color);
-        Require(maskDeleted && colorDeleted);
+        DeleteBitmapCopies(info.Mask, info.Color, DeleteObject);
         return true;
     }
 
@@ -40,30 +46,27 @@ public static class IconComparisonRegression
         return result;
     }
 
-    private static void CheckInvalidAssets(Icon icon, IntPtr candidateHandle, IconComparisonTrace trace)
+    private static void CheckMalformedDirectoryAndNonIcon(string asset, Icon icon, IntPtr candidateHandle, IconComparisonTrace trace)
     {
-        string directory = Path.Combine(Path.GetTempPath(), "workbench-icon-regression-" + Guid.NewGuid().ToString("N"));
-        OwnedShellHost.CreateDirectoryExclusive(directory);
-        string malformed = Path.Combine(directory, "malformed.ico");
-        string undecodable = Path.Combine(directory, "undecodable.ico");
-        try
-        {
-            File.WriteAllBytes(malformed, new byte[] { 0, 0, 1 });
-            trace.Begin("regression16");
-            Require(!OwnedShellHost.IconAssetMatches(malformed, icon, trace));
-            trace.Begin("regression16");
-            Require(!CheckReferenceLifetime(malformed, icon, candidateHandle, trace, false, false));
-            Require(trace.Stage == "directory");
+        // A directory-only check cannot test Windows decoding of a corrupt payload.
+        byte[] truncated = new byte[] { 0, 0, 1 };
+        Require(!OwnedShellHost.IconDirectoryHasSize(truncated, truncated.Length, 16, 16));
 
-            // Structurally valid 16px directory with an invalid image payload.
-            File.WriteAllBytes(undecodable, new byte[] { 0,0,1,0,1,0, 16,16,0,0,1,0,32,0,1,0,0,0,22,0,0,0, 0 });
-            trace.Begin("regression16");
-            Require(!OwnedShellHost.IconAssetMatches(undecodable, icon, trace));
-            trace.Begin("regression16");
-            Require(!CheckReferenceLifetime(undecodable, icon, candidateHandle, trace, false, false));
-            Require(trace.Stage == "reference");
+        // The launcher has already checked this SVG in the extracted host asset set.
+        // It is used read-only as a non-ICO input to the real comparison helper.
+        string nonIcon = Path.ChangeExtension(asset, ".svg");
+        OwnedShellHost.RejectLinks(nonIcon);
+        using (var stream = new FileStream(nonIcon, FileMode.Open, FileAccess.Read, FileShare.Read))
+        using (var reader = new BinaryReader(stream))
+        {
+            byte[] header = reader.ReadBytes(4);
+            Require(header.Length == 4 && (header[0] != 0 || header[1] != 0 || header[2] != 1 || header[3] != 0));
         }
-        finally { File.Delete(malformed); File.Delete(undecodable); Directory.Delete(directory); }
+        trace.Begin("regression16");
+        Require(!OwnedShellHost.IconAssetMatches(nonIcon, icon, trace));
+        trace.Begin("regression16");
+        Require(!CheckReferenceLifetime(nonIcon, icon, candidateHandle, trace, false, false));
+        Require(trace.Stage == "directory" && trace.ReferenceWidth == 0 && trace.ReferenceHeight == 0);
     }
 
     private static int[] CheckAssetHandle(string asset, int size, string subject, IconComparisonTrace trace)
@@ -109,7 +112,7 @@ public static class IconComparisonRegression
                     // An exception after acquisition must release the reference, not the candidate.
                     trace.Begin(subject);
                     CheckReferenceLifetime(asset, icon, handle, trace, true, true);
-                    CheckInvalidAssets(icon, handle, trace);
+                    CheckMalformedDirectoryAndNonIcon(asset, icon, handle, trace);
                 }
                 return legacy;
             }

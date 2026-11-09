@@ -1,15 +1,16 @@
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $helper = Join-Path $PSScriptRoot '../Workbench.NativeShellRecovery/OwnedShellHost.cs'
+$regression = Join-Path $PSScriptRoot '../Workbench.NativeShellRecovery/IconComparisonRegression.cs'
 if ($PSVersionTable.PSEdition -ceq 'Desktop') {
-    Add-Type -Path $helper -ReferencedAssemblies System.dll,System.Core.dll,System.Drawing.dll
+    Add-Type -Path @($helper,$regression) -ReferencedAssemblies System.dll,System.Core.dll,System.Drawing.dll
 } else {
     $refs = @(Get-ChildItem (Join-Path $PSHOME 'ref/*.dll') | ForEach-Object FullName)
     foreach ($name in @('System.Drawing.Common.dll','System.Private.Windows.Core.dll','System.Private.Windows.GdiPlus.dll')) {
         $path = Join-Path $PSHOME $name
         if (Test-Path -LiteralPath $path) { $refs += $path }
     }
-    Add-Type -Path $helper -ReferencedAssemblies $refs
+    Add-Type -Path @($helper,$regression) -ReferencedAssemblies $refs
 }
 # Hand-built ICO directory: two one-byte image payloads at offsets 38 and 39.
 [byte[]]$directory = @(0,0,1,0,2,0, 16,16,0,0,1,0,32,0,1,0,0,0,38,0,0,0, 32,32,0,0,1,0,32,0,1,0,0,0,39,0,0,0)
@@ -22,21 +23,27 @@ $passed=0
 Expect $directory 40 16 16 $true '16 exists'
 Expect $directory 40 32 32 $true '32 exists'
 Expect $directory 40 24 24 $false 'unrepresented size'
+Expect $directory 40 17 17 $false 'unrepresented 17px size'
 Expect $directory 40 16 32 $false 'unequal dimensions'
 Expect $directory 40 0 16 $false 'zero requested width'
 Expect $directory 40 257 16 $false 'requested width above ICO limit'
 Expect $directory 39 16 16 $false 'truncated other frame'
 Expect $directory[0..36] 40 16 16 $false 'truncated directory'
+Expect ([byte[]]@(0,0,1)) 3 16 16 $false 'truncated ICO header; directory only, no Windows payload decode'
 $bad=[byte[]]$directory.Clone(); $bad[2]=2
 Expect $bad 40 16 16 $false 'not an icon directory'
 $bad=[byte[]]$directory.Clone(); $bad[18]=1
 Expect $bad 40 16 16 $false 'payload overlaps directory'
 $bad=[byte[]]$directory.Clone(); $bad[14]=0
 Expect $bad 40 16 16 $false 'empty image payload'
+$bad=[byte[]]$directory.Clone(); $bad[14]=3
+Expect $bad 40 16 16 $false 'image payload exceeds file'
+[byte[]]$boundedSingleByte = @(0,0,1,0,1,0, 16,16,0,0,1,0,32,0,1,0,0,0,22,0,0,0)
+Expect $boundedSingleByte 23 16 16 $true 'directory bounds only; no Windows LoadImageW or corrupt-payload decoding'
 [byte[]]$max = @(0,0,1,0,1,0, 0,0,0,0,1,0,32,0,1,0,0,0,22,0,0,0)
 Expect $max 23 256 256 $true 'zero directory dimensions mean 256'
 Expect $max 23 255 255 $false '255 is not 256'
-Write-Host "Icon directory policy: $passed synthetic boundary cases passed; no native execution."
+Write-Host "Icon directory policy: $passed synthetic boundary cases passed; no Windows LoadImageW or corrupt-payload decoding."
 
 # Execute the real driver's receipt builder with bounded synthetic trace data.
 # This verifies emission and the process-local switch observation, not GDI.
@@ -110,3 +117,28 @@ if ($PSVersionTable.PSEdition -cne 'Desktop') {
 $script:iconTrace.Begin('regression32')
 if ($null -ne $script:iconTrace.Difference) { throw 'New comparison retained stale pixel aggregate.' }
 Write-Host 'Real trace and driver builder: aggregate/reset and portable strict receipt validation passed; no native execution.'
+
+# Exercise the real managed cleanup routine with controlled release outcomes.
+# These delegates model managed control flow only, not Windows DeleteObject.
+$cleanup=[IconComparisonRegression].GetMethod('DeleteBitmapCopies', [Reflection.BindingFlags]'NonPublic,Static')
+if ($null -eq $cleanup) { throw 'Bitmap-copy cleanup routine is missing.' }
+$script:released = [Collections.Generic.List[int]]::new()
+$script:releaseMode = ''
+$release = [Func[IntPtr,bool]] {
+    param([IntPtr]$handle)
+    $value=$handle.ToInt32(); $script:released.Add($value)
+    if ($script:releaseMode -ceq 'first throws' -and $value -eq 1) { throw [InvalidOperationException]::new('synthetic release failure') }
+    if ($script:releaseMode -ceq 'second throws' -and $value -eq 2) { throw [InvalidOperationException]::new('synthetic release failure') }
+    if ($script:releaseMode -ceq 'first returns false' -and $value -eq 1) { return $false }
+    if ($script:releaseMode -ceq 'second returns false' -and $value -eq 2) { return $false }
+    return $true
+}
+foreach ($mode in @('success','first returns false','second returns false','first throws','second throws')) {
+    $script:releaseMode=$mode; $script:released.Clear(); $thrown=$false
+    try { $null=$cleanup.Invoke($null,[object[]]@([IntPtr]1,[IntPtr]2,$release)) } catch { $thrown=$true }
+    if (($script:released -join ',') -cne '1,2' -or $thrown -ne ($mode -cne 'success')) { throw "Bitmap-copy cleanup failed: $mode" }
+}
+$script:releaseMode='success'; $script:released.Clear()
+$null=$cleanup.Invoke($null,[object[]]@([IntPtr]::Zero,[IntPtr]2,$release))
+if (($script:released -join ',') -cne '2') { throw 'Bitmap-copy cleanup mishandled a null handle.' }
+Write-Host 'Bitmap-copy cleanup: six managed control-flow cases passed; Windows DeleteObject not executed.'
