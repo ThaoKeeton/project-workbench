@@ -55,7 +55,6 @@ internal sealed partial class MainWindow : Window
         _body = new ContentControl { HorizontalContentAlignment = HorizontalAlignment.Stretch, VerticalContentAlignment = VerticalAlignment.Stretch };
         options.TraceStartup("creating-info-bar");
         _notice = Ui.Named(new InfoBar { IsOpen = false }, "操作结果与错误");
-        Title = options.IsIsolated ? "Project Workbench · isolated native probe" : "Project Workbench · 原生插件工作台";
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition());
@@ -68,6 +67,7 @@ internal sealed partial class MainWindow : Window
         _navigation.IsSettingsVisible = false;
         _navigation.Content = _content;
         Content = _root;
+        InitializeShellTitleBar();
         AppWindow.Resize(new Windows.Graphics.SizeInt32(1180, 800));
         _navigation.SelectionChanged += (_, args) =>
         {

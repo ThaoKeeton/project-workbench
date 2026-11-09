@@ -5,6 +5,7 @@ using Microsoft.UI.Xaml.Automation.Peers;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Markup;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Media.Imaging;
 using Workbench.Core;
 using Workbench.WinUI.Sdk;
 
@@ -38,6 +39,8 @@ internal static class NativeSmoke
             && metadata.GetXamlType("Microsoft.UI.Xaml.Controls.NavigationView") is not null,
             "Application could not resolve WinUI control metadata by type and full name.");
         Record("Application resolved WinUI control XAML metadata by type and full name");
+        await VerifyShellAsync(window);
+        Record("Native titlebar, bundled icon, content rows and system caption integration attached to the host window");
         var manager = window.SmokeManager;
         Require(manager.Plugins.Count == 2, "Smoke must discover exactly the two curated bundled packages.");
         Require(manager.Plugins.All(p => p.Manifest is not null && RunOptions.SampleIds.Contains(p.Manifest.Id)
@@ -58,6 +61,8 @@ internal static class NativeSmoke
         Record("Occupied-store startup shows a manager-independent page, blocks Settings/Home navigation and closes safely");
         await window.SmokeVerifyLiveCardThemesAsync();
         Record("Same native host card re-resolved actual theme and fill/stroke across live Light/Dark/Light changes");
+        await VerifyShellThemesAsync(window);
+        Record("Native titlebar and caption colors followed live Light/Dark/Light host themes with Mica or an opaque themed fallback");
         foreach (var page in new[] { "background", "credentials", "packages" }) await window.SmokeNavigateAsync(page);
         Record("Initialized Background, Credentials and Package maintenance navigation attached native host pages");
 
@@ -319,6 +324,7 @@ internal static class NativeSmoke
         try
         {
             failed.Activate();
+            await VerifyShellAsync(failed);
             await failed.InitializeAsync();
             Require(failed.SmokeStartupFailure is UserStoreInUseException, "Second host did not report the actual occupied-store failure.");
             Require(!failed.SmokeNavigationAvailable, "Navigation/settings remained available after startup failed.");
@@ -329,6 +335,92 @@ internal static class NativeSmoke
             await failed.FinishSmokeAsync();
             await closed.Task.WaitAsync(TimeSpan.FromSeconds(15));
         }
+    }
+
+    // These assertions inspect the real loaded WinUI tree, including a window with no runtime.
+    // Removing the constructor's shell hook must fail before plugin discovery is consulted.
+    private static async Task VerifyShellAsync(MainWindow window)
+    {
+        var root = window.Content as Grid ?? throw new InvalidOperationException("The host shell root is unavailable.");
+        await SettleShellAsync(window, root);
+        var titleBar = FindNamed<TitleBar>(root, "工作台标题栏");
+        Require(window.ExtendsContentIntoTitleBar && window.AppWindow.TitleBar.ExtendsContentIntoTitleBar,
+            "The host still uses the stock non-client titlebar.");
+        Require(window.Title == "Project Workbench" && titleBar.Title == "Project Workbench",
+            "The native window and visible titlebar must identify Project Workbench.");
+        Require(titleBar.IsLoaded && titleBar.XamlRoot == root.XamlRoot && titleBar.ActualHeight >= 32,
+            "The native titlebar did not attach to the window's XamlRoot.");
+        Require(!titleBar.IsBackButtonVisible && !titleBar.IsPaneToggleButtonVisible,
+            "The titlebar duplicated navigation controls.");
+        Require(titleBar.IconSource is ImageIconSource { ImageSource: SvgImageSource image }
+            && image.UriSource.AbsoluteUri == "ms-appx:///Assets/Workbench.svg"
+            && File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "Workbench.svg"))
+            && File.Exists(Path.Combine(AppContext.BaseDirectory, "Assets", "Workbench.ico")),
+            "The unified titlebar or deployment is missing the bundled Workbench icon.");
+        Require(Grid.GetRow(titleBar) == 0 && root.RowDefinitions[0].Height.IsAuto,
+            "The titlebar did not reserve a separate content row.");
+        var titleBottom = titleBar.TransformToVisual(root).TransformPoint(new(0, titleBar.ActualHeight)).Y;
+        foreach (var sibling in root.Children.OfType<FrameworkElement>().Where(child => child != titleBar))
+            Require(Grid.GetRow(sibling) > 0 && (!sibling.IsLoaded || sibling.ActualHeight == 0
+                || sibling.TransformToVisual(root).TransformPoint(new(0, 0)).Y >= titleBottom - 1),
+                "A notice, project header or body overlaps the native titlebar.");
+        Require(!FindNamed<NavigationView>(root, "工作台导航").IsTitleBarAutoPaddingEnabled,
+            "Navigation inserted a second titlebar spacer below the unified frame.");
+        Require(window.SystemBackdrop is MicaBackdrop || root.Background is SolidColorBrush { Color.A: 255 },
+            "The shell has neither Mica nor an opaque themed fallback.");
+    }
+
+    private static async Task VerifyShellThemesAsync(MainWindow window)
+    {
+        var root = (Grid)window.Content;
+        var titleBar = FindNamed<TitleBar>(root, "工作台标题栏");
+        var previous = root.RequestedTheme;
+        async Task<(Windows.UI.Color Text, Windows.UI.Color Caption, Windows.UI.Color? Fallback)> ReadAsync(ElementTheme theme)
+        {
+            window.SmokeSetTheme(theme);
+            await SettleShellAsync(window, root);
+            Require(root.ActualTheme == theme && titleBar.ActualTheme == theme,
+                "The titlebar did not inherit the host's actual theme.");
+            Require(titleBar.Foreground is SolidColorBrush, "The native titlebar text brush did not resolve.");
+            var caption = window.AppWindow.TitleBar;
+            Require(caption.ButtonBackgroundColor is { A: 0 } && caption.ButtonInactiveBackgroundColor is { A: 0 },
+                "System caption buttons do not blend into the unified frame.");
+            Require(caption.ButtonForegroundColor is not null && caption.ButtonInactiveForegroundColor is not null,
+                "System caption colors did not follow the host theme.");
+            var fallback = root.Background is SolidColorBrush { Color.A: 255 } brush ? (Windows.UI.Color?)brush.Color : null;
+            Require(window.SystemBackdrop is MicaBackdrop || fallback is not null,
+                "Theme change left the non-Mica shell without an opaque background.");
+            return (((SolidColorBrush)titleBar.Foreground).Color, caption.ButtonForegroundColor!.Value, fallback);
+        }
+        try
+        {
+            var light = await ReadAsync(ElementTheme.Light);
+            var dark = await ReadAsync(ElementTheme.Dark);
+            var lightAgain = await ReadAsync(ElementTheme.Light);
+            Require(!light.Text.Equals(dark.Text) && !light.Caption.Equals(dark.Caption) && light.Equals(lightAgain),
+                "The same native titlebar/caption did not re-resolve across Light/Dark/Light.");
+            if (window.SystemBackdrop is null)
+                Require(light.Fallback is not null && dark.Fallback is not null && !light.Fallback.Equals(dark.Fallback),
+                    "The non-Mica background did not follow the host theme.");
+        }
+        finally { window.SmokeSetTheme(previous); }
+    }
+
+    private static async Task SettleShellAsync(MainWindow window, FrameworkElement root)
+    {
+        var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        void OnLoaded(object sender, RoutedEventArgs args) => ready.TrySetResult();
+        root.Loaded += OnLoaded;
+        try
+        {
+            if (!root.IsLoaded) await ready.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            Require(window.DispatcherQueue.TryEnqueue(Microsoft.UI.Dispatching.DispatcherQueuePriority.Low,
+                () => settled.TrySetResult()), "The native shell dispatcher is unavailable.");
+            await settled.Task.WaitAsync(TimeSpan.FromSeconds(15));
+            root.UpdateLayout();
+        }
+        finally { root.Loaded -= OnLoaded; }
     }
 
     private static async Task AttachAllViewsAsync(MainWindow window)

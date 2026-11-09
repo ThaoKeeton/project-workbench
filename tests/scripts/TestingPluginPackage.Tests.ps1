@@ -200,6 +200,7 @@ if ($HelperGuardsOnly) {
         'tests/Workbench.Core.Tests/SourceAcceptanceTests.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Ownership.cs','tests/Workbench.Core.Tests/SourceAcceptanceTests.Transport.cs','tests/Workbench.Core.Tests/SourceAcceptanceReleaseTests.cs',
         'scripts/source-acceptance-probe.ps1','scripts/SourceAcceptanceProbe.psm1','tests/scripts/SourceAcceptanceProbe.Tests.ps1','tests/Workbench.Core.Tests/RunOptionsTests.cs',
         'src/Workbench.App/TestingSourceAcceptanceProbe.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Controls.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Records.cs','src/Workbench.App/TestingSourceAcceptanceProbe.Lifecycle.cs',
+        'src/Workbench.App/ShellTitleBar.cs','src/Workbench.App/Assets/Workbench.svg','src/Workbench.App/Assets/Workbench.ico',
         'docs/testing-plugin.md','docs/windows-verification.md','.github/workflows/build.yml','scripts/TestingPluginDelivery.psm1','tests/scripts/TestingPluginPackage.Tests.ps1',
         'tests/Workbench.Core.Tests/TestingNativeOwnedPilotTests.cs','tests/Workbench.Core.Tests/TestingNativeOwnedEvidenceTests.cs','tests/Workbench.Core.Tests/TestingNativeLifecycleTests.cs',
         'tests/Workbench.Core.Tests/OwnedAdmissionTests.cs','tests/Workbench.Core.Tests/OwnedJournalTests.cs','tests/Workbench.Core.Tests/OwnedFixedPlansTests.cs')) {
