@@ -34,13 +34,51 @@ function Record-Sentinel([string]$Name) {
     Assert-Condition ($hash -ceq $script:sentinelHash)
     $null = $script:sentinelChecks.Add(@{ phase=$Name; sha256=$hash })
 }
+function Assert-HostElement($Owned,$Element) {
+    $Owned.host.Validate($Owned.hwnd)
+    [OwnedShellHost]::AssertElementProcessId($Owned.host.Id,$Element.Current.ProcessId)
+    $Owned.host.Validate($Owned.hwnd)
+}
+function Assert-HostAfter($Owned,$Element) {
+    if ($Owned.host.Exited -or -not [OwnedShellHost]::WindowExists($Owned.hwnd)) {
+        try { [OwnedShellHost]::AssertElementProcessId($Owned.host.Id,$Element.Current.ProcessId) }
+        catch { if ($_.Exception.GetBaseException() -isnot [System.Windows.Automation.ElementNotAvailableException]) { throw } }
+        return
+    }
+    try { Assert-HostElement $Owned $Element }
+    catch {
+        if ($_.Exception.GetBaseException() -isnot [System.Windows.Automation.ElementNotAvailableException]) { throw }
+        $Owned.host.Validate($Owned.hwnd)
+    }
+}
+function Assert-PickerRoot($Owned,$Picker) {
+    [OwnedShellHost]::AssertElementProcessId($Picker.processId,$Owned.host.PopupProcessId($Owned.hwnd,$Picker.hwnd))
+}
+function Assert-PickerElement($Owned,$Picker,$Element) {
+    Assert-PickerRoot $Owned $Picker
+    [OwnedShellHost]::AssertElementProcessId($Picker.processId,$Element.Current.ProcessId)
+    Assert-PickerRoot $Owned $Picker
+}
+function Assert-PickerAfter($Owned,$Picker,$Element) {
+    if (-not [OwnedShellHost]::WindowExists($Picker.hwnd)) {
+        try { [OwnedShellHost]::AssertElementProcessId($Picker.processId,$Element.Current.ProcessId) }
+        catch { if ($_.Exception.GetBaseException() -isnot [System.Windows.Automation.ElementNotAvailableException]) { throw } }
+        return
+    }
+    try { Assert-PickerElement $Owned $Picker $Element }
+    catch {
+        if ($_.Exception.GetBaseException() -isnot [System.Windows.Automation.ElementNotAvailableException]) { throw }
+        Assert-PickerRoot $Owned $Picker
+    }
+}
 function New-Host([string]$Role) {
     $hostRun = [OwnedShellHost]::Start($HostExe); $null = $script:hosts.Add($hostRun)
     $hwnd = Wait-For { $h = $hostRun.Window(); if ($h -ne [IntPtr]::Zero) { $h } } 60
     $hostRun.Validate($hwnd)
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
-    Assert-Condition ($window.Current.ProcessId -eq $hostRun.Id)
-    return @{ host = $hostRun; hwnd = $hwnd; window = $window; role = $Role; closed = $false }
+    $owned = @{ host = $hostRun; hwnd = $hwnd; window = $window; role = $Role; closed = $false }
+    Assert-HostElement $owned $window
+    return $owned
 }
 function Find-Named($Element, [string]$Name) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty, $Name)
@@ -49,62 +87,84 @@ function Find-Named($Element, [string]$Name) {
     return $items.Item(0)
 }
 function Get-HostControl($Owned, [string]$Name) {
-    return Wait-For { $Owned.host.Validate($Owned.hwnd); $item = Find-Named $Owned.window $Name; $Owned.host.Validate($Owned.hwnd); $item }
+    return Wait-For { Assert-HostElement $Owned $Owned.window; $item = Find-Named $Owned.window $Name; Assert-HostElement $Owned $item; $item }
 }
 function Invoke-Host($Owned, [string]$Name) {
-    $item = Wait-For { $candidate = Get-HostControl $Owned $Name; if ($candidate.Current.IsEnabled) { $candidate } }
-    $pattern = $null; Assert-Condition $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)
-    $Owned.host.Validate($Owned.hwnd); $pattern.Invoke(); $Owned.host.Validate($Owned.hwnd)
+    $item = Wait-For { $candidate = Get-HostControl $Owned $Name; Assert-HostElement $Owned $candidate; $enabled = $candidate.Current.IsEnabled; Assert-HostElement $Owned $candidate; if ($enabled) { $candidate } }
+    $pattern = $null; Assert-HostElement $Owned $item
+    $available = $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)
+    Assert-HostElement $Owned $item; Assert-Condition $available
+    Assert-HostElement $Owned $item; try { $pattern.Invoke() } finally { Assert-HostAfter $Owned $item }
 }
 function Read-HostText($Owned,[string]$Name) {
     $item = Get-HostControl $Owned $Name; $pattern = $null
-    if ($item.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern)) { return $pattern.DocumentRange.GetText(512).TrimEnd([char[]]"`r`n") }
-    if ($item.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)) { return $pattern.Current.Value }
+    Assert-HostElement $Owned $item; $available = $item.TryGetCurrentPattern([System.Windows.Automation.TextPattern]::Pattern,[ref]$pattern); Assert-HostElement $Owned $item
+    if ($available) { Assert-HostElement $Owned $item; try { $text = $pattern.DocumentRange.GetText(512).TrimEnd([char[]]"`r`n") } finally { Assert-HostAfter $Owned $item }; return $text }
+    Assert-HostElement $Owned $item; $available = $item.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern); Assert-HostElement $Owned $item
+    if ($available) { Assert-HostElement $Owned $item; try { $text = $pattern.Current.Value } finally { Assert-HostAfter $Owned $item }; return $text }
     throw 'TextPatternUnavailable'
 }
 function Show-Picker($Owned) {
     Invoke-Host $Owned '导出脱敏错误报告'
     $popup = Wait-For { $h = $Owned.host.Popup($Owned.hwnd); if ($h -ne [IntPtr]::Zero) { $h } } 30
-    $Owned.host.ValidatePopup($Owned.hwnd,$popup)
-    $picker = [System.Windows.Automation.AutomationElement]::FromHandle($popup)
-    $null = Wait-For { Find-Named $picker '将错误报告保存到此文件夹' } 30
-    return @{ hwnd = $popup; window = $picker }
+    $popupId = $Owned.host.PopupProcessId($Owned.hwnd,$popup)
+    $window = [System.Windows.Automation.AutomationElement]::FromHandle($popup)
+    $picker = @{ hwnd = $popup; window = $window; processId = $popupId }
+    Assert-PickerElement $Owned $picker $window
+    $null = Wait-For { Assert-PickerElement $Owned $picker $picker.window; $item = Find-Named $picker.window '将错误报告保存到此文件夹'; Assert-PickerElement $Owned $picker $item; $item } 30
+    return $picker
 }
 function Picker-Invoke($Owned,$Picker,[string]$Name,[switch]$Closing) {
-    $Owned.host.ValidatePopup($Owned.hwnd,$Picker.hwnd)
-    $item = Find-Named $Picker.window $Name; Assert-Condition $item.Current.IsEnabled
-    $pattern = $null; Assert-Condition $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)
-    $pattern.Invoke()
+    Assert-PickerElement $Owned $Picker $Picker.window
+    $item = Find-Named $Picker.window $Name; Assert-PickerElement $Owned $Picker $item
+    $enabled = $item.Current.IsEnabled; Assert-PickerElement $Owned $Picker $item; Assert-Condition $enabled
+    $pattern = $null; Assert-PickerElement $Owned $Picker $item
+    $available = $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)
+    Assert-PickerElement $Owned $Picker $item; Assert-Condition $available
+    Assert-PickerElement $Owned $Picker $item; try { $pattern.Invoke() } finally { Assert-PickerAfter $Owned $Picker $item }
     if ($Closing) { $null = Wait-For { if ($Owned.host.Exited -or $Owned.host.Popup($Owned.hwnd) -eq [IntPtr]::Zero) { $true } } 30 }
     else { $Owned.host.Validate($Owned.hwnd); $null = Wait-For { if ($Owned.host.Popup($Owned.hwnd) -eq [IntPtr]::Zero) { $true } } 30 }
     Assert-Condition (-not [OwnedShellHost]::WindowExists($Picker.hwnd))
 }
 function Cancel-Picker($Owned,$Picker) {
     $cancel = $null
-    foreach ($name in @('Cancel','取消')) { try { $cancel = Find-Named $Picker.window $name; break } catch { } }
+    foreach ($name in @('Cancel','取消')) { try { Assert-PickerElement $Owned $Picker $Picker.window; $cancel = Find-Named $Picker.window $name; break } catch { if ($_.Exception.Message -cne 'NamedControlUnavailable') { throw } } }
     if ($null -eq $cancel) { throw 'PickerCancelUnavailable' }
-    Picker-Invoke $Owned $Picker $cancel.Current.Name
+    Assert-PickerElement $Owned $Picker $cancel; $name = $cancel.Current.Name; Assert-PickerElement $Owned $Picker $cancel
+    Picker-Invoke $Owned $Picker $name
 }
 function Select-PickerFolder($Owned,$Picker,[string]$Directory,[switch]$Closing) {
-    $Owned.host.ValidatePopup($Owned.hwnd,$Picker.hwnd)
+    Assert-PickerElement $Owned $Picker $Picker.window
     $all = $Picker.window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition)
+    Assert-PickerElement $Owned $Picker $Picker.window
     $addresses = New-Object System.Collections.ArrayList
     foreach ($item in $all) {
-        $pattern = $null
-        if ($item.Current.Name -match '^(Address|地址)(:|：)' -and $item.Current.NativeWindowHandle -ne 0 -and
-            $item.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern) -and -not $pattern.Current.IsReadOnly) {
-            $null = $addresses.Add(@{ item = $item; value = $pattern })
+        Assert-PickerElement $Owned $Picker $item
+        $name = $item.Current.Name; $handle = $item.Current.NativeWindowHandle
+        Assert-PickerElement $Owned $Picker $item
+        if ($name -match '^(Address|地址)(:|：)' -and $handle -ne 0) {
+            $pattern = $null; Assert-PickerElement $Owned $Picker $item
+            $available = $item.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern,[ref]$pattern)
+            Assert-PickerElement $Owned $Picker $item
+            if ($available) {
+                Assert-PickerElement $Owned $Picker $item; $readOnly = $pattern.Current.IsReadOnly; Assert-PickerElement $Owned $Picker $item
+                if (-not $readOnly) { $null = $addresses.Add(@{ item = $item; value = $pattern }) }
+            }
         }
     }
     Assert-Condition ($addresses.Count -eq 1)
-    $address = $addresses[0]; $address.value.SetValue($Directory)
-    $Owned.host.SubmitPickerAddress($Owned.hwnd,$Picker.hwnd,[IntPtr]$address.item.Current.NativeWindowHandle)
+    $address = $addresses[0]
+    Assert-PickerElement $Owned $Picker $address.item; try { $address.value.SetValue($Directory) } finally { Assert-PickerAfter $Owned $Picker $address.item }
+    Assert-PickerElement $Owned $Picker $address.item; $editHandle = [IntPtr]$address.item.Current.NativeWindowHandle; Assert-PickerElement $Owned $Picker $address.item
+    $Owned.host.SubmitPickerAddress($Owned.hwnd,$Picker.hwnd,$editHandle)
+    Assert-PickerAfter $Owned $Picker $address.item
     $expectedFolder = [IO.Path]::GetFullPath($Directory).TrimEnd('\')
     $null = Wait-For {
-        $Owned.host.ValidatePopup($Owned.hwnd,$Picker.hwnd)
-        $actualFolder = [IO.Path]::GetFullPath($address.value.Current.Value).TrimEnd('\')
-        $button = Find-Named $Picker.window '将错误报告保存到此文件夹'
-        if ([string]::Equals($actualFolder,$expectedFolder,[StringComparison]::OrdinalIgnoreCase) -and $button.Current.IsEnabled) { $true }
+        Assert-PickerElement $Owned $Picker $address.item; $value = $address.value.Current.Value; Assert-PickerElement $Owned $Picker $address.item
+        $actualFolder = [IO.Path]::GetFullPath($value).TrimEnd('\')
+        Assert-PickerElement $Owned $Picker $Picker.window; $button = Find-Named $Picker.window '将错误报告保存到此文件夹'
+        Assert-PickerElement $Owned $Picker $button; $enabled = $button.Current.IsEnabled; Assert-PickerElement $Owned $Picker $button
+        if ([string]::Equals($actualFolder,$expectedFolder,[StringComparison]::OrdinalIgnoreCase) -and $enabled) { $true }
     } 30
     Picker-Invoke $Owned $Picker '将错误报告保存到此文件夹' -Closing:$Closing
 }
@@ -121,9 +181,10 @@ function Capture-Frame($Owned,[string]$Name) {
     $null = $script:images.Add(@{ name = $Name; sha256 = $hash; bytes = $item.Length; width = ($bounds[2]-$bounds[0]); height = ($bounds[3]-$bounds[1]); left=$bounds[0]; top=$bounds[1]; right=$bounds[2]; bottom=$bounds[3]; processId=$Owned.host.Id; creationFileTime=$Owned.host.Birth; windowHandle=$Owned.hwnd.ToInt64(); source='PrintWindow2' })
 }
 function Close-Host($Owned) {
-    $Owned.host.Validate($Owned.hwnd); $pattern = $null
-    Assert-Condition $Owned.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$pattern)
-    $pattern.Close(); $Owned.closed = $true
+    $pattern = $null; Assert-HostElement $Owned $Owned.window
+    $available = $Owned.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$pattern)
+    Assert-HostElement $Owned $Owned.window; Assert-Condition $available
+    Assert-HostElement $Owned $Owned.window; try { $pattern.Close() } finally { Assert-HostAfter $Owned $Owned.window }; $Owned.closed = $true
     $null = Wait-For { if ($Owned.host.Exited) { $true } } 45
     Assert-Condition ($Owned.host.ExitCode -eq 0 -and -not [OwnedShellHost]::WindowExists($Owned.hwnd))
     $null = Wait-For { if ($Owned.host.LiveCount() -eq 0) { $true } } 10
@@ -143,18 +204,23 @@ function Assert-RootHeld([string]$Root) {
 }
 function Select-HostItem($Owned,[string]$Name) {
     $item = Get-HostControl $Owned $Name; $pattern = $null
-    if ($item.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern)) { $pattern.Select() }
-    elseif ($item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern)) { $pattern.Invoke() }
-    else { throw 'SelectionPatternUnavailable' }
-    $Owned.host.Validate($Owned.hwnd)
+    Assert-HostElement $Owned $item; $select = $item.TryGetCurrentPattern([System.Windows.Automation.SelectionItemPattern]::Pattern,[ref]$pattern); Assert-HostElement $Owned $item
+    if ($select) { Assert-HostElement $Owned $item; try { $pattern.Select() } finally { Assert-HostAfter $Owned $item } }
+    else {
+        Assert-HostElement $Owned $item; $invoke = $item.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$pattern); Assert-HostElement $Owned $item
+        if (-not $invoke) { throw 'SelectionPatternUnavailable' }
+        Assert-HostElement $Owned $item; try { $pattern.Invoke() } finally { Assert-HostAfter $Owned $item }
+    }
 }
 function Set-Theme($Owned,[string]$Theme) {
     Select-HostItem $Owned '工作台设置'
     $combo = Get-HostControl $Owned '应用主题'; $expand = $null
-    Assert-Condition $combo.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$expand)
-    $expand.Expand(); Select-HostItem $Owned $Theme
+    Assert-HostElement $Owned $combo; $available = $combo.TryGetCurrentPattern([System.Windows.Automation.ExpandCollapsePattern]::Pattern,[ref]$expand); Assert-HostElement $Owned $combo; Assert-Condition $available
+    Assert-HostElement $Owned $combo; try { $expand.Expand() } finally { Assert-HostAfter $Owned $combo }
+    Select-HostItem $Owned $Theme
     Start-Sleep -Milliseconds 900
 }
+
 try {
     if ([Environment]::OSVersion.Platform -ne [PlatformID]::Win32NT -or $PSVersionTable.PSEdition -cne 'Desktop' -or
         [Threading.Thread]::CurrentThread.ApartmentState -ne 'STA' -or $env:CI -cne 'true' -or $env:GITHUB_ACTIONS -cne 'true' -or
@@ -187,27 +253,34 @@ try {
     Set-Phase 'healthy'
     $first = New-Host 'healthy'; $script:current = $first
     $null = Get-HostControl $first '工作台标题栏'
-    $null = Wait-For { $first.host.Validate($first.hwnd); if ($first.window.Current.Name -ceq 'Default · Project Workbench') { $true } } 60
+    $null = Wait-For { Assert-HostElement $first $first.window; $name = $first.window.Current.Name; Assert-HostElement $first $first.window; if ($name -ceq 'Default · Project Workbench') { $true } } 60
     $catalogPath = Join-Path $userRoot '.workspaces/catalog.json'; [OwnedShellHost]::RejectLinks($catalogPath)
     $catalogBytes = [IO.File]::ReadAllBytes($catalogPath); $catalog = [Text.Encoding]::UTF8.GetString($catalogBytes) | ConvertFrom-Json
     Assert-Condition (@($catalog.projects).Count -eq 1 -and $catalog.activeProjectId -ceq 'default' -and $catalog.projects[0].id -ceq 'default')
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'切换项目')
+    Assert-HostElement $first $first.window
     $selector = $first.window.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
-    Assert-Condition ($selector.Count -eq 0 -or ($selector.Count -eq 1 -and $selector.Item(0).Current.IsOffscreen))
+    Assert-HostElement $first $first.window
+    if ($selector.Count -eq 1) { $candidate = $selector.Item(0); Assert-HostElement $first $candidate; $offscreen = $candidate.Current.IsOffscreen; Assert-HostElement $first $candidate }
+    Assert-Condition ($selector.Count -eq 0 -or ($selector.Count -eq 1 -and $offscreen))
     $icon = Join-Path ([IO.Path]::GetDirectoryName($HostExe)) 'Assets/Workbench.ico'; [OwnedShellHost]::RejectLinks($icon)
     Assert-Condition ($first.host.IconMatches($first.hwnd,$HostExe,$icon))
-    $win = $null; Assert-Condition $first.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$win)
-    $first.host.Validate($first.hwnd); $win.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized); $first.host.Validate($first.hwnd)
-    $null = Wait-For { $first.host.Validate($first.hwnd); if ($win.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Maximized) { $true } }
-    $first.host.Validate($first.hwnd); $win.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal); $first.host.Validate($first.hwnd)
-    $null = Wait-For { $first.host.Validate($first.hwnd); if ($win.Current.WindowVisualState -eq [System.Windows.Automation.WindowVisualState]::Normal) { $true } }
-    $first.host.Validate($first.hwnd)
-    $transform = $null; Assert-Condition ($first.window.TryGetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern,[ref]$transform) -and $transform.Current.CanResize)
-    $first.host.Validate($first.hwnd); $transform.Resize(640,600); $first.host.Validate($first.hwnd)
-    $null = Wait-For { $first.host.Validate($first.hwnd); if ($first.window.Current.BoundingRectangle.Width -le 660) { $true } }
+    $win = $null; Assert-HostElement $first $first.window
+    $available = $first.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$win)
+    Assert-HostElement $first $first.window; Assert-Condition $available
+    Assert-HostElement $first $first.window; try { $win.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized) } finally { Assert-HostAfter $first $first.window }
+    $null = Wait-For { Assert-HostElement $first $first.window; $state = $win.Current.WindowVisualState; Assert-HostElement $first $first.window; if ($state -eq [System.Windows.Automation.WindowVisualState]::Maximized) { $true } }
+    Assert-HostElement $first $first.window; try { $win.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal) } finally { Assert-HostAfter $first $first.window }
+    $null = Wait-For { Assert-HostElement $first $first.window; $state = $win.Current.WindowVisualState; Assert-HostElement $first $first.window; if ($state -eq [System.Windows.Automation.WindowVisualState]::Normal) { $true } }
+    $transform = $null; Assert-HostElement $first $first.window
+    $available = $first.window.TryGetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern,[ref]$transform)
+    Assert-HostElement $first $first.window; Assert-Condition $available
+    Assert-HostElement $first $first.window; $canResize = $transform.Current.CanResize; Assert-HostElement $first $first.window; Assert-Condition $canResize
+    Assert-HostElement $first $first.window; try { $transform.Resize(640,600) } finally { Assert-HostAfter $first $first.window }
+    $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -le 660) { $true } }
     $null = Get-HostControl $first '工作台标题栏'; $null = Get-HostControl $first '当前项目标题'
-    $first.host.Validate($first.hwnd); $transform.Resize(1180,800); $first.host.Validate($first.hwnd)
-    $null = Wait-For { $first.host.Validate($first.hwnd); if ($first.window.Current.BoundingRectangle.Width -ge 1100) { $true } }
+    Assert-HostElement $first $first.window; try { $transform.Resize(1180,800) } finally { Assert-HostAfter $first $first.window }
+    $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -ge 1100) { $true } }
     Set-Theme $first '浅色'; Capture-Frame $first 'light.png'
     Set-Theme $first '深色'; Capture-Frame $first 'dark.png'
     Record-Sentinel 'healthy'
@@ -216,8 +289,11 @@ try {
     $null = Get-HostControl $second '导出脱敏错误报告'
     Record-Sentinel 'duplicate-root'
     $picker = Show-Picker $second
-    $button = Get-HostControl $second '导出脱敏错误报告'; Assert-Condition (-not $button.Current.IsEnabled)
-    $second.host.ValidatePopup($second.hwnd,$picker.hwnd); $invoke = $null; if ($button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invoke)) { try { $invoke.Invoke() } catch [System.Windows.Automation.ElementNotEnabledException] { } }
+    $button = Get-HostControl $second '导出脱敏错误报告'
+    Assert-HostElement $second $button; $enabled = $button.Current.IsEnabled; Assert-HostElement $second $button; Assert-Condition (-not $enabled)
+    Assert-PickerRoot $second $picker; $invoke = $null
+    Assert-HostElement $second $button; $available = $button.TryGetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern,[ref]$invoke); Assert-HostElement $second $button
+    if ($available) { Assert-HostElement $second $button; try { $invoke.Invoke() } catch [System.Windows.Automation.ElementNotEnabledException] { } finally { Assert-HostAfter $second $button } }
     Assert-Condition ($second.host.Popup($second.hwnd) -eq $picker.hwnd)
     Cancel-Picker $second $picker
     $null = Wait-For { if ((Read-HostText $second '错误报告导出状态') -ceq '已取消导出，尚未写入报告。') { $true } }
@@ -235,7 +311,7 @@ try {
     Record-Sentinel 'first-close'
     Assert-Condition ((Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash -ceq ([BitConverter]::ToString([Security.Cryptography.SHA256]::Create().ComputeHash($catalogBytes)).Replace('-','')))
     Invoke-Host $second '重试打开项目'
-    $null = Wait-For { $second.host.Validate($second.hwnd); if ($second.window.Current.Name -ceq 'Default · Project Workbench') { $true } } 60
+    $null = Wait-For { Assert-HostElement $second $second.window; $name = $second.window.Current.Name; Assert-HostElement $second $second.window; if ($name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $second; Reacquire-Roots $userRoot
     Record-Sentinel 'retry-close'
     Set-Phase 'corrupt-catalog'
@@ -252,16 +328,18 @@ try {
     Record-Sentinel 'corrupt-export'
     [IO.File]::WriteAllBytes($catalogPath,$catalogBytes)
     Invoke-Host $third '重试打开项目'
-    $null = Wait-For { $third.host.Validate($third.hwnd); if ($third.window.Current.Name -ceq 'Default · Project Workbench') { $true } } 60
+    $null = Wait-For { Assert-HostElement $third $third.window; $name = $third.window.Current.Name; Assert-HostElement $third $third.window; if ($name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $third; Reacquire-Roots $userRoot
     Record-Sentinel 'corrupt-recovery'
     Set-Phase 'close-pending-picker'
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($catalogBytes))
     [IO.File]::WriteAllBytes($catalogPath,$broken)
     $fourth = New-Host 'close-pending'; $script:current = $fourth; $picker = Show-Picker $fourth
-    $pattern = $null; Assert-Condition $fourth.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$pattern)
-    $fourth.host.ValidatePopup($fourth.hwnd,$picker.hwnd); $pattern.Close()
-    Assert-Condition (-not $fourth.host.Exited); $fourth.host.ValidatePopup($fourth.hwnd,$picker.hwnd); Assert-RootHeld $userRoot
+    $pattern = $null; Assert-HostElement $fourth $fourth.window
+    $available = $fourth.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$pattern)
+    Assert-HostElement $fourth $fourth.window; Assert-Condition $available
+    Assert-PickerRoot $fourth $picker; Assert-HostElement $fourth $fourth.window; try { $pattern.Close() } finally { Assert-HostAfter $fourth $fourth.window }
+    Assert-Condition (-not $fourth.host.Exited); Assert-PickerRoot $fourth $picker; Assert-RootHeld $userRoot
     Select-PickerFolder $fourth $picker $pendingDir -Closing
     $null = Wait-For { if ($fourth.host.Exited) { $true } } 45
     Assert-Condition ($fourth.host.ExitCode -eq 0 -and -not [OwnedShellHost]::WindowExists($fourth.hwnd) -and $fourth.host.LiveCount() -eq 0)
@@ -272,7 +350,7 @@ try {
     Record-Sentinel 'close-pending'
     [IO.File]::WriteAllBytes($catalogPath,$catalogBytes)
     $fifth = New-Host 'restored-start'; $script:current = $fifth
-    $null = Wait-For { $fifth.host.Validate($fifth.hwnd); if ($fifth.window.Current.Name -ceq 'Default · Project Workbench') { $true } } 60
+    $null = Wait-For { Assert-HostElement $fifth $fifth.window; $name = $fifth.window.Current.Name; Assert-HostElement $fifth $fifth.window; if ($name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $fifth; Reacquire-Roots $userRoot
     Record-Sentinel 'final-recovery'
     $sentinelFinal = [IO.File]::ReadAllBytes($script:sentinelPath)
@@ -294,8 +372,19 @@ try {
                 $hwnd = $hostRun.Window()
                 if ($hwnd -ne [IntPtr]::Zero) {
                     $popup = $hostRun.Popup($hwnd)
-                    if ($popup -ne [IntPtr]::Zero) { $hostRun.ValidatePopup($hwnd,$popup); $w=[System.Windows.Automation.AutomationElement]::FromHandle($popup); $p=$null; if ($w.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p)) { $p.Close() } }
-                    $hostRun.Validate($hwnd); $w=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd); $p=$null; if ($w.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p)) { $p.Close() }
+                    $owned = @{ host=$hostRun; hwnd=$hwnd; window=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd) }
+                    Assert-HostElement $owned $owned.window
+                    if ($popup -ne [IntPtr]::Zero) {
+                        $popupId=$hostRun.PopupProcessId($hwnd,$popup); $w=[System.Windows.Automation.AutomationElement]::FromHandle($popup)
+                        $picker=@{ hwnd=$popup; window=$w; processId=$popupId }; $p=$null
+                        Assert-PickerElement $owned $picker $w; $available=$w.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p); Assert-PickerElement $owned $picker $w
+                        if ($available) { Assert-PickerElement $owned $picker $w; try { $p.Close() } finally { Assert-PickerAfter $owned $picker $w } }
+                    }
+                    if (-not $hostRun.Exited) {
+                        Assert-HostElement $owned $owned.window; $p=$null
+                        $available=$owned.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p); Assert-HostElement $owned $owned.window
+                        if ($available) { Assert-HostElement $owned $owned.window; try { $p.Close() } finally { Assert-HostAfter $owned $owned.window } }
+                    }
                     $null = Wait-For { if ($hostRun.Exited) { $true } } 10
                 }
             } catch { }

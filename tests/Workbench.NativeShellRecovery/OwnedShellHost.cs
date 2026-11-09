@@ -30,6 +30,10 @@ public sealed class OwnedShellHost : IDisposable
         if (!AliveIdentity() || window == IntPtr.Zero || !IsWindow(window) || !IsWindowVisible(window) || GetWindowThreadProcessId(window, out id) == 0 || id != (uint)Id)
             throw new InvalidOperationException();
     }
+    public static void AssertElementProcessId(int expected, int actual)
+    {
+        if (expected <= 0 || actual <= 0 || expected != actual) throw new InvalidOperationException();
+    }
     public static bool PathExists(string path)
     {
         uint a = GetFileAttributesW(path); if (a != 0xffffffff) return true;
@@ -97,12 +101,31 @@ public sealed class OwnedShellHost : IDisposable
     {
         Validate(root); if (popup == IntPtr.Zero || !IsWindow(popup) || !IsWindowVisible(popup) || !OwnsPopup(popup, root)) throw new InvalidOperationException();
     }
-    public void SubmitPickerAddress(IntPtr root, IntPtr popup, IntPtr edit)
+    public int PopupProcessId(IntPtr root, IntPtr popup)
     {
         ValidatePopup(root, popup);
-        if (edit == IntPtr.Zero || !IsWindow(edit) || !IsChild(popup, edit)) throw new InvalidOperationException();
-        if (!PostMessage(edit, 0x0100, new IntPtr(13), IntPtr.Zero) || !PostMessage(edit, 0x0101, new IntPtr(13), IntPtr.Zero)) throw new InvalidOperationException();
+        uint id, after;
+        if (GetWindowThreadProcessId(popup, out id) == 0 || id == 0 || id > Int32.MaxValue) throw new InvalidOperationException();
         ValidatePopup(root, popup);
+        if (GetWindowThreadProcessId(popup, out after) == 0 || after != id) throw new InvalidOperationException();
+        ValidatePopup(root, popup);
+        return (int)id;
+    }
+    private void ValidatePickerEdit(IntPtr root, IntPtr popup, IntPtr edit, int expected)
+    {
+        AssertElementProcessId(expected, PopupProcessId(root, popup)); uint editId;
+        if (edit == IntPtr.Zero || !IsWindow(edit) || !IsChild(popup, edit) || GetWindowThreadProcessId(edit, out editId) == 0 || editId == 0 || editId > Int32.MaxValue) throw new InvalidOperationException();
+        AssertElementProcessId(expected, (int)editId);
+        AssertElementProcessId(expected, PopupProcessId(root, popup));
+    }
+    public void SubmitPickerAddress(IntPtr root, IntPtr popup, IntPtr edit)
+    {
+        int popupId = PopupProcessId(root, popup);
+        ValidatePickerEdit(root, popup, edit, popupId);
+        if (!PostMessage(edit, 0x0100, new IntPtr(13), IntPtr.Zero)) throw new InvalidOperationException();
+        ValidatePickerEdit(root, popup, edit, popupId);
+        if (!PostMessage(edit, 0x0101, new IntPtr(13), IntPtr.Zero)) throw new InvalidOperationException();
+        ValidatePickerEdit(root, popup, edit, popupId);
     }
     public static bool WindowExists(IntPtr window) { return IsWindow(window); }
     public int LiveCount()
