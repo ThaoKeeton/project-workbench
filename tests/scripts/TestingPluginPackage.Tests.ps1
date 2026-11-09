@@ -189,7 +189,7 @@ if ($HelperGuardsOnly) {
     Refuses { & $module { param($b,$d) Assert-TestingOwnedSource $b $d } $build $descriptor } 'TestingOwnedHelperSourceInvalid'
     $allSources = @(& $module { param($root) Get-TestingSourceFiles $root } $repo)
     foreach ($path in @('scripts/TestingManagedPayloadAudit.cs','tests/scripts/TestingManagedPayload.Tests.ps1','scripts/package-testing-plugin.ps1','scripts/build.ps1','tests/Workbench.Testing.PackageProbe/Program.cs','scripts/OwnedLabProbeStaging.psm1','tests/scripts/OwnedLabProbeStaging.Tests.ps1','scripts/OwnedLabProbeOutput.psm1','tests/scripts/OwnedLabProbeOutput.Tests.ps1',
-        'plugins/Workbench.Testing/NativeActivityCoordinator.cs','tests/Workbench.Core.Tests/TestingNativeActivityTests.cs','tests/Workbench.Core.Tests/TestingControllerAdmissionTests.cs','tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj',
+        'plugins/Workbench.Testing/NativeActivityCoordinator.cs','tests/Workbench.Core.Tests/TestingNativeActivityTests.cs','tests/Workbench.Core.Tests/TestingControllerAdmissionTests.cs','tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj','tests/Workbench.Core.Tests/LifecycleTests.cs',
         'plugins/Workbench.Testing/NativeOwnedPilot.cs','plugins/Workbench.Testing/NativeOwnedEvidence.cs','plugins/Workbench.Testing/NativeTestingLifecycle.cs','plugins/Workbench.Testing/TestingOwnedPilotPanel.cs',
         'plugins/Workbench.Testing/NativeInvocationFeedback.cs','tests/Workbench.Core.Tests/TestingNativeFeedbackTests.cs',
         'plugins/Workbench.Testing/TestingSourceServices.cs','plugins/Workbench.Testing/TestingPlugin.cs','plugins/Workbench.Testing/Workbench.Testing.csproj','plugins/Workbench.Testing/plugin.json',

@@ -41,11 +41,40 @@ internal sealed class PluginLoadContext : AssemblyLoadContext
         return resolved is null ? nint.Zero : LoadUnmanagedDllFromPath(ValidateResolvedFile(resolved));
     }
 
-    private string ValidateResolvedFile(string path)
+    internal string ValidateResolvedFile(string path)
     {
-        var contained = FileSystemGuard.ContainedPath(_packageRoot, Path.GetRelativePath(_packageRoot, path));
+        var comparisonRoot = OperatingSystem.IsWindows() ? ResolverComparisonRoot(_packageRoot, path) : _packageRoot;
+        var contained = FileSystemGuard.ContainedPath(_packageRoot, Path.GetRelativePath(comparisonRoot, path));
         FileSystemGuard.EnsureRegularFile(contained);
         return contained;
+    }
+
+    internal static string ResolverComparisonRoot(string packageRoot, string path)
+    {
+        if (!path.StartsWith(@"\\?\", StringComparison.Ordinal)) return packageRoot;
+        // Windows hostpolicy adds this prefix when the component entry path reaches MAX_PATH.
+        // Align only the comparison root; actual containment/IO still uses the original package root.
+        var ordinaryRoot = packageRoot.StartsWith(@"\\?\UNC\", StringComparison.Ordinal) ? @"\\" + packageRoot[8..]
+            : packageRoot.StartsWith(@"\\?\", StringComparison.Ordinal) ? packageRoot[4..] : packageRoot;
+        string comparisonRoot;
+        if (ordinaryRoot.Length >= 3 && char.IsAsciiLetter(ordinaryRoot[0]) && ordinaryRoot[1] == ':' && ordinaryRoot[2] == '\\')
+        {
+            if (ordinaryRoot.Length > 3 && !CanonicalDirectory(ordinaryRoot[3..])) throw InvalidResolvedPath();
+            comparisonRoot = @"\\?\" + ordinaryRoot;
+        }
+        else if (ordinaryRoot.StartsWith(@"\\", StringComparison.Ordinal)
+            && ordinaryRoot[2..].TrimEnd('\\').Split('\\').Length >= 2 && CanonicalDirectory(ordinaryRoot[2..]))
+            comparisonRoot = @"\\?\UNC\" + ordinaryRoot[2..];
+        else throw InvalidResolvedPath();
+
+        var prefix = comparisonRoot.EndsWith('\\') ? comparisonRoot : comparisonRoot + '\\';
+        if (!path.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) || !CanonicalSuffix(path[prefix.Length..]))
+            throw InvalidResolvedPath();
+        return comparisonRoot;
+
+        static bool CanonicalDirectory(string value) => CanonicalSuffix(value.EndsWith('\\') ? value[..^1] : value);
+        static bool CanonicalSuffix(string value) => !value.Contains('/') && PackageValidator.IsSafeRelativePath(value.Replace('\\', '/'));
+        static IOException InvalidResolvedPath() => new("Plugin dependency path is not a canonical package descendant.");
     }
 
     private static HashSet<string> ReadFrameworkNames()

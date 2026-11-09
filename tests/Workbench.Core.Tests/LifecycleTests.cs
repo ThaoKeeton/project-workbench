@@ -59,6 +59,96 @@ public sealed class LifecycleTests
     }
 
     [Theory]
+    [InlineData(@"C:\packages\fixture", @"C:\packages\fixture\private.dll", @"C:\packages\fixture")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\private.dll", @"\\?\C:\packages\fixture")]
+    [InlineData(@"C:\packages\fixture", @"\\?\c:\PACKAGES\FIXTURE\private.dll", @"\\?\C:\packages\fixture")]
+    [InlineData(@"C:\packages\fixture\", @"\\?\C:\packages\fixture\private.dll", @"\\?\C:\packages\fixture\")]
+    [InlineData(@"\\?\C:\packages\fixture", @"\\?\C:\packages\fixture\private.dll", @"\\?\C:\packages\fixture")]
+    [InlineData(@"\\server\share\fixture", @"\\?\UNC\server\share\fixture\private.dll", @"\\?\UNC\server\share\fixture")]
+    [InlineData(@"\\?\UNC\server\share\fixture", @"\\?\UNC\server\share\fixture\private.dll", @"\\?\UNC\server\share\fixture")]
+    [InlineData("/packages/fixture", "/packages/fixture/private.dll", "/packages/fixture")]
+    public void Resolver_comparison_root_aligns_only_canonical_extended_paths(string root, string resolved, string expected)
+        => Assert.Equal(expected, PluginLoadContext.ResolverComparisonRoot(root, resolved));
+
+    [Theory]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\sibling\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture-other\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\D:\packages\fixture\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\..\sibling\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\.\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\sub/private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\private.dll.")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\private.dll ")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\private.dll:stream")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\NUL.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\COM1.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:\packages\fixture\LPT¹.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\GLOBALROOT\Device\HarddiskVolume1\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\Volume{123}\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\C:packages\fixture\private.dll")]
+    [InlineData(@"C:\packages\fixture", @"\\?\UNC\server\share\fixture\private.dll")]
+    [InlineData(@"\\server\share\fixture", @"\\?\UNC\other\share\fixture\private.dll")]
+    [InlineData(@"\\server\share\fixture", @"\\?\UNC\server\other\fixture\private.dll")]
+    [InlineData(@"\\server\share\fixture", @"\\?\UNC\server\share\fixture-other\private.dll")]
+    [InlineData(@"\\.\C:\packages\fixture", @"\\?\C:\packages\fixture\private.dll")]
+    [InlineData(@"\??\C:\packages\fixture", @"\\?\C:\packages\fixture\private.dll")]
+    [InlineData(@"\\?\GLOBALROOT\Device\HarddiskVolume1", @"\\?\GLOBALROOT\Device\HarddiskVolume1\private.dll")]
+    [InlineData(@"C:/packages/fixture", @"\\?\C:\packages\fixture\private.dll")]
+    [InlineData(@"C:\packages\fixture.", @"\\?\C:\packages\fixture.\private.dll")]
+    [InlineData(@"\\server", @"\\?\UNC\server\private.dll")]
+    public void Resolver_comparison_root_refuses_external_device_and_alias_paths(string root, string resolved)
+        => Assert.Throws<IOException>(() => PluginLoadContext.ResolverComparisonRoot(root, resolved));
+
+    [WindowsLoaderFact]
+    public async Task Long_entry_paths_initialize_real_private_dependencies_across_the_Windows_prefix_boundary()
+    {
+        foreach (var length in new[] { 259, 261 })
+        {
+            using var disk = new TestDirectory();
+            const string entry = "Workbench.TestPlugin.dll";
+            var folder = new string('p', length - disk.Plugins.Length - entry.Length - 2);
+            var package = disk.Package(Id, folder);
+            Assert.Equal(length, Path.Combine(package, entry).Length);
+            var resolver = new AssemblyDependencyResolver(Path.Combine(package, entry));
+            var dependency = resolver.ResolveAssemblyToPath(new("Workbench.TestDependency"));
+            Assert.NotNull(dependency);
+            Assert.Equal(length >= 260, dependency.StartsWith(@"\\?\", StringComparison.Ordinal));
+            await using var manager = disk.Manager();
+            await manager.DiscoverAsync();
+            var enabled = await manager.EnableAsync(Id, confirmTrust: true);
+            Assert.True(enabled.Succeeded, enabled.Message);
+            Assert.Equal("com.example.fixture:dependency-ok:demo draft", (await manager.ExecuteCommandAsync(Id, "ping")).Message);
+            Assert.StartsWith("Workbench:", (await manager.ExecuteCommandAsync(Id, "dependency-context")).Message);
+            Assert.True((await manager.DisableAsync(Id)).Succeeded);
+        }
+    }
+
+    [WindowsLoaderFact]
+    public async Task Extended_resolver_paths_keep_actual_containment_regular_file_and_reparse_checks()
+    {
+        using var disk = new TestDirectory();
+        var package = disk.Package(Id);
+        var validated = await PackageValidator.ValidateAsync(package, new Version(0, 1, 0), CancellationToken.None);
+        Assert.True(validated.IsValid);
+        var loader = new PluginLoadContext(validated, [], []);
+        var dependency = Path.Combine(package, "Workbench.TestDependency.dll");
+        Assert.Equal(dependency, loader.ValidateResolvedFile(@"\\?\" + dependency));
+        var sibling = Path.Combine(disk.Plugins, "sibling", "private.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(sibling)!); File.WriteAllText(sibling, "external bytes");
+        foreach (var refused in new[] { sibling, @"\\?\" + sibling, @"\\.\" + dependency, @"\??\" + dependency,
+            @"\\?\" + Path.Combine(package, "..", "sibling", "private.dll"), @"\\?\" + dependency + ".", @"\\?\" + dependency + ":stream" })
+            Assert.Throws<IOException>(() => loader.ValidateResolvedFile(refused));
+        var directory = Path.Combine(package, "directory.dll"); Directory.CreateDirectory(directory);
+        Assert.Throws<IOException>(() => loader.ValidateResolvedFile(@"\\?\" + directory));
+        var linked = Path.Combine(package, "linked.dll"); File.CreateSymbolicLink(linked, sibling);
+        Assert.Throws<IOException>(() => loader.ValidateResolvedFile(@"\\?\" + linked));
+        var linkedDirectory = Path.Combine(package, "linked-directory"); Directory.CreateSymbolicLink(linkedDirectory, Path.GetDirectoryName(sibling)!);
+        Assert.Throws<IOException>(() => loader.ValidateResolvedFile(@"\\?\" + Path.Combine(linkedDirectory, "private.dll")));
+        Assert.Equal("external bytes", File.ReadAllText(sibling));
+    }
+
+    [Theory]
     [InlineData("init-fail")]
     [InlineData("duplicate-view")]
     [InlineData("duplicate-command")]
@@ -376,5 +466,13 @@ public sealed class LifecycleTests
         using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         while (!await manager.GetSettings(Id).GetAsync(key, false, deadline.Token))
             await Task.Delay(5, deadline.Token);
+    }
+}
+
+internal sealed class WindowsLoaderFactAttribute : FactAttribute
+{
+    public WindowsLoaderFactAttribute()
+    {
+        if (!OperatingSystem.IsWindows()) Skip = "Requires Windows dependency resolver paths and actual Windows filesystem checks.";
     }
 }
