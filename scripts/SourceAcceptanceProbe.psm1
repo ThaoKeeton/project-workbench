@@ -47,7 +47,7 @@ function ConvertFrom-SourceAcceptanceJson([byte[]]$Bytes) {
         $options = [System.Text.Json.JsonDocumentOptions]::new(); $options.MaxDepth = 32
         $document = [System.Text.Json.JsonDocument]::Parse($text,$options)
         if ($document.RootElement.ValueKind -ne [System.Text.Json.JsonValueKind]::Object -or -not (Test-SourceAcceptanceJsonNames $document.RootElement)) { throw 'SourceJsonInvalid' }
-        return ConvertFrom-Json -InputObject $text -AsHashtable -NoEnumerate -Depth 32
+        return ConvertFrom-Json -InputObject $text -AsHashtable -NoEnumerate -Depth 32 -DateKind String
     } finally { if ($null -ne $document) { $document.Dispose() } }
 }
 function Read-SourceAcceptanceJson([string]$Path, [int]$Maximum = 262144) { return ConvertFrom-SourceAcceptanceJson (Read-SourceAcceptanceBytes $Path $Maximum) }
@@ -59,10 +59,10 @@ function Assert-SourceAcceptanceStrings($Data, [string[]]$Names) {
     foreach ($name in $Names) { if ($Data[$name] -isnot [string]) { throw 'SourceStringTypeInvalid' } }
 }
 function Test-SourceAcceptanceUtc($Value) {
-    # ConvertFrom-Json normally parses UTC ISO strings as DateTime; reject other JSON types and non-UTC values.
+    # Keep the original JSON offset: STJ DateTimeOffset UTC emits +00:00; no Local/unspecified conversion.
     if ($Value -is [datetime]) { return $Value.Kind -eq [DateTimeKind]::Utc -and $Value -gt [datetime]'2000-01-01T00:00:00Z' }
     if ($Value -is [DateTimeOffset]) { return $Value.Offset -eq [TimeSpan]::Zero -and $Value -gt [DateTimeOffset]'2000-01-01T00:00:00Z' }
-    if ($Value -isnot [string] -or $Value -cnotmatch '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,7})?Z$') { return $false }
+    if ($Value -isnot [string] -or $Value -cnotmatch '^20[0-9]{2}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,7})?(Z|\+00:00)$') { return $false }
     $parsed=[DateTimeOffset]::MinValue
     return [DateTimeOffset]::TryParse($Value,[Globalization.CultureInfo]::InvariantCulture,[Globalization.DateTimeStyles]::RoundtripKind,[ref]$parsed) -and $parsed.Offset -eq [TimeSpan]::Zero
 }
