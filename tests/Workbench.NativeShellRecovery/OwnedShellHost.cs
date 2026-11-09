@@ -30,6 +30,57 @@ public sealed class OwnedShellHost : IDisposable
         if (!AliveIdentity() || window == IntPtr.Zero || !IsWindow(window) || !IsWindowVisible(window) || GetWindowThreadProcessId(window, out id) == 0 || id != (uint)Id)
             throw new InvalidOperationException();
     }
+    // Only fixed labels leave the driver; caller-provided type names and messages never do.
+    public static string SafeExceptionType(string name)
+    {
+        switch (name)
+        {
+            case "System.Management.Automation.RuntimeException": return "RuntimeException";
+            case "System.Management.Automation.MethodInvocationException": return "MethodInvocationException";
+            case "System.Management.Automation.PropertyNotFoundException": return "PropertyNotFoundException";
+            case "System.Management.Automation.ItemNotFoundException": return "ItemNotFoundException";
+            case "System.InvalidOperationException": return "InvalidOperationException";
+            case "System.ArgumentException": return "ArgumentException";
+            case "System.IO.IOException": return "IOException";
+            case "System.IO.FileNotFoundException": return "FileNotFoundException";
+            case "System.IO.DirectoryNotFoundException": return "DirectoryNotFoundException";
+            case "System.UnauthorizedAccessException": return "UnauthorizedAccessException";
+            case "System.Runtime.InteropServices.COMException": return "COMException";
+            case "System.ComponentModel.Win32Exception": return "Win32Exception";
+            case "System.NullReferenceException": return "NullReferenceException";
+            case "System.TimeoutException": return "TimeoutException";
+            case "System.ObjectDisposedException": return "ObjectDisposedException";
+            case "System.Windows.Automation.ElementNotAvailableException": return "ElementNotAvailableException";
+            case "System.Windows.Automation.ElementNotEnabledException": return "ElementNotEnabledException";
+            default: return "Other";
+        }
+    }
+    public static string SafeFailureCategory(string message, string type)
+    {
+        switch (message)
+        {
+            case "NativeAssertionFailed": return "AssertionFailed";
+            case "NamedControlUnavailable": return "ControlUnavailable";
+            case "NativeWaitExpired": return "WaitExpired";
+            case "SelectionPatternUnavailable":
+            case "TextPatternUnavailable": return "PatternUnavailable";
+            case "PickerNavigationUnconfirmed": return "PickerNavigationUnconfirmed";
+            case "UnsafeEnvironment": return "UnsafeEnvironment";
+        }
+        switch (type)
+        {
+            case "ElementNotAvailableException": return "ElementUnavailable";
+            case "ElementNotEnabledException": return "ElementDisabled";
+            case "COMException":
+            case "Win32Exception": return "NativeError";
+            case "IOException":
+            case "FileNotFoundException":
+            case "DirectoryNotFoundException": return "IO";
+            case "UnauthorizedAccessException": return "AccessDenied";
+            case "InvalidOperationException": return "InvalidOperation";
+            default: return "Other";
+        }
+    }
     public static void AssertElementProcessId(int expected, int actual)
     {
         if (expected <= 0 || actual <= 0 || expected != actual) throw new InvalidOperationException();

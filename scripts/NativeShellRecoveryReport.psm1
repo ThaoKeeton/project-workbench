@@ -173,12 +173,51 @@ function Test-ShellRecoveryImage {
             -not [NativeGalleryPngV1]::Valid([IO.File]::ReadAllBytes($path), $Image.width, $Image.height)) { throw 'invalid' }
     } catch { throw 'ShellRecoveryImageInvalid' }
 }
+# Diagnostic data is deliberately bounded: no exception messages, UI names, paths or stacks.
+function Assert-ShellRecoverySafeFailure($Failure) {
+    Assert-ShellKeys $Failure @('type','category','hresult','line')
+    $types = @('RuntimeException','MethodInvocationException','PropertyNotFoundException','ItemNotFoundException','InvalidOperationException','ArgumentException','IOException','FileNotFoundException','DirectoryNotFoundException','UnauthorizedAccessException','COMException','Win32Exception','NullReferenceException','TimeoutException','ObjectDisposedException','ElementNotAvailableException','ElementNotEnabledException','Other')
+    $categories = @('AssertionFailed','ControlUnavailable','WaitExpired','PatternUnavailable','PickerNavigationUnconfirmed','UnsafeEnvironment','ElementUnavailable','ElementDisabled','NativeError','IO','AccessDenied','InvalidOperation','Other')
+    if ($Failure.type -isnot [string] -or $Failure.type -cnotin $types -or $Failure.category -isnot [string] -or $Failure.category -cnotin $categories -or
+        ($null -ne $Failure.hresult -and -not (Test-ShellInt $Failure.hresult ([int]::MinValue) ([int]::MaxValue))) -or
+        ($null -ne $Failure.line -and -not (Test-ShellInt $Failure.line 1 1000000))) { throw 'ShellRecoverySafeFailureInvalid' }
+}
+function Test-ShellRecoveryDiagnosticFrame($Frame,[string]$Directory,$Healthy) {
+    Assert-ShellKeys $Frame @('status','image','failure')
+    if ($Frame.status -isnot [string] -or $Frame.status -cnotin @('captured','unavailable','not-attempted')) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
+    if ($Frame.status -ceq 'captured') {
+        if ($null -ne $Frame.failure -or $Frame.image -isnot [Collections.IDictionary] -or $Frame.image.name -isnot [string] -or $Frame.image.name -cne 'diagnostic-window.png') { throw 'ShellRecoveryDiagnosticFrameInvalid' }
+        $identity = if ($null -ne $Healthy) { $Healthy } else { $Frame.image }
+        Test-ShellRecoveryImage -Directory $Directory -Image $Frame.image -Identity $identity
+    } elseif ($Frame.status -ceq 'unavailable') {
+        if ($null -ne $Frame.image -or $null -eq $Frame.failure) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
+        Assert-ShellRecoverySafeFailure $Frame.failure
+    } elseif ($null -ne $Frame.image -or $null -ne $Frame.failure) { throw 'ShellRecoveryDiagnosticFrameInvalid' }
+}
+function Test-ShellRecoveryFailureDiagnostic {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string]$Path,[Parameter(Mandatory)][string]$Directory)
+    $r = Read-ShellRecoveryJson $Path
+    Assert-ShellKeys $r @('schemaVersion','succeeded','phase','failureCode','forcedCleanup','diagnostic')
+    $phases = @('preflight','healthy','lease-conflict','corrupt-catalog','close-pending-picker','cleanup')
+    $stages = @('preflight','healthy','healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-initial-frame','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker','cleanup','completed')
+    if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or $r.succeeded -or $r.phase -isnot [string] -or $r.phase -cnotin $phases -or
+        $r.failureCode -isnot [string] -or $r.failureCode -cne 'NativeGateFailed' -or $r.forcedCleanup -isnot [bool]) { throw 'ShellRecoveryFailureDiagnosticInvalid' }
+    $d = $r.diagnostic
+    Assert-ShellKeys $d @('stage','failure','lastWaitFailure','checkpointWriteFailed','cleanupFailure','initialFrame')
+    if ($d.stage -isnot [string] -or $d.stage -cnotin $stages -or $d.checkpointWriteFailed -isnot [bool]) { throw 'ShellRecoveryFailureDiagnosticInvalid' }
+    Assert-ShellRecoverySafeFailure $d.failure
+    if ($null -ne $d.lastWaitFailure) { Assert-ShellRecoverySafeFailure $d.lastWaitFailure }
+    if ($null -ne $d.cleanupFailure) { Assert-ShellRecoverySafeFailure $d.cleanupFailure }
+    Test-ShellRecoveryDiagnosticFrame $d.initialFrame $Directory $null
+    return $r
+}
 function Test-ShellRecoveryFinal {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Directory,
         [Parameter(Mandatory)][string]$ExpectedSourceCommit, [Parameter(Mandatory)][string]$ExpectedExeSha256, [Parameter(Mandatory)][string]$ExpectedDllSha256)
     $r = Read-ShellRecoveryJson $Path
-    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','reports','cancelWritten','cancelEvidence','closeEvidence','repeatEvidence','collisionBefore','collisionAfter','catalogBefore','catalogAfter','sentinelBefore','sentinelAfter','sentinelChecks','pickerPendingAtClose','checks')
+    Assert-ShellKeys $r @('schemaVersion','succeeded','sourceCommit','executableSha256','dllSha256','forcedCleanup','processes','images','diagnosticFrame','reports','cancelWritten','cancelEvidence','closeEvidence','repeatEvidence','collisionBefore','collisionAfter','catalogBefore','catalogAfter','sentinelBefore','sentinelAfter','sentinelChecks','pickerPendingAtClose','checks')
     if (-not (Test-ShellInt $r.schemaVersion 1 1) -or $r.succeeded -isnot [bool] -or -not $r.succeeded -or
         ($r.sourceCommit -isnot [string] -or $r.sourceCommit -cne $ExpectedSourceCommit) -or $ExpectedSourceCommit -cnotmatch '\A[0-9a-f]{40}\z' -or
         -not (Test-ShellHash $ExpectedExeSha256) -or -not (Test-ShellHash $r.executableSha256) -or $r.executableSha256 -cne $ExpectedExeSha256 -or
@@ -218,6 +257,9 @@ function Test-ShellRecoveryFinal {
         foreach ($key in @('windowClosed','rootReacquired','jobEmpty')) { if ($p[$key] -isnot [bool] -or -not $p[$key]) { throw 'ShellRecoveryRetirementInvalid' } }
         if (-not (Test-ShellInt $p.exitCode 0 0) -or -not $identities.Add("$($p.processId):$($p.creationFileTime):$($p.windowHandle)")) { throw 'ShellRecoveryRetirementInvalid' }
     }
+    $healthy = @($r.processes | Where-Object { $_.role -ceq 'healthy' })
+    if ($healthy.Count -ne 1) { throw 'ShellRecoveryProcessInvalid' }
+    Test-ShellRecoveryDiagnosticFrame $r.diagnosticFrame $Directory $healthy[0]
     $catalogPath = Join-Path $Directory 'original-catalog.json'
     Assert-ShellRecoveryNoLinks $catalogPath
     $catalogFile = Get-Item -LiteralPath $catalogPath -Force
@@ -386,4 +428,4 @@ function Expand-ShellRecoveryArchive {
         return @{ archiveSha256=$ExpectedSha256; archiveBytes=[long]$item.Length; expandedBytes=$expanded; entryCount=$zip.Entries.Count }
     } finally { $zip.Dispose() }
 }
-Export-ModuleMember -Function Test-ShellRecoveryExport,Test-ShellRecoveryImage,Test-ShellRecoveryFinal,Test-ShellRecoveryDriverSource,Test-ShellRecoveryProducer,Test-ShellRecoveryHostVersion,Expand-ShellRecoveryArchive,Get-ShellRecoveryPreflightFailure,Test-ShellRecoveryFailureOutcome
+Export-ModuleMember -Function Test-ShellRecoveryExport,Test-ShellRecoveryImage,Test-ShellRecoveryFinal,Test-ShellRecoveryDriverSource,Test-ShellRecoveryProducer,Test-ShellRecoveryHostVersion,Expand-ShellRecoveryArchive,Get-ShellRecoveryPreflightFailure,Test-ShellRecoveryFailureOutcome,Test-ShellRecoveryFailureDiagnostic

@@ -9,14 +9,50 @@ $script:phase = 'preflight'; $script:hosts = New-Object System.Collections.Array
 $script:records = New-Object System.Collections.ArrayList; $script:images = New-Object System.Collections.ArrayList
 $script:reports = New-Object System.Collections.ArrayList; $script:forced = $false; $script:current = $null
 $script:result = $null; $script:canWrite = $false
+$script:stage = 'preflight'; $script:diagnosticNumber = 1; $script:checkpointWriteFailed = $false
+$script:lastWaitFailure = $null; $script:primaryWaitFailure = $null; $script:primaryFailure = $null; $script:cleanupFailure = $null
+$script:initialFrame = @{ status='not-attempted'; image=$null; failure=$null }
 function Assert-Condition([bool]$Condition) { if (-not $Condition) { throw 'NativeAssertionFailed' } }
+function Get-SafeFailure($Record) {
+    try {
+        $errorValue = $Record.Exception.GetBaseException()
+        $type = [OwnedShellHost]::SafeExceptionType($errorValue.GetType().FullName)
+        $category = [OwnedShellHost]::SafeFailureCategory($errorValue.Message,$type)
+        $line = [int]$Record.InvocationInfo.ScriptLineNumber
+        if ($line -lt 1 -or $line -gt 1000000) { $line = $null }
+        return @{ type=$type; category=$category; hresult=[int]$errorValue.HResult; line=$line }
+    } catch { return @{ type='Other'; category='Other'; hresult=$null; line=$null } }
+}
+function Set-DiagnosticStage([string]$Stage) {
+    $allowed = @('healthy-start','healthy-window-wait','healthy-window-identity','healthy-uia-root','healthy-initial-frame','healthy-titlebar','healthy-readiness','healthy-catalog','healthy-project-selector','healthy-icon','healthy-maximize','healthy-restore','healthy-resize-small','healthy-resize-large','healthy-theme-light','healthy-capture-light','healthy-theme-dark','healthy-capture-dark','healthy-complete','lease-conflict','corrupt-catalog','close-pending-picker')
+    if ($Stage -cnotin $allowed) { throw 'DiagnosticStageInvalid' }
+    $script:stage = $Stage; $script:lastWaitFailure = $null
+    if (-not $script:canWrite) { return }
+    try {
+        $path = Join-Path $EvidenceRoot (('checkpoint-{0:D2}-{1}.json' -f $script:diagnosticNumber,$Stage)); $script:diagnosticNumber++
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes((@{ stage=$Stage } | ConvertTo-Json -Compress))
+        $stream = [IO.File]::Open($path,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+    } catch { $script:checkpointWriteFailed = $true }
+}
 function Wait-For([scriptblock]$Probe, [int]$Seconds = 30) {
-    $clock = [Diagnostics.Stopwatch]::StartNew()
-    while ($clock.Elapsed.TotalSeconds -lt $Seconds) { try { $answer = & $Probe; if ($answer) { return $answer } } catch { } Start-Sleep -Milliseconds 200 }
+    $clock = [Diagnostics.Stopwatch]::StartNew(); $last = $null; $script:lastWaitFailure = $null
+    while ($clock.Elapsed.TotalSeconds -lt $Seconds) {
+        try { $answer = & $Probe; if ($answer) { return $answer } }
+        catch {
+            $safe = Get-SafeFailure $_
+            if ($safe.category -ceq 'WaitExpired' -and $null -ne $script:lastWaitFailure) { $last = $script:lastWaitFailure } else { $last = $safe }
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    $script:lastWaitFailure = $last
     throw 'NativeWaitExpired'
 }
+function New-FailureDiagnostic {
+    return @{ stage=$script:stage; failure=$script:primaryFailure; lastWaitFailure=$script:primaryWaitFailure; checkpointWriteFailed=$script:checkpointWriteFailed; cleanupFailure=$script:cleanupFailure; initialFrame=$script:initialFrame }
+}
 function Set-Phase([string]$Name) {
-    $script:phase = $Name
+    $script:phase = $Name; $script:stage = $Name; $script:lastWaitFailure = $null
     $file = Join-Path $EvidenceRoot (('phase-{0:D2}-{1}.json' -f $script:phaseNumber, $Name))
     $script:phaseNumber++
     $bytes = [Text.UTF8Encoding]::new($false).GetBytes((@{ phase = $Name } | ConvertTo-Json -Compress))
@@ -71,10 +107,25 @@ function Assert-PickerAfter($Owned,$Picker,$Element) {
         Assert-PickerRoot $Owned $Picker
     }
 }
+# Optional original PrintWindow(2) diagnostic for the exact owned HWND. Its
+# failure never qualifies a native frame and never replaces the primary failure.
+function Capture-InitialDiagnostic($HostRun,[IntPtr]$Window) {
+    try {
+        $path = Join-Path $EvidenceRoot 'diagnostic-window.png'
+        $bounds = $HostRun.Capture($Window,$path)
+        $file = Get-Item -LiteralPath $path
+        if ($file.Length -lt 1 -or $file.Length -gt 16777216) { throw 'NativeAssertionFailed' }
+        $hash = (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash.ToLowerInvariant()
+        $script:initialFrame = @{ status='captured'; image=@{ name='diagnostic-window.png'; sha256=$hash; bytes=$file.Length; width=($bounds[2]-$bounds[0]); height=($bounds[3]-$bounds[1]); left=$bounds[0]; top=$bounds[1]; right=$bounds[2]; bottom=$bounds[3]; processId=$HostRun.Id; creationFileTime=$HostRun.Birth; windowHandle=$Window.ToInt64(); source='PrintWindow2' }; failure=$null }
+    } catch { $script:initialFrame = @{ status='unavailable'; image=$null; failure=(Get-SafeFailure $_) } }
+}
 function New-Host([string]$Role) {
     $hostRun = [OwnedShellHost]::Start($HostExe); $null = $script:hosts.Add($hostRun)
+    if ($Role -ceq 'healthy') { Set-DiagnosticStage 'healthy-window-wait' }
     $hwnd = Wait-For { $h = $hostRun.Window(); if ($h -ne [IntPtr]::Zero) { $h } } 60
+    if ($Role -ceq 'healthy') { Set-DiagnosticStage 'healthy-window-identity' }
     $hostRun.Validate($hwnd)
+    if ($Role -ceq 'healthy') { Set-DiagnosticStage 'healthy-initial-frame'; Capture-InitialDiagnostic $hostRun $hwnd; Set-DiagnosticStage 'healthy-uia-root' }
     $window = [System.Windows.Automation.AutomationElement]::FromHandle($hwnd)
     $owned = @{ host = $hostRun; hwnd = $hwnd; window = $window; role = $Role; closed = $false }
     Assert-HostElement $owned $window
@@ -317,28 +368,36 @@ try {
         try { $stream.Write($script:sentinelBytes,0,$script:sentinelBytes.Length) } finally { $stream.Dispose() }
     }
     Record-Sentinel 'before-start'
-    Set-Phase 'healthy'
+    Set-Phase 'healthy'; Set-DiagnosticStage 'healthy-start'
     $first = New-Host 'healthy'; $script:current = $first
+    Set-DiagnosticStage 'healthy-titlebar'
     $null = Get-HostControl $first '工作台标题栏'
+    Set-DiagnosticStage 'healthy-readiness'
     $null = Wait-For { Assert-HostElement $first $first.window; $name = $first.window.Current.Name; Assert-HostElement $first $first.window; if ($name -ceq 'Default · Project Workbench') { $true } } 60
+    Set-DiagnosticStage 'healthy-catalog'
     $catalogPath = Join-Path $userRoot '.workspaces/catalog.json'; [OwnedShellHost]::RejectLinks($catalogPath)
     $catalogBytes = [IO.File]::ReadAllBytes($catalogPath); $catalog = [Text.Encoding]::UTF8.GetString($catalogBytes) | ConvertFrom-Json
     Assert-Condition (@($catalog.projects).Count -eq 1 -and $catalog.activeProjectId -ceq 'default' -and $catalog.projects[0].id -ceq 'default')
+    Set-DiagnosticStage 'healthy-project-selector'
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::NameProperty,'切换项目')
     Assert-HostElement $first $first.window
     $selector = $first.window.FindAll([System.Windows.Automation.TreeScope]::Descendants,$condition)
     Assert-HostElement $first $first.window
     if ($selector.Count -eq 1) { $candidate = $selector.Item(0); Assert-HostElement $first $candidate; $offscreen = $candidate.Current.IsOffscreen; Assert-HostElement $first $candidate }
     Assert-Condition ($selector.Count -eq 0 -or ($selector.Count -eq 1 -and $offscreen))
+    Set-DiagnosticStage 'healthy-icon'
     $icon = Join-Path ([IO.Path]::GetDirectoryName($HostExe)) 'Assets/Workbench.ico'; [OwnedShellHost]::RejectLinks($icon)
     Assert-Condition ($first.host.IconMatches($first.hwnd,$HostExe,$icon))
+    Set-DiagnosticStage 'healthy-maximize'
     $win = $null; Assert-HostElement $first $first.window
     $available = $first.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$win)
     Assert-HostElement $first $first.window; Assert-Condition $available
     Assert-HostElement $first $first.window; try { $win.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Maximized) } finally { Assert-HostAfter $first $first.window }
     $null = Wait-For { Assert-HostElement $first $first.window; $state = $win.Current.WindowVisualState; Assert-HostElement $first $first.window; if ($state -eq [System.Windows.Automation.WindowVisualState]::Maximized) { $true } }
+    Set-DiagnosticStage 'healthy-restore'
     Assert-HostElement $first $first.window; try { $win.SetWindowVisualState([System.Windows.Automation.WindowVisualState]::Normal) } finally { Assert-HostAfter $first $first.window }
     $null = Wait-For { Assert-HostElement $first $first.window; $state = $win.Current.WindowVisualState; Assert-HostElement $first $first.window; if ($state -eq [System.Windows.Automation.WindowVisualState]::Normal) { $true } }
+    Set-DiagnosticStage 'healthy-resize-small'
     $transform = $null; Assert-HostElement $first $first.window
     $available = $first.window.TryGetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern,[ref]$transform)
     Assert-HostElement $first $first.window; Assert-Condition $available
@@ -346,12 +405,15 @@ try {
     Assert-HostElement $first $first.window; try { $transform.Resize(640,600) } finally { Assert-HostAfter $first $first.window }
     $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -le 660) { $true } }
     $null = Get-HostControl $first '工作台标题栏'; $null = Get-HostControl $first '当前项目标题'
+    Set-DiagnosticStage 'healthy-resize-large'
     Assert-HostElement $first $first.window; try { $transform.Resize(1180,800) } finally { Assert-HostAfter $first $first.window }
     $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -ge 1100) { $true } }
-    Set-Theme $first '浅色'; Capture-Frame $first 'light.png'
-    Set-Theme $first '深色'; Capture-Frame $first 'dark.png'
-    Record-Sentinel 'healthy'
-    Set-Phase 'lease-conflict'
+    Set-DiagnosticStage 'healthy-theme-light'; Set-Theme $first '浅色'
+    Set-DiagnosticStage 'healthy-capture-light'; Capture-Frame $first 'light.png'
+    Set-DiagnosticStage 'healthy-theme-dark'; Set-Theme $first '深色'
+    Set-DiagnosticStage 'healthy-capture-dark'; Capture-Frame $first 'dark.png'
+    Set-DiagnosticStage 'healthy-complete'; Record-Sentinel 'healthy'
+    Set-Phase 'lease-conflict'; Set-DiagnosticStage 'lease-conflict'
     $second = New-Host 'duplicate-retry'; $script:current = $second
     $null = Get-HostControl $second '导出脱敏错误报告'
     Record-Sentinel 'duplicate-root'
@@ -393,7 +455,7 @@ try {
     $null = Wait-For { Assert-HostElement $second $second.window; $name = $second.window.Current.Name; Assert-HostElement $second $second.window; if ($name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $second; Reacquire-Roots $userRoot
     Record-Sentinel 'retry-close'
-    Set-Phase 'corrupt-catalog'
+    Set-Phase 'corrupt-catalog'; Set-DiagnosticStage 'corrupt-catalog'
     $copy = Join-Path $EvidenceRoot 'original-catalog.json'; $stream = [IO.File]::Open($copy,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None); try { $stream.Write($catalogBytes,0,$catalogBytes.Length) } finally { $stream.Dispose() }
     $catalogBefore = (Get-FileHash -LiteralPath $copy -Algorithm SHA256).Hash.ToLowerInvariant()
     $broken = [Text.Encoding]::UTF8.GetBytes('{ invalid synthetic catalog')
@@ -410,7 +472,7 @@ try {
     $null = Wait-For { Assert-HostElement $third $third.window; $name = $third.window.Current.Name; Assert-HostElement $third $third.window; if ($name -ceq 'Default · Project Workbench') { $true } } 60
     Close-Host $third; Reacquire-Roots $userRoot
     Record-Sentinel 'corrupt-recovery'
-    Set-Phase 'close-pending-picker'
+    Set-Phase 'close-pending-picker'; Set-DiagnosticStage 'close-pending-picker'
     Assert-Condition ([Convert]::ToBase64String([IO.File]::ReadAllBytes($catalogPath)) -ceq [Convert]::ToBase64String($catalogBytes))
     [IO.File]::WriteAllBytes($catalogPath,$broken)
     $fourth = New-Host 'close-pending'; $script:current = $fourth; $picker = Show-Picker $fourth
@@ -444,39 +506,53 @@ try {
     $catalogAfter = (Get-FileHash -LiteralPath $catalogPath -Algorithm SHA256).Hash.ToLowerInvariant()
     Assert-Condition ($catalogBefore -ceq $catalogAfter)
     foreach ($record in $script:records) { $record.rootReacquired = $true }
-    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); reports=@($script:reports.ToArray()); cancelWritten=$cancelWritten; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; sentinelBefore=$script:sentinelHash; sentinelAfter=$script:sentinelChecks[$script:sentinelChecks.Count-1].sha256; sentinelChecks=@($script:sentinelChecks.ToArray()); pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
+    $script:result = @{ schemaVersion=1; succeeded=$true; sourceCommit=$ExpectedSourceCommit; executableSha256=$ExeHash; dllSha256=$DllHash; forcedCleanup=$false; processes=@($script:records.ToArray()); images=@($script:images.ToArray()); diagnosticFrame=$script:initialFrame; reports=@($script:reports.ToArray()); cancelWritten=$cancelWritten; cancelEvidence=$cancelEvidence; closeEvidence=$closeEvidence; repeatEvidence=$repeatEvidence; collisionBefore=$before; collisionAfter=$after; catalogBefore=$catalogBefore; catalogAfter=$catalogAfter; sentinelBefore=$script:sentinelHash; sentinelAfter=$script:sentinelChecks[$script:sentinelChecks.Count-1].sha256; sentinelChecks=@($script:sentinelChecks.ToArray()); pickerPendingAtClose=$true; checks=@('normal','leaseConflict','retry','corruptCatalog','cancel','export','serialization','collision','closePending','light','dark','maximizeRestore','icon') }
     $script:phase = 'completed'
 } catch {
+    $script:primaryFailure = Get-SafeFailure $_; $script:primaryWaitFailure = $script:lastWaitFailure
     $script:result = @{ schemaVersion=1; succeeded=$false; phase=$script:phase; failureCode='NativeGateFailed'; forcedCleanup=$false }
 } finally {
     foreach ($hostRun in $script:hosts) {
-        if (-not $hostRun.Exited) {
-            try {
-                $hwnd = $hostRun.Window()
-                if ($hwnd -ne [IntPtr]::Zero) {
-                    $popup = $hostRun.Popup($hwnd)
-                    $owned = @{ host=$hostRun; hwnd=$hwnd; window=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd) }
-                    Assert-HostElement $owned $owned.window
-                    if ($popup -ne [IntPtr]::Zero) {
-                        $popupId=$hostRun.PopupProcessId($hwnd,$popup); $w=[System.Windows.Automation.AutomationElement]::FromHandle($popup)
-                        $picker=@{ hwnd=$popup; window=$w; processId=$popupId }; $p=$null
-                        Assert-PickerElement $owned $picker $w; $available=$w.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p); Assert-PickerElement $owned $picker $w
-                        if ($available) { Assert-PickerElement $owned $picker $w; try { $p.Close() } finally { Assert-PickerAfter $owned $picker $w } }
+        try {
+            if (-not $hostRun.Exited) {
+                if ($script:result.succeeded -and $null -eq $script:cleanupFailure) { $script:cleanupFailure = @{ type='Other'; category='Other'; hresult=$null; line=$null } }
+                try {
+                    $hwnd = $hostRun.Window()
+                    if ($hwnd -ne [IntPtr]::Zero) {
+                        $popup = $hostRun.Popup($hwnd)
+                        $owned = @{ host=$hostRun; hwnd=$hwnd; window=[System.Windows.Automation.AutomationElement]::FromHandle($hwnd) }
+                        Assert-HostElement $owned $owned.window
+                        if ($popup -ne [IntPtr]::Zero) {
+                            $popupId=$hostRun.PopupProcessId($hwnd,$popup); $w=[System.Windows.Automation.AutomationElement]::FromHandle($popup)
+                            $picker=@{ hwnd=$popup; window=$w; processId=$popupId }; $p=$null
+                            Assert-PickerElement $owned $picker $w; $available=$w.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p); Assert-PickerElement $owned $picker $w
+                            if ($available) { Assert-PickerElement $owned $picker $w; try { $p.Close() } finally { Assert-PickerAfter $owned $picker $w } }
+                        }
+                        if (-not $hostRun.Exited) {
+                            Assert-HostElement $owned $owned.window; $p=$null
+                            $available=$owned.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p); Assert-HostElement $owned $owned.window
+                            if ($available) { Assert-HostElement $owned $owned.window; try { $p.Close() } finally { Assert-HostAfter $owned $owned.window } }
+                        }
+                        $null = Wait-For { if ($hostRun.Exited) { $true } } 10
                     }
-                    if (-not $hostRun.Exited) {
-                        Assert-HostElement $owned $owned.window; $p=$null
-                        $available=$owned.window.TryGetCurrentPattern([System.Windows.Automation.WindowPattern]::Pattern,[ref]$p); Assert-HostElement $owned $owned.window
-                        if ($available) { Assert-HostElement $owned $owned.window; try { $p.Close() } finally { Assert-HostAfter $owned $owned.window } }
-                    }
-                    $null = Wait-For { if ($hostRun.Exited) { $true } } 10
-                }
-            } catch { }
-            if (-not $hostRun.Exited) { try { $script:forced=$true; $hostRun.TerminateOwned() } catch { } }
-        }
-        try { if ($hostRun.LiveCount() -ne 0) { $script:forced=$true; $hostRun.TerminateOwned() } } catch { $script:forced=$true }
-        $hostRun.Dispose()
+                } catch { if ($null -eq $script:cleanupFailure) { $script:cleanupFailure = Get-SafeFailure $_ } }
+                if (-not $hostRun.Exited) { $script:forced=$true; $hostRun.TerminateOwned() }
+            }
+            if ($hostRun.LiveCount() -ne 0) { $script:forced=$true; $hostRun.TerminateOwned() }
+        } catch { $script:forced = $true; if ($null -eq $script:cleanupFailure) { $script:cleanupFailure = Get-SafeFailure $_ } }
+        finally { try { $hostRun.Dispose() } catch { $script:forced = $true; if ($null -eq $script:cleanupFailure) { $script:cleanupFailure = Get-SafeFailure $_ } } }
     }
-    if ($script:forced) { $script:result.succeeded=$false; $script:result.forcedCleanup=$true }
+    if ($script:forced -or $null -ne $script:cleanupFailure) {
+        if ($script:result.succeeded) {
+            $script:phase = 'cleanup'; $script:stage = 'cleanup'; $script:primaryWaitFailure = $null
+            $script:primaryFailure = if ($null -ne $script:cleanupFailure) { $script:cleanupFailure } else { @{ type='Other'; category='Other'; hresult=$null; line=$null } }
+            $script:result = @{ schemaVersion=1; succeeded=$false; phase='cleanup'; failureCode='NativeGateFailed'; forcedCleanup=$script:forced }
+        } else { $script:result.forcedCleanup = $script:forced }
+    }
+    if ($null -ne $script:result -and -not $script:result.succeeded) {
+        if ($null -eq $script:primaryFailure) { $script:primaryFailure = @{ type='Other'; category='Other'; hresult=$null; line=$null } }
+        $script:result['diagnostic'] = New-FailureDiagnostic
+    }
     if ($script:canWrite -and $null -ne $script:result) {
         try {
             $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($script:result | ConvertTo-Json -Depth 10))
