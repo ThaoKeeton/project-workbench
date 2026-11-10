@@ -81,6 +81,14 @@ $script:iconTrace.Difference=$null
 $withoutDifference=(New-FailureDiagnostic).icon
 if ($withoutDifference.ContainsKey('difference')) { throw 'Driver emitted an incomplete aggregate.' }
 if ($withoutDifference.pngSwitch -cne 'false') { throw 'Driver dropped switch observation before a completed scan.' }
+$script:iconRegression = @{ legacyWidth = 16; legacyHeight = 16; legacyOutOfRange = $true }
+$script:resizeDiag = @{ largeAfterImmediate = @{ width = 900; height = 800; x = 1; y = 2 }; largeWait = @{ threshold = 1100; met = $false } }
+$retained = New-FailureDiagnostic
+if ($retained.iconRegression.legacyWidth -ne 16 -or $retained.iconRegression.legacyHeight -ne 16 -or $retained.iconRegression.legacyOutOfRange -ne $true -or
+    $retained.resize.largeWait.threshold -ne 1100 -or $retained.resize.largeWait.met -or $retained.resize.largeAfterImmediate.width -ne 900) {
+    throw 'Driver dropped icon regression or resize observations under StrictMode.'
+}
+Remove-Variable iconRegression,resizeDiag -Scope Script
 Write-Host 'Actual driver receipt builder: bounded synthetic aggregate and process-local switch observation passed; no native execution.'
 
 # The same accumulator used by the bitmap loop must count exact ARGB

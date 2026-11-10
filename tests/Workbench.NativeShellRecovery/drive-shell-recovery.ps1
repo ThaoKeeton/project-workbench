@@ -72,9 +72,22 @@ function New-FailureDiagnostic {
             }
         }
     }
+    $legacy = $null; $legacyVariable = Get-Variable -Name iconRegression -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $legacyVariable) { $legacy = $legacyVariable.Value }
     $resize = $null; $resizeVariable = Get-Variable -Name resizeDiag -Scope Script -ErrorAction SilentlyContinue
     if ($null -ne $resizeVariable) { $resize = $resizeVariable.Value }
     return @{ stage=$script:stage; failure=$script:primaryFailure; lastWaitFailure=$script:primaryWaitFailure; checkpointWriteFailed=$script:checkpointWriteFailed; cleanupFailure=$script:cleanupFailure; initialFrame=$script:initialFrame; icon=$icon; iconRegression=$legacy; resize=$resize }
+}
+function Save-ResizeDiagnostic {
+    if (-not $script:canWrite) { return }
+    $resizeVariable = Get-Variable -Name resizeDiag -Scope Script -ErrorAction SilentlyContinue
+    if ($null -eq $resizeVariable -or $null -eq $resizeVariable.Value) { return }
+    try {
+        $diagPath = Join-Path $EvidenceRoot 'resize-diagnostic.json'
+        $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($resizeVariable.Value | ConvertTo-Json -Depth 4 -Compress))
+        $stream = [IO.File]::Open($diagPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+        try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+    } catch { }
 }
 function Set-Phase([string]$Name) {
     $script:phase = $Name; $script:stage = $Name; $script:lastWaitFailure = $null
@@ -452,20 +465,20 @@ try {
         $rect = $first.window.Current.BoundingRectangle
         $script:resizeDiag.largeAfterImmediate = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
     } catch { $script:resizeDiag.largeAfterImmediate = @{ error = 'unavailable' } }
-    $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -ge 1100) { $true } }
-    Assert-HostElement $first $first.window
+    # The 1,100-pixel gate is unchanged. Persist the observations when that wait fails
+    # as well as when it succeeds (UIA BoundingRectangle; Win32 client/screen may differ under DPI).
+    $largeWaitMet = $false
     try {
-        $rect = $first.window.Current.BoundingRectangle
-        $script:resizeDiag.largeAfter = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
-    } catch { $script:resizeDiag.largeAfter = @{ error = 'unavailable' } }
-    # Persist observed sizes even on success for audit (UIA BoundingRectangle; Win32 client/screen may differ under DPI).
-    if ($script:canWrite) {
+        $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -ge 1100) { $true } }
+        $largeWaitMet = $true
+        Assert-HostElement $first $first.window
         try {
-            $diagPath = Join-Path $EvidenceRoot 'resize-diagnostic.json'
-            $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($script:resizeDiag | ConvertTo-Json -Depth 4 -Compress))
-            $stream = [IO.File]::Open($diagPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
-            try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
-        } catch { }
+            $rect = $first.window.Current.BoundingRectangle
+            $script:resizeDiag.largeAfter = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
+        } catch { $script:resizeDiag.largeAfter = @{ error = 'unavailable' } }
+    } finally {
+        if ($null -ne $script:resizeDiag) { $script:resizeDiag.largeWait = @{ threshold = 1100; met = [bool]$largeWaitMet } }
+        Save-ResizeDiagnostic
     }
     Set-DiagnosticStage 'healthy-theme-light'; Set-Theme $first '浅色'
     Set-DiagnosticStage 'healthy-capture-light'; Capture-Frame $first 'light.png'
