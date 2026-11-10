@@ -245,6 +245,37 @@ try {
     $withoutIcon.diagnostic.icon = $null
     $withoutIcon.diagnostic.iconRegression = $null
     Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $withoutIcon 'diagnostic-no-icon.json') -Directory $root | Out-Null; $passed++
+    $resizeFailure = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $resizeFailure.diagnostic.stage = 'healthy-resize-large'
+    $resizeFailure.diagnostic.resize = @{
+        smallBefore = @{ width = 1180; height = 800; x = 10; y = 20 }
+        smallAfter = @{ width = 640; height = 600; x = 10; y = 20 }
+        largeBefore = @{ width = 640; height = 600; x = 10; y = 20 }
+        largeAfter = $null
+        largeAfterImmediate = @{ width = 900.5; height = 700; x = -4; y = 8 }
+        largeResizeOutcome = @{ started = $true; returned = $true }
+        largeWait = @{ threshold = 1100; met = $false }
+    }
+    Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $resizeFailure 'diagnostic-resize-failed-wait.json') -Directory $root | Out-Null; $passed++
+    $resizeSuccess = $resizeFailure | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $resizeSuccess.diagnostic.resize.largeAfter = @{ width = 1180; height = 800; x = 10; y = 20 }
+    $resizeSuccess.diagnostic.resize.largeAfterImmediate = @{ error = 'unavailable' }
+    $resizeSuccess.diagnostic.resize.largeWait.met = $true
+    Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $resizeSuccess 'diagnostic-resize-met.json') -Directory $root | Out-Null; $passed++
+    $resizeNull = $failureDiagnostic | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+    $resizeNull.diagnostic.resize = $null
+    Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $resizeNull 'diagnostic-resize-null.json') -Directory $root | Out-Null; $passed++
+    foreach ($case in @('lower-threshold','extra-path','string-width','outcome-type','missing-met')) {
+        $bad = $resizeFailure | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
+        switch ($case) {
+            'lower-threshold' { $bad.diagnostic.resize.largeWait.threshold = 1000 }
+            'extra-path' { $bad.diagnostic.resize.path = 'private' }
+            'string-width' { $bad.diagnostic.resize.largeAfterImmediate.width = '900' }
+            'outcome-type' { $bad.diagnostic.resize.largeResizeOutcome.started = 1 }
+            'missing-met' { $bad.diagnostic.resize.largeWait.Remove('met') }
+        }
+        Refuse { Test-ShellRecoveryFailureDiagnostic -Path (Write-Json $bad 'bad-resize.json') -Directory $root } "resize-diagnostic-$case"
+    }
     foreach ($case in @('subject','stage','width-string','width-negative','width-range','height-array','reference-negative','extra','missing','legacy-raw','legacy-inconsistent')) {
         $bad = $withIcon | ConvertTo-Json -Depth 12 | ConvertFrom-Json -AsHashtable
         switch ($case) {

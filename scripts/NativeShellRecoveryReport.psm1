@@ -37,6 +37,44 @@ function Assert-ShellKeys($Object, [string[]]$Names) {
 function Test-ShellInt($Value, [long]$Min, [long]$Max) {
     return (($Value -is [int] -or $Value -is [long]) -and $Value -ge $Min -and $Value -le $Max)
 }
+function Test-ShellNumber($Value, [double]$Min, [double]$Max) {
+    if ($Value -isnot [int] -and $Value -isnot [long] -and $Value -isnot [double] -and $Value -isnot [decimal]) { return $false }
+    $number = [double]$Value
+    return (-not [double]::IsNaN($number) -and -not [double]::IsInfinity($number) -and $number -ge $Min -and $number -le $Max)
+}
+function Assert-ShellRecoveryResizeObservation($Observation) {
+    if ($null -eq $Observation) { return }
+    if ($Observation -isnot [Collections.IDictionary]) { throw 'ShellRecoveryResizeDiagnosticInvalid' }
+    if ($Observation.Contains('error')) {
+        Assert-ShellKeys $Observation @('error')
+        if ($Observation.error -isnot [string] -or $Observation.error -cne 'unavailable') { throw 'ShellRecoveryResizeDiagnosticInvalid' }
+        return
+    }
+    Assert-ShellKeys $Observation @('width','height','x','y')
+    if (-not (Test-ShellNumber $Observation.width 0 100000) -or -not (Test-ShellNumber $Observation.height 0 100000) -or
+        -not (Test-ShellNumber $Observation.x -100000 100000) -or -not (Test-ShellNumber $Observation.y -100000 100000)) { throw 'ShellRecoveryResizeDiagnosticInvalid' }
+}
+function Assert-ShellRecoveryResize($Resize) {
+    if ($null -eq $Resize) { return }
+    if ($Resize -isnot [Collections.IDictionary]) { throw 'ShellRecoveryResizeDiagnosticInvalid' }
+    $allowed = @('smallBefore','smallAfter','largeBefore','largeAfter','largeAfterImmediate','largeResizeOutcome','largeWait')
+    foreach ($key in @($Resize.Keys)) { if ($key -cnotin $allowed) { throw 'ShellRecoveryResizeDiagnosticInvalid' } }
+    foreach ($name in @('smallBefore','smallAfter','largeBefore','largeAfter','largeAfterImmediate')) {
+        if ($Resize.Contains($name)) { Assert-ShellRecoveryResizeObservation $Resize[$name] }
+    }
+    if ($Resize.Contains('largeResizeOutcome') -and $null -ne $Resize.largeResizeOutcome) {
+        $outcome = $Resize.largeResizeOutcome
+        Assert-ShellKeys $outcome @('started','returned')
+        if ($outcome.started -isnot [bool] -or $outcome.returned -isnot [bool]) { throw 'ShellRecoveryResizeDiagnosticInvalid' }
+    }
+    if ($Resize.Contains('largeWait')) {
+        if ($null -eq $Resize.largeWait) { throw 'ShellRecoveryResizeDiagnosticInvalid' }
+        $wait = $Resize.largeWait
+        Assert-ShellKeys $wait @('threshold','met')
+        # The native gate stays at 1,100 pixels. A receipt that records any other threshold is invalid.
+        if (-not (Test-ShellInt $wait.threshold 1100 1100) -or $wait.met -isnot [bool]) { throw 'ShellRecoveryResizeDiagnosticInvalid' }
+    }
+}
 function Test-ShellHash($Value) { return ($Value -is [string] -and $Value -cmatch '\A[0-9a-f]{64}\z') }
 # Only attributes are inspected; a preexisting normal root is never opened or enumerated.
 function Get-ShellRecoveryPreflightFailure {
@@ -205,6 +243,7 @@ function Test-ShellRecoveryFailureDiagnostic {
     $diagnosticKeys = @('stage','failure','lastWaitFailure','checkpointWriteFailed','cleanupFailure','initialFrame')
     if ($d -is [Collections.IDictionary] -and $d.Contains('icon')) { $diagnosticKeys += 'icon' }
     if ($d -is [Collections.IDictionary] -and $d.Contains('iconRegression')) { $diagnosticKeys += 'iconRegression' }
+    if ($d -is [Collections.IDictionary] -and $d.Contains('resize')) { $diagnosticKeys += 'resize' }
     Assert-ShellKeys $d $diagnosticKeys
     if ($d.stage -isnot [string] -or $d.stage -cnotin $stages -or $d.checkpointWriteFailed -isnot [bool]) { throw 'ShellRecoveryFailureDiagnosticInvalid' }
     Assert-ShellRecoverySafeFailure $d.failure
@@ -249,6 +288,7 @@ function Test-ShellRecoveryFailureDiagnostic {
         }
     }
     if ($d.Contains('iconRegression') -and $null -ne $d.iconRegression) { Assert-ShellRecoveryIconRegression $d.iconRegression }
+    if ($d.Contains('resize')) { Assert-ShellRecoveryResize $d.resize }
     return $r
 }
 function Test-ShellRecoveryFinal {
