@@ -72,9 +72,9 @@ function New-FailureDiagnostic {
             }
         }
     }
-    $legacy = $null; $legacyVariable = Get-Variable -Name iconRegression -Scope Script -ErrorAction SilentlyContinue
-    if ($null -ne $legacyVariable) { $legacy = $legacyVariable.Value }
-    return @{ stage=$script:stage; failure=$script:primaryFailure; lastWaitFailure=$script:primaryWaitFailure; checkpointWriteFailed=$script:checkpointWriteFailed; cleanupFailure=$script:cleanupFailure; initialFrame=$script:initialFrame; icon=$icon; iconRegression=$legacy }
+    $resize = $null; $resizeVariable = Get-Variable -Name resizeDiag -Scope Script -ErrorAction SilentlyContinue
+    if ($null -ne $resizeVariable) { $resize = $resizeVariable.Value }
+    return @{ stage=$script:stage; failure=$script:primaryFailure; lastWaitFailure=$script:primaryWaitFailure; checkpointWriteFailed=$script:checkpointWriteFailed; cleanupFailure=$script:cleanupFailure; initialFrame=$script:initialFrame; icon=$icon; iconRegression=$legacy; resize=$resize }
 }
 function Set-Phase([string]$Name) {
     $script:phase = $Name; $script:stage = $Name; $script:lastWaitFailure = $null
@@ -423,12 +423,50 @@ try {
     $available = $first.window.TryGetCurrentPattern([System.Windows.Automation.TransformPattern]::Pattern,[ref]$transform)
     Assert-HostElement $first $first.window; Assert-Condition $available
     Assert-HostElement $first $first.window; $canResize = $transform.Current.CanResize; Assert-HostElement $first $first.window; Assert-Condition $canResize
+    $script:resizeDiag = @{ smallBefore = $null; smallAfter = $null; largeBefore = $null; largeAfter = $null; largeResizeOutcome = $null }
+    Assert-HostElement $first $first.window
+    try {
+        $rect = $first.window.Current.BoundingRectangle
+        $script:resizeDiag.smallBefore = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
+    } catch { $script:resizeDiag.smallBefore = @{ error = 'unavailable' } }
     Assert-HostElement $first $first.window; try { $transform.Resize(640,600) } finally { Assert-HostAfter $first $first.window }
     $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -le 660) { $true } }
+    Assert-HostElement $first $first.window
+    try {
+        $rect = $first.window.Current.BoundingRectangle
+        $script:resizeDiag.smallAfter = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
+    } catch { $script:resizeDiag.smallAfter = @{ error = 'unavailable' } }
     $null = Get-HostControl $first '工作台标题栏'; $null = Get-HostControl $first '当前项目标题'
     Set-DiagnosticStage 'healthy-resize-large'
-    Assert-HostElement $first $first.window; try { $transform.Resize(1180,800) } finally { Assert-HostAfter $first $first.window }
+    Assert-HostElement $first $first.window
+    try {
+        $rect = $first.window.Current.BoundingRectangle
+        $script:resizeDiag.largeBefore = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
+    } catch { $script:resizeDiag.largeBefore = @{ error = 'unavailable' } }
+    $largeResizeStarted = $true; $largeResizeReturned = $false
+    Assert-HostElement $first $first.window
+    try { $transform.Resize(1180,800); $largeResizeReturned = $true } finally { Assert-HostAfter $first $first.window }
+    $script:resizeDiag.largeResizeOutcome = @{ started = $largeResizeStarted; returned = $largeResizeReturned }
+    Assert-HostElement $first $first.window
+    try {
+        $rect = $first.window.Current.BoundingRectangle
+        $script:resizeDiag.largeAfterImmediate = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
+    } catch { $script:resizeDiag.largeAfterImmediate = @{ error = 'unavailable' } }
     $null = Wait-For { Assert-HostElement $first $first.window; $width = $first.window.Current.BoundingRectangle.Width; Assert-HostElement $first $first.window; if ($width -ge 1100) { $true } }
+    Assert-HostElement $first $first.window
+    try {
+        $rect = $first.window.Current.BoundingRectangle
+        $script:resizeDiag.largeAfter = @{ width = $rect.Width; height = $rect.Height; x = $rect.X; y = $rect.Y }
+    } catch { $script:resizeDiag.largeAfter = @{ error = 'unavailable' } }
+    # Persist observed sizes even on success for audit (UIA BoundingRectangle; Win32 client/screen may differ under DPI).
+    if ($script:canWrite) {
+        try {
+            $diagPath = Join-Path $EvidenceRoot 'resize-diagnostic.json'
+            $bytes = [Text.UTF8Encoding]::new($false).GetBytes(($script:resizeDiag | ConvertTo-Json -Depth 4 -Compress))
+            $stream = [IO.File]::Open($diagPath,[IO.FileMode]::CreateNew,[IO.FileAccess]::Write,[IO.FileShare]::None)
+            try { $stream.Write($bytes,0,$bytes.Length) } finally { $stream.Dispose() }
+        } catch { }
+    }
     Set-DiagnosticStage 'healthy-theme-light'; Set-Theme $first '浅色'
     Set-DiagnosticStage 'healthy-capture-light'; Capture-Frame $first 'light.png'
     Set-DiagnosticStage 'healthy-theme-dark'; Set-Theme $first '深色'
