@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
+    <Project Path="src/Workbench.Service/Workbench.Service.csproj" />
+  </Folder>
+  <Folder Name="/plugins/">
+    <Project Path="plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Workbench.Service.Tests/Workbench.Service.Tests.csproj" />
+  </Folder>
+</Solution>

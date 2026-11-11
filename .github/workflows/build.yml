@@ -379,3 +379,129 @@ jobs:
         run: |
           echo 'Choose full with or without diagnostics, or shipping-recovery without diagnostics.'
           exit 1
+  service-v2-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Preview service API tests
+        run: dotnet test ProjectWorkbench.V2.slnx -c Release --nologo --logger "trx;LogFileName=service-v2-linux.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: service-v2-linux-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  web-v2-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/host/package-lock.json
+      - name: Install Chinese fonts for screenshots
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Install the web UI and Playwright
+        working-directory: web/host
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          ./node_modules/.bin/playwright install --with-deps chromium
+      - name: Typecheck, build, and run Linux Playwright tests
+        working-directory: web/host
+        run: |
+          npm run build
+          npm run test:e2e
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: web-v2-playwright
+          path: |
+            web/host/e2e/screenshots/
+            web/host/test-results/
+          if-no-files-found: warn
+          retention-days: 1
+  sonarcloud:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Skip when SONAR_TOKEN is not configured
+        id: sonar_gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "SONAR_TOKEN is not configured. Skipping SonarQube Cloud analysis."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-dotnet@v6.1.0
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-java@v4.7.1
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-node@v7.1.0
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/host/package-lock.json
+      - name: Analyze the preview service and web UI
+        if: steps.sonar_gate.outputs.skip != 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          dotnet tool install --global dotnet-sonarscanner
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          # Absolute report path: the .NET scanner resolves this property from each
+          # project directory, so a repo-relative path is invisible to the plugin project.
+          lcov_report="$(pwd)/web/host/coverage/lcov.info"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${lcov_report}"
+          dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
+          dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
+          npm ci --ignore-scripts --prefix web/host
+          npm rebuild esbuild --prefix web/host
+          npm run test:unit --prefix web/host
+          python3 - <<'PY'
+          from pathlib import Path
+          report = Path("web/host/coverage/lcov.info")
+          root = Path("web/host").resolve()
+          lines = []
+          for line in report.read_text().splitlines():
+              if line.startswith("SF:"):
+                  line = "SF:" + (root / line[3:]).resolve().as_posix()
+              lines.append(line)
+          report.write_text("\n".join(lines) + "\n")
+          PY
+          set +e
+          dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+          status=$?
+          set -e
+          echo "SonarQube Cloud quality gate:"
+          pr="${PR_NUMBER:-}"
+          query="projectKey=ThaoKeeton_project-workbench"
+          if [ -n "$pr" ]; then query="${query}&pullRequest=${pr}"; fi
+          curl -fsS -H "Authorization: Bearer ${SONAR_TOKEN}" "https://sonarcloud.io/api/qualitygates/project_status?${query}" | jq '{status: .projectStatus.status, conditions: .projectStatus.conditions}' || echo "Quality gate API was not readable."
+          echo "Top open issues:"
+          curl -fsS -H "Authorization: Bearer ${SONAR_TOKEN}" "https://sonarcloud.io/api/issues/search?componentKeys=ThaoKeeton_project-workbench&pullRequest=${pr}&resolved=false&ps=10&s=SEVERITY&asc=false" | jq '[.issues[] | {severity, type, rule, component, line, message}]' || echo "Issue API was not readable."
+          exit "$status"

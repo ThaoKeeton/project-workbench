@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <ProjectReference Include="../../src/Workbench.Service/Workbench.Service.csproj" />
+    <ProjectReference Include="../../plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" />
+    <ProjectReference Include="../../src/Workbench.Core/Workbench.Core.csproj" />
+  </ItemGroup>
+  <Target Name="StagePreviewPluginForTests" AfterTargets="Build">
+    <PropertyGroup>
+      <_SampleOut>$(MSBuildThisFileDirectory)../../plugins/v2/Workbench.TestCases.V2/bin/$(Configuration)/net10.0/</_SampleOut>
+      <_Stage>$(TargetDir)preview-plugins/com.projectworkbench.test-cases.v2/</_Stage>
+    </PropertyGroup>
+    <MakeDir Directories="$(_Stage)" />
+    <Copy SourceFiles="$(_SampleOut)Workbench.TestCases.V2.dll;$(_SampleOut)Workbench.TestCases.V2.deps.json;$(MSBuildThisFileDirectory)../../plugins/v2/Workbench.TestCases.V2/plugin.v2.json" DestinationFolder="$(_Stage)" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

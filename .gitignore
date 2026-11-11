@@ -11,3 +11,11 @@ TestResults/
 
 # Native Windows tool state produced by Linux reference probes
 **/.mono/
+
+# v2 preview web UI
+web/host/node_modules/
+web/host/dist/
+web/host/test-results/
+web/host/playwright-report/
+web/host/e2e/screenshots/
+web/host/coverage/
