@@ -1,127 +1,102 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { MemoryRouter } from "react-router-dom";
+import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api";
-import type { Snapshot } from "./App";
-import { CasesPage, DevicesPage, DiagnosticsPage, HomePage, PluginsPage, ProjectsPage, SettingsPage } from "./pages";
+import { formatLauncherDate } from "./catalog";
+import { HomePage } from "./launcher";
+import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
+import { DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SettingsPage } from "./workspace";
 
 afterEach(() => cleanup());
 
-const snapshot: Snapshot = {
-  info: {
-    product: "ProjectWorkbench",
-    apiVersion: "2.0.0-preview.1",
-    preview: true,
-    device: { id: "local", label: "本机", kind: "loopback" },
-    lan: { enabled: false, availableInPreview: false },
-    autoSend: false,
-    catalogSchemaVersion: 1,
-  },
-  projects: {
-    schemaVersion: 1,
-    revision: "rev-1",
-    activeProjectId: "default",
-    projects: [
-      { id: "default", name: "默认示例", isArchived: false },
-      { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "示例项目", isArchived: false },
-    ],
-  },
-  plugins: [
-    { id: "com.projectworkbench.summary", name: "工作摘要 · 示例", version: "0.1.0", contract: "v1", state: "Disabled", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
-    { id: "com.projectworkbench.test-cases.v2", name: "测试用例 · 示例", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [{ id: "local.file.export", sensitive: false }], uiPath: "/plugins/test-cases" },
-  ],
-  diagnostics: {
-    schema: "workbench.diagnostics.v2.preview",
-    service: { bind: "loopback", lanEnabled: false, autoSend: false },
-    plugins: { discovered: 2, ready: 1, invalid: 0, loaded: 1 },
-    projects: { count: 2, activePresent: true },
-    issues: [],
-    nativeWindow: { minimumWidth: 1100 },
-  },
-  channel: "已连接",
-};
+const client = {
+  cases: vi.fn(async () => ({ schema: "workbench.test-cases.v2.preview", schemaVersion: 2, suiteName: "原生工作台演示", rows: [{ id: "EX-001", action: "启用本地插件", expected: "页面出现在主窗口" }, { id: "EX-002", action: "编辑摘要示例", expected: "草稿保存到本地数据目录" }, { id: "EX-003", action: "停用示例插件", expected: "页面与命令入口撤销" }] })),
+  saveCases: vi.fn(async (document: unknown) => document),
+  exportCases: vi.fn(async () => new Blob(["suite,id\n"])),
+} as unknown as ApiClient;
 
-function client(): ApiClient {
-  return {
-    switchProject: vi.fn(async () => ({ ...snapshot.projects, activeProjectId: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", revision: "rev-2" })),
-    info: vi.fn(async () => snapshot.info),
-    plugins: vi.fn(async () => snapshot.plugins),
-    diagnostics: vi.fn(async () => snapshot.diagnostics),
-    cases: vi.fn(async () => ({ schema: "workbench.test-cases.v2.preview", schemaVersion: 2, suiteName: "原生工作台演示", rows: [{ id: "EX-001", action: "启用本地插件", expected: "页面出现在主窗口" }, { id: "EX-002", action: "编辑摘要示例", expected: "草稿保存到本地数据目录" }, { id: "EX-003", action: "停用示例插件", expected: "页面与命令入口撤销" }] })),
-    saveCases: vi.fn(async (document) => document),
-    exportCases: vi.fn(async () => new Blob(["suite,id\n"])),
-  } as unknown as ApiClient;
-}
-
-describe("preview pages", () => {
-  it("renders the overview, plugins, diagnostics, and devices", async () => {
+describe("launcher pages", () => {
+  it("formats the launcher date and opens a recent plugin", async () => {
+    expect(formatLauncherDate(new Date(2026, 10, 11))).toBe("11 月 11 日 星期三");
     const user = userEvent.setup();
-    render(<MemoryRouter><HomePage snapshot={snapshot} /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "今天的工作台" })).toBeTruthy();
-    for (const name of ["配对设备", "查看更新", "打开诊断", "生成预览", "打开检查", "查看阶段", "管理", "去更新", "查看"]) {
-      await user.click(screen.getByRole("button", { name }));
-    }
-    expect(screen.getByText("本机 · 星河笔记本")).toBeTruthy();
-    cleanup();
-    render(<MemoryRouter><PluginsPage plugins={snapshot.plugins} /></MemoryRouter>);
-    expect(document.body.textContent).toContain("未启用");
-    cleanup();
-    const withIssue: Snapshot = { ...snapshot, diagnostics: { ...snapshot.diagnostics, service: { ...snapshot.diagnostics.service, bind: "other" }, issues: [{ code: "InvalidManifest" }] } };
-    render(<DiagnosticsPage snapshot={withIssue} />);
-    expect(document.body.textContent).toContain("InvalidManifest");
-    cleanup();
-    render(<DevicesPage />);
-    expect(screen.getByRole("heading", { name: "设备" })).toBeTruthy();
+    render(<MemoryRouter><HomePage onOpenPalette={vi.fn()} date={new Date(2026, 10, 11)} /></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "早上好，文前" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /UPCAM 站会日报/ }));
   });
 
-  it("switches theme and project", async () => {
+  it("browses the market, confirms an install, and opens the detail", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><MarketPage onOpen={vi.fn()} /></MemoryRouter>);
+    await user.click(screen.getByRole("tab", { name: "测试" }));
+    expect(screen.getByText("用例仓库")).toBeTruthy();
+    await user.click(screen.getAllByRole("button", { name: "安装" })[0]);
+    expect(screen.getByRole("dialog")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("shows installed detail, updates, and the import checklist", async () => {
+    const user = userEvent.setup();
+    const { unmount } = render(<MemoryRouter><InstalledPage onOpen={vi.fn()} /></MemoryRouter>);
+    await user.click(screen.getAllByRole("button", { name: /钉钉 Insights/ })[0]);
+    await user.click(screen.getByRole("button", { name: "卸载" }));
+    unmount();
+    render(<MemoryRouter><UpdatesPage /></MemoryRouter>);
+    await user.click(screen.getByRole("button", { name: /钉钉 Insights/ }));
+    expect(screen.getByText("热点计算忽略已撤回的消息")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "更新全部" }));
+    expect(screen.getAllByRole("button", { name: "已更新" }).length).toBeGreaterThan(0);
+    cleanup();
+    render(<MemoryRouter><ImportPage onOpen={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByText("未请求网络访问")).toBeTruthy();
+    const file = new File(["{}"], "sample.pbpack", { type: "application/octet-stream" });
+    await user.upload(screen.getByLabelText("选择文件"), file);
+    expect(screen.getByText("sample.pbpack")).toBeTruthy();
+  });
+
+  it("covers settings, diagnostics, pairing, offline, crash and empty states", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<SettingsPage setting="system" onChange={onChange} />);
-    await user.click(screen.getByRole("radio", { name: "深色" }));
+    const onRestore = vi.fn();
+    const onMotion = vi.fn();
+    render(<SettingsPage setting="system" onChange={onChange} restore onRestore={onRestore} reduceMotion={false} onReduceMotion={onMotion} />);
+    await user.click(screen.getByRole("radio", { name: /深色/ }));
     expect(onChange).toHaveBeenCalledWith("dark");
+    await user.click(screen.getByRole("button", { name: "开启" }));
+    expect(onRestore).toHaveBeenCalledWith(false);
+    await user.click(screen.getByRole("button", { name: "关闭" }));
+    expect(onMotion).toHaveBeenCalledWith(true);
     cleanup();
-    const api = client();
-    const onSwitched = vi.fn();
-    render(<ProjectsPage client={api} snapshot={snapshot} onSwitched={onSwitched} />);
-    await user.click(screen.getByRole("button", { name: "切换到此项目" }));
-    expect(onSwitched).toHaveBeenCalled();
-  });
-
-  it("opens a plugin and reports a failed project switch", async () => {
-    const user = userEvent.setup();
-    render(<MemoryRouter><PluginsPage plugins={[
-      ...snapshot.plugins,
-      { id: "broken", name: "损坏", version: "0.0.1", contract: "v1", state: "Failed", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
-      { id: "stopping", name: "停止中", version: "0.0.1", contract: "v1", state: "Stopping", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
-      { id: "enabled", name: "已开", version: "0.0.1", contract: "v1", state: "Enabled", trusted: false, loaded: true, diagnostics: [], permissions: [], uiPath: null },
-      { id: "other", name: "其他", version: "0.0.1", contract: "v1", state: "Mystery", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
-    ]} /></MemoryRouter>);
-    expect(document.body.textContent).toContain("失败");
-    expect(document.body.textContent).toContain("未知");
-    await user.click(screen.getByRole("button", { name: "打开插件" }));
+    render(<DiagnosticsPage minimumWidth={1100} />);
+    expect(screen.getByText(/仅本机回环/)).toBeTruthy();
+    expect(screen.getByText(/1,100/)).toBeTruthy();
     cleanup();
-    const api = client();
-    api.switchProject = vi.fn(async () => { throw new Error("nope"); });
-    const archived = {
-      ...snapshot,
-      projects: {
-        ...snapshot.projects,
-        projects: [...snapshot.projects.projects, { id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", name: "归档项目", isArchived: true }],
-      },
-    };
-    render(<ProjectsPage client={api} snapshot={archived} onSwitched={vi.fn()} />);
-    expect(document.body.textContent).toContain("已归档");
-    await user.click(screen.getByRole("button", { name: "切换到此项目" }));
-    expect(await screen.findByText("无法切换项目。")).toBeTruthy();
-  });
-
-  it("loads the sample cases", async () => {
-    const user = userEvent.setup();
+    render(<MemoryRouter><PairingPage /></MemoryRouter>);
+    expect(screen.getByText("7K4M — XQ2P")).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter><OfflinePage onRetry={vi.fn()} /></MemoryRouter>);
+    await user.click(screen.getByRole("button", { name: "重试" }));
+    cleanup();
+    render(<MemoryRouter initialEntries={["/plugin/test/stopped"]}><PluginWorkspace client={client} crashed /></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: /已停止运行/ })).toBeTruthy();
+    expect(screen.getByText("renderer timeout after 12s")).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} empty="target" />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "找不到目标程序" })).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} empty="agent" />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "Agent 未就绪" })).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} empty="key" />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "尚未配置模型密钥" })).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
+    await user.click(screen.getByRole("button", { name: "打开测试设计" }));
+    cleanup();
     URL.createObjectURL = () => "blob:preview";
     URL.revokeObjectURL = () => undefined;
-    render(<MemoryRouter><CasesPage client={client()} /></MemoryRouter>);
+    render(<MemoryRouter initialEntries={["/plugin/test"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
     const step = await screen.findByDisplayValue("启用本地插件");
     const expected = screen.getByLabelText("EX-001 预期");
     await user.clear(step);
@@ -133,21 +108,24 @@ describe("preview pages", () => {
     await user.click(screen.getByRole("button", { name: "导出本地 CSV" }));
     expect(await screen.findByText("已导出到本机，未发送。")).toBeTruthy();
     cleanup();
-    const failing = client();
-    failing.cases = vi.fn(async () => { throw new Error("nope"); });
-    render(<MemoryRouter><CasesPage client={failing} /></MemoryRouter>);
+    const failing = { ...client, cases: vi.fn(async () => { throw new Error("nope"); }), saveCases: client.saveCases, exportCases: client.exportCases } as ApiClient;
+    render(<MemoryRouter initialEntries={["/plugin/test"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={failing} />} /></Routes></MemoryRouter>);
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "无法读取示例用例。");
     cleanup();
-    const saving = client();
-    saving.saveCases = vi.fn(async () => { throw new Error("nope"); });
-    render(<MemoryRouter><CasesPage client={saving} /></MemoryRouter>);
+    const saving = { ...client, saveCases: vi.fn(async () => { throw new Error("nope"); }) } as ApiClient;
+    render(<MemoryRouter initialEntries={["/plugin/test"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={saving} />} /></Routes></MemoryRouter>);
     await user.click(await screen.findByRole("button", { name: "保存示例草稿" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "没有保存。");
     cleanup();
-    const exporting = client();
-    exporting.exportCases = vi.fn(async () => { throw new Error("nope"); });
-    render(<MemoryRouter><CasesPage client={exporting} /></MemoryRouter>);
+    const exporting = { ...client, exportCases: vi.fn(async () => { throw new Error("nope"); }) } as ApiClient;
+    render(<MemoryRouter initialEntries={["/plugin/test"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={exporting} />} /></Routes></MemoryRouter>);
     await user.click(await screen.findByRole("button", { name: "导出本地 CSV" }));
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "没有导出。");
+    cleanup();
+    render(<MemoryRouter initialEntries={["/plugin/ding"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "钉钉 Insights" })).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter initialEntries={["/market/minutes"]}><Routes><Route path="/market/:id" element={<MarketDetail />} /></Routes></MemoryRouter>);
+    expect(screen.getByText("版本历史")).toBeTruthy();
   });
 });

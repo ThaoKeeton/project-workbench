@@ -1,0 +1,161 @@
+export type IconName =
+  | "home"
+  | "clipboard"
+  | "chat"
+  | "flask"
+  | "activity"
+  | "store"
+  | "devices"
+  | "diagnostics"
+  | "settings"
+  | "folder"
+  | "laptop"
+  | "server";
+
+export type PluginId = "upcam" | "ding" | "test" | "runner";
+
+export type MarketBadge = "官方" | "已签名" | "本地导入";
+export type MarketCategory = "效率" | "协作" | "测试" | "工具";
+
+export type MarketItem = {
+  id: string;
+  pluginId?: PluginId;
+  name: string;
+  summary: string;
+  author: string;
+  version: string;
+  badge: MarketBadge;
+  category: MarketCategory;
+  installed: boolean;
+  featured?: boolean;
+  blurb?: string;
+};
+
+export const pinnedPlugins: Array<{ id: PluginId; name: string; icon: IconName; hint: string }> = [
+  { id: "upcam", name: "UPCAM 站会日报", icon: "clipboard", hint: "整理今日站会并生成草稿" },
+  { id: "ding", name: "钉钉 Insights", icon: "chat", hint: "看本周沟通热点与会议节奏" },
+  { id: "test", name: "测试设计", icon: "flask", hint: "用例仓库与失败分流" },
+  { id: "runner", name: "自动化测试执行器", icon: "activity", hint: "从已保存的套件开始运行" },
+];
+
+export const todayItems = [
+  { time: "09:20", source: "UPCAM", title: "XH-128 登录页视觉走查进入终检" },
+  { time: "09:41", source: "钉钉 Insights", title: "本周站会日报已写入草稿" },
+  { time: "10:05", source: "测试设计", title: "17 条失败待分流，集中在支付回调" },
+];
+
+export const recentPlugins = [
+  { id: "upcam" as const, name: "UPCAM 站会日报", hint: "整理今日站会并生成草稿", icon: "clipboard" as const },
+  { id: "ding" as const, name: "钉钉 Insights", hint: "看本周沟通热点与会议节奏", icon: "chat" as const },
+  { id: "test" as const, name: "测试设计", hint: "用例仓库与失败分流", icon: "flask" as const },
+];
+
+export const devices = [
+  { id: "local", group: "本机", name: "星河笔记本", status: "当前设备", remote: false, icon: "laptop", dot: "on" },
+  { id: "study", group: "局域网", name: "书房工作站", status: "在线 · LAN", remote: true, icon: "server", dot: "on" },
+  { id: "living", group: "局域网", name: "客厅小主机", status: "休眠", remote: true, icon: "server", dot: "sleep" },
+] as const;
+
+export type DeviceId = (typeof devices)[number]["id"];
+
+export const marketItems: MarketItem[] = [
+  {
+    id: "upcam",
+    pluginId: "upcam",
+    name: "UPCAM 站会日报",
+    summary: "整理今日站会并生成只留在本机的日报草稿",
+    blurb: "整理今日站会并生成草稿",
+    author: "星河实验室",
+    version: "v1.4.2",
+    badge: "官方",
+    category: "效率",
+    installed: true,
+    featured: true,
+  },
+  {
+    id: "minutes",
+    name: "会议纪要助手",
+    summary: "从录音稿提取决议与待办，不自动外发",
+    author: "青裔测试",
+    version: "v1.0.3",
+    badge: "已签名",
+    category: "协作",
+    installed: false,
+    featured: true,
+  },
+  {
+    id: "ding",
+    pluginId: "ding",
+    name: "钉钉 Insights",
+    summary: "看本周沟通热点与会议节奏",
+    author: "星河实验室",
+    version: "v0.9.1",
+    badge: "官方",
+    category: "协作",
+    installed: true,
+  },
+  {
+    id: "test",
+    pluginId: "test",
+    name: "测试设计",
+    summary: "用例仓库与失败分流",
+    author: "青裔测试",
+    version: "v2.1.0",
+    badge: "已签名",
+    category: "测试",
+    installed: true,
+  },
+  {
+    id: "calendar",
+    name: "日历同步",
+    summary: "把日程与站会纪要对齐到本周视图",
+    author: "林间工作室",
+    version: "v1.2.0",
+    badge: "已签名",
+    category: "效率",
+    installed: false,
+  },
+  {
+    id: "backup",
+    name: "本地备份助手",
+    summary: "将插件数据定期写入本机目录",
+    author: "北窗",
+    version: "v0.8.4",
+    badge: "已签名",
+    category: "工具",
+    installed: false,
+  },
+  {
+    id: "markup",
+    name: "截图批注",
+    summary: "在截图上圈点并回写到事项",
+    author: "北窗",
+    version: "v1.1.1",
+    badge: "已签名",
+    category: "工具",
+    installed: false,
+  },
+  {
+    id: "cases",
+    name: "用例仓库",
+    summary: "把测试用例按模块归档检索",
+    author: "青裔测试",
+    version: "v3.0.0",
+    badge: "官方",
+    category: "测试",
+    installed: false,
+  },
+];
+
+export const categories = ["全部", "效率", "协作", "测试", "工具"] as const;
+
+export function formatLauncherDate(date: Date): string {
+  const weekday = "日一二三四五六"[date.getDay()];
+  return `${date.getMonth() + 1} 月 ${date.getDate()} 日 星期${weekday}`;
+}
+
+export function deviceLabel(id: DeviceId): string {
+  const device = devices.find((item) => item.id === id);
+  if (!device) return "本机 · 星河笔记本";
+  return device.remote ? `远程 · ${device.name}` : `本机 · ${device.name}`;
+}

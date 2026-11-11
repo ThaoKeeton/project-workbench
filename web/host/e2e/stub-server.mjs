@@ -26,8 +26,8 @@ function fresh() {
     revision: "rev-1",
     activeProjectId: "default",
     projects: [
-      { id: "default", name: "默认示例", isArchived: false },
-      { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "示例项目", isArchived: false },
+      { id: "default", name: "星河协作", isArchived: false },
+      { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "灯塔实验", isArchived: false },
     ],
     cases: {},
     themeSetting: "system",
