@@ -127,6 +127,7 @@ public sealed partial class PluginManager : IAsyncDisposable
             ObjectDisposedException.ThrowIf(_disposed, this);
             foreach (var entry in Volatile.Read(ref _entries))
                 await StopRuntimeAsync(entry, PluginStopReason.HostShutdown, cancellationToken);
+            await SettlePendingStopsAsync(cancellationToken);
             if (HasPendingStops) throw new PluginShutdownException();
             if (_projectPreparation is { } preparation) await preparation.ConfigureAwait(false);
         }
@@ -306,6 +307,7 @@ public sealed partial class PluginManager : IAsyncDisposable
                 return;
             foreach (var entry in Volatile.Read(ref _entries))
                 await StopRuntimeAsync(entry, PluginStopReason.HostShutdown, CancellationToken.None);
+            await SettlePendingStopsAsync(CancellationToken.None);
             if (HasPendingStops) throw new PluginShutdownException();
             if (_projectPreparation is { } preparation) await preparation.ConfigureAwait(false);
             _disposed = true;
@@ -478,6 +480,26 @@ public sealed partial class PluginManager : IAsyncDisposable
                 return new(false, message);
             }
         }
+    }
+
+    private async Task SettlePendingStopsAsync(CancellationToken cancellationToken)
+    {
+        if (!HasPendingStops) return;
+        var stops = Volatile.Read(ref _entries)
+            .Select(entry => entry.StopTask)
+            .Where(stop => stop is { IsCompleted: false })
+            .Cast<Task>()
+            .ToArray();
+        if (stops.Length > 0)
+        {
+            try { await Task.WhenAll(stops).WaitAsync(_options.StopTimeout, cancellationToken); }
+            catch (TimeoutException)
+            {
+                // The bound elapsed and the plugin is still stopping. Shutdown reports that below.
+            }
+        }
+        foreach (var entry in Volatile.Read(ref _entries))
+            if (entry.StopTask is { IsCompletedSuccessfully: true }) CompleteStop(entry);
     }
 
     private async Task<PluginOperationResult> StopRuntimeAsync(Entry entry, PluginStopReason reason, CancellationToken cancellationToken)
