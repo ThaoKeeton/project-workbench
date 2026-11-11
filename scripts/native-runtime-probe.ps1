@@ -15,6 +15,16 @@ $managementRoot = Join-Path $temporary ([Guid]::NewGuid().ToString('N'))
 $restartRoot = Join-Path $temporary ([Guid]::NewGuid().ToString('N'))
 $phases = @('management', 'restart-seed', 'restart-verify', 'restart-disabled', 'update-verify', 'rollback-verify', 'remove-verify')
 $completed = @()
+
+function Write-NativeProbeFailureDetail([string]$Phase, [string]$Report, [string]$Output) {
+    Write-Host "Native runtime probe $Phase failed. Report: $Report"
+    foreach ($path in @($Report, "$Report.evidence.json", (Join-Path $Output "$Phase.stdout.log"), (Join-Path $Output "$Phase.stderr.log"))) {
+        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { continue }
+        if ((Get-Item -LiteralPath $path).Length -eq 0) { Write-Host "---- $path (empty) ----"; continue }
+        Write-Host "---- $path ----"
+        Get-Content -LiteralPath $path -Raw | Write-Host
+    }
+}
 foreach ($phase in $phases) {
     $report = Join-Path $output "$phase.json"
     $root = if ($phase -eq 'management') { $managementRoot } else { $restartRoot }
@@ -25,7 +35,10 @@ foreach ($phase in $phases) {
         $arguments = @('--runtime-probe', $phase, '--probe-root', "`"$root`"", '--smoke-report', "`"$report`"")
         $process = Start-Process -FilePath $app -ArgumentList $arguments -PassThru -RedirectStandardOutput (Join-Path $output "$phase.stdout.log") -RedirectStandardError (Join-Path $output "$phase.stderr.log")
         if (-not $process.WaitForExit($TimeoutSeconds * 1000)) { throw "Isolated native runtime probe $phase timed out; process $($process.Id) remains owned. No force termination was requested." }
-        if ($process.ExitCode -ne 0) { throw "Native runtime probe $phase exited with $($process.ExitCode)." }
+        if ($process.ExitCode -ne 0) {
+            Write-NativeProbeFailureDetail -Phase $phase -Report $report -Output $output
+            throw "Native runtime probe $phase exited with $($process.ExitCode)."
+        }
         if (-not (Test-Path -LiteralPath $report -PathType Leaf)) { throw "Native runtime probe $phase did not write a report." }
         $result = Get-Content -LiteralPath $report -Raw | ConvertFrom-Json
         if ($result.succeeded -ne $true -or $result.probe -ne $phase -or $result.userRoot -ne $root -or $result.checks.Count -eq 0) { throw "Native runtime probe $phase did not establish its required success evidence." }

@@ -492,10 +492,16 @@ public sealed partial class PluginManager : IAsyncDisposable
             .ToArray();
         if (stops.Length > 0)
         {
-            try { await Task.WhenAll(stops).WaitAsync(_options.StopTimeout, cancellationToken); }
+            // The lifecycle gate is still held, so a stop that finishes just after its
+            // budget cannot clear itself. A full extra budget would also push an
+            // intentional hold past the native close deadline.
+            var grace = _options.StopTimeout < TimeSpan.FromMilliseconds(500)
+                ? _options.StopTimeout
+                : TimeSpan.FromMilliseconds(500);
+            try { await Task.WhenAll(stops).WaitAsync(grace, cancellationToken); }
             catch (TimeoutException)
             {
-                // The bound elapsed and the plugin is still stopping. Shutdown reports that below.
+                // The plugin is still stopping. Shutdown reports PluginStopPending below.
             }
         }
         foreach (var entry in Volatile.Read(ref _entries))
