@@ -182,14 +182,18 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
         });
         app.MapPost("/api/v2/session", (HttpContext context) =>
         {
-            context.Response.Cookies.Append(SessionTokens.CookieName, token, new CookieOptions
+            // Loopback preview speaks HTTP. Forcing Secure would make the browser drop the cookie.
+#pragma warning disable S2092
+            var cookie = new CookieOptions
             {
                 HttpOnly = true,
                 SameSite = SameSiteMode.Strict,
-                Secure = context.Request.IsHttps, // NOSONAR loopback HTTP must not force Secure or the browser drops the cookie
+                Secure = context.Request.IsHttps,
                 IsEssential = true,
                 Path = "/api"
-            });
+            };
+#pragma warning restore S2092
+            context.Response.Cookies.Append(SessionTokens.CookieName, token, cookie);
             return Results.NoContent();
         });
         app.Map("/api/v2/events", HandleEventsAsync);

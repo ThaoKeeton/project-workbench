@@ -312,17 +312,26 @@ public sealed class ServiceApiTests
     {
         var root = TempRoot();
         using var cancel = new CancellationTokenSource();
+        var plugins = Path.Combine(root, "plugins-v2");
+        CopySample(plugins);
+        Directory.CreateDirectory(Path.Combine(root, "empty-ui"));
+        var output = new StringWriter();
+        var previousOut = Console.Out;
+        Console.SetOut(output);
         var task = Program.RunAsync(
         [
             "--user-root", root,
             "--v1-plugins", Path.Combine(root, "plugins-v1"),
-            "--v2-plugins", Path.Combine(AppContext.BaseDirectory, "preview-plugins")
+            "--v2-plugins", plugins,
+            "--ui-dist", Path.Combine(root, "empty-ui")
         ], cancel.Token);
         var deadline = DateTime.UtcNow.AddSeconds(10);
-        while (!File.Exists(Path.Combine(root, ".workspaces", "catalog.json")) && DateTime.UtcNow < deadline)
+        while (!output.ToString().Contains("listening: http://127.0.0.1:", StringComparison.Ordinal) && !task.IsCompleted && DateTime.UtcNow < deadline)
             await Task.Delay(50);
         cancel.Cancel();
-        Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(15)));
+        var code = await task.WaitAsync(TimeSpan.FromSeconds(15));
+        Console.SetOut(previousOut);
+        Assert.Equal(0, code);
     }
 
     private static async Task<string> ReceiveAsync(ClientWebSocket socket)
