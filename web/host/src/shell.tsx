@@ -35,12 +35,12 @@ export function Shell({
   return (
     <div className="shell">
       <header className="topbar">
-        <div className="project-name">
-          <Icon name="folder" />
-          <span>{projectName}</span>
-        </div>
+        <div className="wordmark">Project Workbench</div>
         <div className="top-grow" />
         {remote ? <span className="remote-pill"><i />远程会话</span> : null}
+        <div className="top-context">
+          <span className="context-project">{projectName}</span>
+          <span className="context-dot" aria-hidden="true">·</span>
         <div className="device">
           <button type="button" className="device-trigger" aria-expanded={deviceOpen} aria-haspopup="menu" onClick={onToggleDevice}>
             <Icon name="laptop" />
@@ -66,6 +66,7 @@ export function Shell({
             </div>
           ) : null}
         </div>
+        </div>
         <div className="window-controls" aria-hidden="false">
           <button type="button" aria-label="最小化"><WindowGlyph kind="min" /></button>
           <button type="button" aria-label="最大化"><WindowGlyph kind="max" /></button>
@@ -75,7 +76,7 @@ export function Shell({
       <div className="shell-body">
         <nav className="rail" aria-label="主导航">
           <RailLink to="/" label="首页" icon="home" end />
-          {pinnedPlugins.map((plugin) => (
+          {pinnedPlugins.filter((plugin) => plugin.id !== "runner").map((plugin) => (
             <button
               key={plugin.id}
               type="button"

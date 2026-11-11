@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { devices, formatLauncherDate, pinnedPlugins, recentPlugins, todayItems, type DeviceId } from "./catalog";
+import { devices, pinnedPlugins, recentPlugins, todayItems, type DeviceId } from "./catalog";
 import { Icon } from "./icons";
 import { Keycap } from "./shell";
 
@@ -12,17 +12,14 @@ export type PaletteEntry = {
   run: () => void;
 };
 
-export function HomePage({ onOpenPalette, date = new Date(), palette }: { onOpenPalette: () => void; date?: Date; palette?: ReactNode }) {
+export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void; palette?: ReactNode }) {
   return (
     <div className="launcher">
-      <div className="column greet">
-        <p className="date">{formatLauncherDate(date)}</p>
-        <h1>早上好，文前</h1>
-      </div>
       {palette ?? (
         <button type="button" className="command-bar" onClick={onOpenPalette}>
-          <span>搜索插件、命令或设备…</span>
-          <span className="keys"><Keycap>Ctrl</Keycap><Keycap>K</Keycap></span>
+          <Icon name="home" size={18} />
+          <span>搜索插件、项目、设备或命令…</span>
+          <span className="shortcut">Ctrl K</span>
         </button>
       )}
       {palette ? null : (
@@ -123,8 +120,8 @@ export function CommandPalette({
         <label className="palette-input">
           <input
             autoFocus
-            aria-label="搜索插件、命令或设备"
-            placeholder="搜索插件、命令或设备…"
+            aria-label="搜索插件、项目、设备或命令"
+            placeholder="搜索插件、项目、设备或命令…"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
             onKeyDown={(event) => {

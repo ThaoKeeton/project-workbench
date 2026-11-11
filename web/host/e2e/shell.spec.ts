@@ -25,10 +25,10 @@ async function shot(page: Page, name: string) {
 test("project switch updates the current project", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "早上好，文前" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeVisible();
   await page.keyboard.press("Control+k");
   await page.getByRole("option", { name: "灯塔实验" }).click();
-  await expect(page.locator(".project-name")).toContainText("灯塔实验");
+  await expect(page.locator(".context-project")).toContainText("灯塔实验");
 });
 
 test("sample cases stay inside the test design plugin", async ({ page }) => {
@@ -62,7 +62,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
 
     test("home, palette, and device menu", async ({ page }) => {
       await page.goto("/");
-      await expect(page.getByRole("heading", { name: "早上好，文前" })).toBeVisible();
+      await expect(page.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeVisible();
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await shot(page, `home-${theme}`);
       const axe = await new AxeBuilder({ page }).withTags(["wcag2aa"]).analyze();

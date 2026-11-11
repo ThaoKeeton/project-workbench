@@ -60,12 +60,13 @@ describe("app shell", () => {
     }));
     const user = userEvent.setup();
     render(<MemoryRouter><App /></MemoryRouter>);
-    expect(await screen.findByRole("heading", { name: "早上好，文前" })).toBeTruthy();
+    expect(await screen.findByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeTruthy();
+    expect(screen.getByText("Project Workbench")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /星河笔记本/ }));
     expect(screen.getByText("书房工作站")).toBeTruthy();
     await user.click(screen.getByRole("menuitem", { name: /书房工作站/ }));
     await user.keyboard("{Control>}k{/Control}");
-    const search = await screen.findByRole("textbox", { name: "搜索插件、命令或设备" });
+    const search = await screen.findByRole("textbox", { name: "搜索插件、项目、设备或命令" });
     await user.type(search, "市场");
     await user.keyboard("{Enter}");
     expect(await screen.findByRole("heading", { name: "插件市场" })).toBeTruthy();
@@ -91,7 +92,7 @@ describe("command palette", () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<MemoryRouter><CommandPalette projects={[{ id: "a", name: "星河协作" }]} activeProjectId="a" onClose={onClose} onOpenPlugin={vi.fn()} onPickDevice={vi.fn()} onSwitchProject={vi.fn()} /></MemoryRouter>);
-    const search = screen.getByRole("textbox", { name: "搜索插件、命令或设备" });
+    const search = screen.getByRole("textbox", { name: "搜索插件、项目、设备或命令" });
     await user.type(search, "{ArrowDown}{ArrowUp}");
     await user.type(search, "没有这个");
     expect(screen.getByText("没有匹配的结果")).toBeTruthy();
