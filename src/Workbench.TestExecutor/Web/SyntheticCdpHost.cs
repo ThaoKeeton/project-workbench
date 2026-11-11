@@ -281,6 +281,8 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             var method = root.TryGetProperty("method", out var methodValue) ? methodValue.GetString() : "";
             if (method == "Page.captureScreenshot")
             {
+                if (Marker == "no-shot")
+                    return "{\"id\":" + id + ",\"error\":{\"code\":-32000,\"message\":\"shot-blocked\"}}";
                 var page = _pages.Single(item => item.Id == pageId);
                 return "{\"id\":" + id + ",\"result\":{\"data\":\"" + Convert.ToBase64String(page.Screenshot()) + "\"}}";
             }
@@ -315,6 +317,18 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             }
             if (op == "snapshot") return Snapshot(page);
             if (op == "ping") return "{\"found\":true,\"ok\":true}";
+            if (op == "screenshot")
+            {
+                var rgba = new byte[8 * 8 * 4];
+                for (var index = 0; index < rgba.Length; index += 4)
+                {
+                    rgba[index] = 9;
+                    rgba[index + 1] = 8;
+                    rgba[index + 2] = 7;
+                    rgba[index + 3] = 255;
+                }
+                return "{\"found\":true,\"ok\":true,\"width\":8,\"height\":8,\"rgba\":" + JsonSerializer.Serialize(Convert.ToBase64String(rgba)) + "}";
+            }
             if (op == "popup")
                 return _modal
                     ? "{\"found\":true,\"ok\":false,\"popup\":true,\"actual\":" + JsonSerializer.Serialize("合成弹窗：请先完成加载") + "}"

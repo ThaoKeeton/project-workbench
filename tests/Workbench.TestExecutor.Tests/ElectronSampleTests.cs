@@ -24,6 +24,13 @@ public sealed class ElectronSampleTests
         Assert.Contains("camera.azimuth=", detail, StringComparison.Ordinal);
         Assert.False(SceneAssert.Matches("not-json", "camera.y=4", 0, out var unreadable));
         Assert.Equal("scene-unreadable", unreadable);
+        Assert.False(SceneAssert.Matches(Scene, "camera", 0, out var bare));
+        Assert.Contains("camera", bare, StringComparison.Ordinal);
+        Assert.False(SceneAssert.Matches(Scene, "camera.y=nope", 0.1, out _));
+        Assert.False(SceneAssert.Matches(Scene, "mesh.missing.size=1", 0, out _));
+        Assert.False(SceneAssert.Matches(Scene, "mesh.cube.vertex.9.x=0", 0, out _));
+        Assert.True(SceneAssert.Matches(Scene, "mesh.cube.min.x=-1", 0, out _));
+        Assert.False(SceneAssert.Matches("{\"camera\":{\"y\":\"tall\"}}", "camera.y=1", 0, out _));
         var drag = ScenePointer.Drag(10, 20, 80, 0);
         Assert.Equal("mousePressed", drag[0].Type);
         Assert.Equal("mouseReleased", drag[^1].Type);
@@ -42,6 +49,29 @@ public sealed class ElectronSampleTests
         Assert.Equal(StepKind.Scene3d, suite.Cases[0].Steps[1].Kind);
         Assert.Equal("cube", suite.Cases[0].Steps[1].Target!.ObjectName);
         Assert.Equal(ExecutorSchemas.RendererBlockSeconds, suite.Cases[0].Steps[1].TimeoutSeconds);
+        Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load("""
+            {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"bad","name":"坏","cases":[{"id":"c","name":"n","steps":[{"id":"s","type":"scene3d","action":"click","target":{"selector":"#view"}}]}]}
+            """));
+        Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load("""
+            {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"bad2","name":"坏","cases":[{"id":"c","name":"n","steps":[{"id":"s","type":"web","action":"switch-window"}]}]}
+            """));
+        Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load("""
+            {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"bad3","name":"坏","cases":[{"id":"c","name":"n","steps":[{"id":"s","type":"scene3d","action":"orbit","tolerance":-1,"target":{"object":"cube"}}]}]}
+            """));
+    }
+
+    [Fact]
+    public async Task Screenshot_falls_back_when_the_debugger_refuses_capture()
+    {
+        await using var host = SyntheticCdpHost.StartOn(0, "合成页面", "no-shot");
+        var session = await CdpWebSession.ConnectAsync(host.Port, "合成页面", null, CancellationToken.None);
+        Assert.NotNull(session);
+        await using var connected = session;
+        var png = await connected.CapturePngAsync(CancellationToken.None);
+        Assert.NotNull(png);
+        var image = PngImage.Decode(png);
+        Assert.Equal(8, image.Width);
+        Assert.Equal(new Rgba8(9, 8, 7, 255), image[0, 0]);
     }
 
     [Fact]

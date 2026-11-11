@@ -66,7 +66,8 @@ public static class SceneAssert
                 }
                 var path = split[0].Trim();
                 var (wanted, tolerance) = ParseSpec(split[1], defaultTolerance);
-                if (!TryNumber(document.RootElement, path, out var actual) || Math.Abs(actual - wanted) > tolerance)
+                var actual = 0d;
+                if (double.IsNaN(wanted) || !TryNumber(document.RootElement, path, out actual) || Math.Abs(actual - wanted) > tolerance)
                     failures.Add(path + "=" + actual.ToString("0.###", CultureInfo.InvariantCulture));
             }
             if (failures.Count == 0) return true;
@@ -112,7 +113,7 @@ public static class SceneAssert
         {
             if (current.ValueKind != JsonValueKind.Object || !current.TryGetProperty(part, out current)) return false;
         }
-        return current.TryGetDouble(out value);
+        return current.ValueKind == JsonValueKind.Number && current.TryGetDouble(out value);
     }
 
     private static bool TryMesh(JsonElement root, string name, out JsonElement mesh)
