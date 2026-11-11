@@ -55,16 +55,21 @@ function client(): ApiClient {
 }
 
 describe("preview pages", () => {
-  it("renders the overview, plugins, diagnostics, and devices", () => {
+  it("renders the overview, plugins, diagnostics, and devices", async () => {
+    const user = userEvent.setup();
     render(<MemoryRouter><HomePage snapshot={snapshot} /></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "今天的工作台" })).toBeTruthy();
+    for (const name of ["配对设备", "查看更新", "打开诊断", "生成预览", "打开检查", "查看阶段", "管理", "去更新", "查看"]) {
+      await user.click(screen.getByRole("button", { name }));
+    }
     expect(screen.getByText("本机 · 星河笔记本")).toBeTruthy();
     cleanup();
     render(<MemoryRouter><PluginsPage plugins={snapshot.plugins} /></MemoryRouter>);
     expect(document.body.textContent).toContain("未启用");
     cleanup();
-    render(<DiagnosticsPage snapshot={snapshot} />);
-    expect(document.body.textContent).toContain("仅本机回环");
+    const withIssue: Snapshot = { ...snapshot, diagnostics: { ...snapshot.diagnostics, service: { ...snapshot.diagnostics.service, bind: "other" }, issues: [{ code: "InvalidManifest" }] } };
+    render(<DiagnosticsPage snapshot={withIssue} />);
+    expect(document.body.textContent).toContain("InvalidManifest");
     cleanup();
     render(<DevicesPage />);
     expect(screen.getByRole("heading", { name: "设备" })).toBeTruthy();

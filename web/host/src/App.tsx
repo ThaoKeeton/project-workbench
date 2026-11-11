@@ -108,7 +108,7 @@ export function App() {
         {matches.length > 0 ? (
           <div className="search-results">
             {matches.map((item) => (
-              <button key={item.path} type="button" onClick={() => { setQuery(""); navigate(item.path); }}>{item.label}</button>
+              <button key={item.path} type="button" onClick={() => { setQuery(""); void navigate(item.path); }}>{item.label}</button>
             ))}
           </div>
         ) : null}

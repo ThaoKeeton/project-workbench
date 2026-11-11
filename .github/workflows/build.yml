@@ -486,8 +486,7 @@ jobs:
           lines = []
           for line in report.read_text().splitlines():
               if line.startswith("SF:"):
-                  path = (root / line[3:]).resolve()
-                  line = "SF:" + path.relative_to(Path.cwd().resolve()).as_posix()
+                  line = "SF:" + (root / line[3:]).resolve().as_posix()
               lines.append(line)
           report.write_text("\n".join(lines) + "\n")
           PY

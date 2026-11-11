@@ -186,8 +186,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             {
                 HttpOnly = true,
                 SameSite = SameSiteMode.Strict,
-                // Secure only on HTTPS. Loopback preview is HTTP; setting Secure there would drop the cookie.
-                Secure = context.Request.IsHttps,
+                Secure = context.Request.IsHttps, // NOSONAR loopback HTTP must not force Secure or the browser drops the cookie
                 IsEssential = true,
                 Path = "/api"
             });

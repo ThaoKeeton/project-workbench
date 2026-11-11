@@ -27,7 +27,7 @@ public static class Program
             }, shutdown.Token);
             await Console.Out.WriteLineAsync("listening: " + host.BaseUrl);
             if (printToken) await Console.Out.WriteLineAsync("session-token: " + host.SessionToken);
-            await Console.Out.FlushAsync();
+            await Console.Out.FlushAsync(shutdown.Token);
             try { await host.WaitForShutdownAsync(shutdown.Token); }
             catch (OperationCanceledException) { }
             await host.DisposeAsync();
