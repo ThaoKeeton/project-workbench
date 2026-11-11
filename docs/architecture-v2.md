@@ -7,7 +7,7 @@
 ## 形状
 
 ```text
-WinUI 3 薄壳（WebView2，窗口最小宽度 1,100）
+Electron 薄壳（窗口最小宽度 1,100）
         │  只承载页面，不实现插件页面
         ▼
 本机服务  http://127.0.0.1:<端口>/api/v2
@@ -18,22 +18,27 @@ WinUI 3 薄壳（WebView2，窗口最小宽度 1,100）
                 └─ 本预览只迁了「测试用例 · 示例」
 ```
 
-薄壳用 WinUI 3，而不是 WPF。仓库已经固定 Windows App SDK `1.8.260921001`，WebView2 控件就在这套 SDK 里。窗口继续使用 `AppWindow`，默认 1180×800，宽度低于 1,100 或高度低于 640 时会拉回来。这和现有宿主的窗口尺寸，以及外壳恢复里「宽度至少 1,100」的语义一致。网页壳按 S1 启动器排布：左侧图标轨、顶栏项目名和设备切换、居中的首页。1,100 像素宽时图标轨仍在，不改成另一套导航。
+桌面壳是 Electron，不再是 WinUI 3 / WebView2。现有 `Workbench.App` 仍是 WinUI 3 宿主，预览不替换它。Electron 只打开窗口并拉起已经存在的 `Workbench.Service`：页面仍是 `web/host` 的 React 界面，接口仍是 `http://127.0.0.1:<端口>/api/v2`。窗口默认 1180×800，宽度低于 1,100 或高度低于 640 时 Electron 会拒绝继续缩小。这和原来外壳恢复里「宽度至少 1,100」的语义一致。网页按 S1 启动器排布：左侧图标轨、顶栏项目名和设备切换、居中的首页。1,100 像素宽时图标轨仍在，不改成另一套导航。
+
+Electron 使用系统标题栏，不把页面画进标题栏，避免盖住 S1 顶栏。深色页面底色是 `#0B0C0E`，浅色是 `#F3F5F7`，用来减少窗口刚出现时的闪色。原来 WinUI 壳会把标题栏按钮刷成同一套墨色；Electron 的系统标题栏是否在 Windows 11 上呈现同样的按钮颜色，还要在真机上看。
 
 ## 怎么在 Windows 上跑
 
-需要 .NET SDK `10.0.403`、Node.js 22 和 WebView2 运行时。在仓库根目录：
+需要 .NET SDK `10.0.403` 和 Node.js 22。v2 预览壳不再需要 WebView2 运行时。在仓库根目录：
 
 ```powershell
 dotnet test .\ProjectWorkbench.V2.slnx -c Release
 cd .\web\host
 npm ci
 npm run build
-cd ..\..
-dotnet run --project .\src\Workbench.Shell.Web -- --ui-dist .\web\host\dist
+cd ..\..\desktop\shell
+npm ci
+npm start
 ```
 
-壳会启动本机服务，把随机会话令牌交给 WebView2，并打开 `http://127.0.0.1:<端口>/`。它按框架依赖方式运行，需要本机已安装的 .NET 10，不是现有自包含主程序的替代发布。用户根是 `%LOCALAPPDATA%/ProjectWorkbench-v2-preview`。再次启动时加上 `--attach`，会先读取该根目录里的 `v2-session.json`；健康检查通过就附着到已有服务，否则重新启动。这个文件只留在本机，含本次会话令牌，不要复制出去。
+壳会用 `dotnet run` 启动本机服务，把随机会话令牌交给页面的 `sessionStorage`，并打开 `http://127.0.0.1:<端口>/`。服务按框架依赖方式运行，需要本机已安装的 .NET 10，不是现有自包含主程序的替代发布。用户根是 `%LOCALAPPDATA%/ProjectWorkbench-v2-preview`。Chromium 配置写在这个根下面的 `electron/`，不写到正式的 `%LOCALAPPDATA%/ProjectWorkbench`。
+
+再次启动时加上 `--attach`，会先读取该根目录里的 `v2-session.json`；健康检查通过就附着到已有服务，否则重新启动。正常关闭时，只有这次由壳拉起的服务会被停掉；附着上的服务继续留着。这个文件只留在本机，含本次会话令牌，不要复制出去。壳拒绝 `--allow-lan`，并且不会把这个参数传给服务。
 
 不打开壳、只看服务：
 
@@ -43,12 +48,18 @@ dotnet run --project .\src\Workbench.Service -- --user-root $env:TEMP\workbench-
 
 `--print-token` 会把令牌打到标准输出。`--allow-lan` 会直接失败，预览不会改去监听其他地址。
 
-Linux 上可以跑服务测试和网页测试，不能构建这个 WinUI 壳：
+Linux 上可以跑服务测试、网页测试，以及 Electron 壳能在无头环境里验证的部分。这不是 Windows 11 人工验收：
 
 ```sh
 dotnet test ProjectWorkbench.V2.slnx -c Release
 cd web/host && npm ci && npx playwright install --with-deps chromium && npm run build && npm run test:e2e
+cd ../../desktop/shell && npm ci && npm test
+npm run build
+root="$(mktemp -d)"
+npx electron . --smoke --user-root "$root" --ui-dist "$(pwd)/../../web/host/dist" --smoke-report "$root/smoke.json"
 ```
+
+冒烟报告只记通过与否和检查代码，不记会话令牌。报告通过只说明这台 Linux 上的 Electron 打开了现有 React 界面，并连上了回环 .NET 服务。
 
 ## API 版本
 
@@ -98,7 +109,7 @@ cd web/host && npm ci && npx playwright install --with-deps chromium && npm run 
 
 点缀色只用于主按钮、进度和焦点。深色模式下主按钮文字用 `accent-on`（`#0B0C0E`），不用白色。状态除了颜色，还有文字。没有霓虹、大渐变或背景模糊。
 
-WinUI 薄壳在 Windows 上读取系统背景色，把标题栏按钮刷成同一套深色或浅色。这台 Linux 环境没有 WinUI / WebView2，标题栏跟随系统这一点还不能在这里验证。本机窗口宽度低于 1,100 仍会被拉回。
+Electron 壳把窗口底色设成当前系统主题对应的页面底色。标题栏按钮沿用操作系统自己的标题栏，不再由 WinUI 刷色。本机窗口宽度低于 1,100、高度低于 640 时，Electron 的最小尺寸会把它拦住。诊断接口里的 `nativeWindow.minimumWidth` 仍是 1100，字段名没改，避免网页客户端另接一套。
 
 ## 局域网安全（现在只设计，只实现本机）
 
@@ -117,7 +128,7 @@ WinUI 薄壳在 Windows 上读取系统背景色，把标题栏按钮刷成同�
 
 现有 WinUI 宿主继续可用，直到对应页面在 v2 里达到同样的行为。
 
-1. 已在本预览：本机服务、网页壳、WebView2 薄壳、一个示例插件、服务测试和 Linux Playwright。
+1. 已在本预览：本机服务、网页壳、Electron 薄壳、一个示例插件、服务测试、Linux Playwright，以及 Linux 上的 Electron 冒烟。Windows 11 上的窗口、DPI 和标题栏仍要人工看。
 2. 项目上下文、主题和插件设置的只读/保存，仍走现有存储，不改 schema 1。
 3. 迁工作摘要示例。命令保持本地，不覆盖已有草稿。
 4. 测试设计插件先迁只读页面和本地用例。远程 Figma 与模型创作继续保持手动，不在 v2 里默认打开。
@@ -125,3 +136,15 @@ WinUI 薄壳在 Windows 上读取系统背景色，把标题栏按钮刷成同�
 6. 完成上面的局域网基线之后，才允许有人显式打开局域网。发送仍要本机确认。
 
 每一项都保持自动发送关闭。不要为了预览去打开真实 webhook 或消息发送。
+
+## 还要在 Windows 11 上人工看的部分
+
+GitHub 托管的 Linux 任务可以编译 Electron 壳、跑它的单元测试、拉起真实的 .NET 服务，并在虚拟显示里打开现有 React 页面。这些都不能当作 Windows 11 人工验收。真机至少还要看：
+
+- 窗口默认约 1180×800，拖到宽度 1,100 或高度 640 以下时会被系统拦住；高 DPI 下不要比这个更窄。
+- S1 布局还在：左侧图标轨、居中的命令条、今日事项和最近插件，插件打开后标签在上方。不要变成顶栏加导航列表加卡片墙。
+- 墨色还在：深色底 `#0B0C0E` / `#111317` / `#16191E`，点缀色 `#5B9FFF`。系统标题栏按钮是操作系统自己画的，不再由 WinUI 刷成墨色。
+- 用户数据只出现在 `%LOCALAPPDATA%/ProjectWorkbench-v2-preview`，正式的 `%LOCALAPPDATA%/ProjectWorkbench` 没有新文件。
+- 关闭由壳拉起的窗口后，本机服务退出；用 `--attach` 打开的窗口关闭后，原来的服务还在。
+- `--allow-lan` 让壳直接退出，服务仍然只听 `127.0.0.1`。
+- 市场、设备、诊断、设置仍是宿主页面。UPCAM 和钉钉仍只是界面上的合成入口，没有接到这条服务。

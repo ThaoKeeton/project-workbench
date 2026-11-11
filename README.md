@@ -90,4 +90,4 @@ GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbenc
 
 ## v2 预览
 
-上面的 WinUI 宿主保持原样。并行的本机服务、网页界面和 WinUI 3 WebView2 薄壳说明见 [架构 v2 预览](docs/architecture-v2.md)。它只监听本机回环，自动发送关闭，不改项目目录 schema 1，也不启用真实 webhook 或消息发送。
+上面的 WinUI 宿主保持原样。并行的本机服务、网页界面和 Electron 桌面壳说明见 [架构 v2 预览](docs/architecture-v2.md)。Electron 只是窗口；服务仍是本机回环上的 .NET 进程。它自动发送关闭，不改项目目录 schema 1，也不启用真实 webhook 或消息发送。Linux 上的构建和冒烟不能代替 Windows 11 人工验收。

@@ -19,3 +19,6 @@ web/host/test-results/
 web/host/playwright-report/
 web/host/e2e/screenshots/
 web/host/coverage/
+desktop/shell/node_modules/
+desktop/shell/dist/
+desktop/shell/coverage/
