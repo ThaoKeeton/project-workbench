@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using FlaUI.Core;
@@ -133,71 +132,38 @@ public sealed class FlaUiSession : IUiAutomationSession
         var automation = _automation ??= new UIA3Automation();
         var dialog = FindFileDialog(automation);
         if (dialog is null) return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "dialog-missing");
-        var filename = FindFileNameEdit(dialog);
+        var filename = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1148"));
         if (filename is null) return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "filename-missing");
-        var open = FindOpenButton(dialog);
-        if (open is null) return UiActionResult.Fail(ExecutorError.ActionFailed, false, "open-button-missing");
         var handle = NativeHandle(dialog);
         var path = action.Text ?? "";
         BringToFront(dialog, handle);
-        CommitFileName(filename, path);
-        if (ConfirmOpen(dialog, filename, open, handle)) return UiActionResult.Ok("file-selected");
-        return UiActionResult.Fail(ExecutorError.ActionFailed, true, $"dialog-open:{dialog.Name}:{open.Name}:{ReadValue(filename)}");
+        InputFileName(filename, path);
+        Try(() => filename.Focus());
+        Keyboard.Press(VirtualKeyShort.RETURN);
+        if (Closed(handle)) return UiActionResult.Ok("file-selected");
+        return UiActionResult.Fail(ExecutorError.ActionFailed, true, Describe(dialog, filename, handle));
     }
 
     private AutomationElement? FindFileDialog(UIA3Automation automation)
     {
         var desktop = automation.GetDesktop();
         var processId = _process.Id;
-        return desktop.FindFirstDescendant(cf => cf.ByProcessId(processId).And(cf.ByClassName("#32770")))
-            ?? desktop.FindFirstDescendant(cf => cf.ByClassName("#32770"));
+        return desktop.FindFirstDescendant(cf => cf.ByProcessId(processId).And(cf.ByClassName("#32770")));
     }
 
-    private static AutomationElement? FindFileNameEdit(AutomationElement dialog)
+    private static void InputFileName(AutomationElement filename, string path)
     {
-        var host = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1148"));
-        if (host is not null && host.ControlType == ControlType.Edit) return host;
-        return host?.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit))
-            ?? dialog.FindFirstDescendant(cf => cf.ByAutomationId("1001"))
-            ?? dialog.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit));
-    }
-
-    private static AutomationElement? FindOpenButton(AutomationElement dialog)
-    {
-        var byId = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1"));
-        if (byId is not null && IsPushButton(byId)) return byId;
-        return dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
-            .Concat(dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.SplitButton)))
-            .FirstOrDefault(button => IsOpenButton(button.Name));
-    }
-
-    private static bool ConfirmOpen(AutomationElement dialog, AutomationElement filename, AutomationElement open, IntPtr handle)
-    {
-        // Enter confirms the filename the edit actually holds. Invoke on the
-        // modern Open split button only drops its menu and leaves #32770 up.
-        Try(() => filename.Focus());
-        if (HasFocus(filename)) Keyboard.Press(VirtualKeyShort.RETURN);
-        if (Closed(handle)) return true;
-        Try(() => ClickOpen(open));
-        if (Closed(handle)) return true;
-        ActivateDefault(handle, open);
-        if (Closed(handle)) return true;
-        Try(() => dialog.Focus());
-        Try(() => Keyboard.TypeSimultaneously(VirtualKeyShort.LMENU, VirtualKeyShort.KEY_O));
-        return Closed(handle);
-    }
-
-    private static void CommitFileName(AutomationElement filename, string path)
-    {
-        Try(() => filename.Focus());
-        if (HasFocus(filename))
-        {
-            Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
-            if (TryPlaceOnClipboard(path)) Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
-            else Keyboard.Type(path);
-            Thread.Sleep(150);
-        }
-        if (!ValueHasFile(filename, path)) Try(() => WriteValue(filename, path));
+        var edit = filename.ControlType == ControlType.Edit
+            ? filename
+            : filename.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit)) ?? filename;
+        Try(() => edit.Focus());
+        Try(() => WriteValue(filename, path));
+        if (!ReferenceEquals(edit, filename)) Try(() => WriteValue(edit, path));
+        if (!HasFocus(edit)) Try(() => filename.Focus());
+        if (!HasFocus(edit) && !HasFocus(filename)) return;
+        Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
+        if (TryPlaceOnClipboard(path)) Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
+        else Keyboard.Type(path);
     }
 
     private static void WriteValue(AutomationElement filename, string path)
@@ -205,24 +171,12 @@ public sealed class FlaUiSession : IUiAutomationSession
         if (filename.Patterns.Value.IsSupported) filename.Patterns.Value.Pattern.SetValue(path);
     }
 
-    private static void ClickOpen(AutomationElement open)
+    private static string Describe(AutomationElement dialog, AutomationElement filename, IntPtr handle)
     {
-        var rect = open.BoundingRectangle;
-        if (rect.Width < 8 || rect.Height < 8)
-        {
-            open.Click();
-            return;
-        }
-        var x = (int)Math.Round(rect.Left + Math.Min(rect.Width / 4d, 20d));
-        var y = (int)Math.Round(rect.Top + (rect.Height / 2d));
-        Mouse.Click(new Point(x, y));
-    }
-
-    private static void ActivateDefault(IntPtr dialog, AutomationElement open)
-    {
-        var button = NativeHandle(open);
-        if (button != IntPtr.Zero) PostMessage(button, BmClick, IntPtr.Zero, IntPtr.Zero);
-        if (dialog != IntPtr.Zero) PostMessage(dialog, WmCommand, (IntPtr)IdOk, button);
+        var value = ReadValue(filename).Replace('\r', ' ').Replace('\n', ' ');
+        if (value.Length > 180) value = value[..180];
+        var alive = handle != IntPtr.Zero && IsWindow(handle);
+        return $"dialog-open title={dialog.Name} type={filename.ControlType} value={value} focus={HasFocus(filename)} alive={alive}";
     }
 
     private static void BringToFront(AutomationElement dialog, IntPtr handle)
@@ -248,21 +202,12 @@ public sealed class FlaUiSession : IUiAutomationSession
     private static bool Closed(IntPtr handle)
     {
         if (handle == IntPtr.Zero) return false;
-        for (var attempt = 0; attempt < 10; attempt++)
+        for (var attempt = 0; attempt < 30; attempt++)
         {
             if (!IsWindow(handle)) return true;
             Thread.Sleep(100);
         }
         return false;
-    }
-
-    private static bool ValueHasFile(AutomationElement filename, string path)
-    {
-        var value = ReadValue(filename);
-        if (value.Length == 0) return false;
-        var name = Path.GetFileName(path);
-        return value.Contains(path, StringComparison.OrdinalIgnoreCase)
-            || (name.Length > 0 && value.Contains(name, StringComparison.OrdinalIgnoreCase));
     }
 
     private static string ReadValue(AutomationElement element)
@@ -326,17 +271,6 @@ public sealed class FlaUiSession : IUiAutomationSession
         }
     }
 
-    private static bool IsPushButton(AutomationElement element)
-        => element.ControlType is ControlType.Button or ControlType.SplitButton;
-
-    private static bool IsOpenButton(string? name)
-    {
-        if (string.IsNullOrWhiteSpace(name)) return false;
-        var trimmed = name.Replace("&", "", StringComparison.Ordinal).Trim();
-        return trimmed.StartsWith("打开", StringComparison.Ordinal)
-            || trimmed.StartsWith("Open", StringComparison.OrdinalIgnoreCase);
-    }
-
     private AutomationElement? Find(ElementSelector? selector)
     {
         if (selector is null) return null;
@@ -383,9 +317,6 @@ public sealed class FlaUiSession : IUiAutomationSession
         return new PixelRect((int)(rect.X - bounds.X), (int)(rect.Y - bounds.Y), (int)rect.Width, (int)rect.Height);
     }
 
-    private const int WmCommand = 0x0111;
-    private const int BmClick = 0x00F5;
-    private const int IdOk = 1;
     private const uint GmemMoveable = 0x0002;
     private const uint GmemZeroInit = 0x0040;
     private const uint CfUnicodeText = 13;
@@ -407,9 +338,6 @@ public sealed class FlaUiSession : IUiAutomationSession
 
     [DllImport("user32.dll")]
     private static extern bool IsWindow(IntPtr hWnd);
-
-    [DllImport("user32.dll")]
-    private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
 
     [DllImport("user32.dll", SetLastError = true)]
     private static extern bool OpenClipboard(IntPtr owner);
