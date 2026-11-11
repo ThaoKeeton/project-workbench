@@ -379,3 +379,53 @@ jobs:
         run: |
           echo 'Choose full with or without diagnostics, or shipping-recovery without diagnostics.'
           exit 1
+  service-v2-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Preview service API tests
+        run: dotnet test ProjectWorkbench.V2.slnx -c Release --nologo --logger "trx;LogFileName=service-v2-linux.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: service-v2-linux-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  web-v2-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/host/package-lock.json
+      - name: Install Chinese fonts for screenshots
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Install the web UI and Playwright
+        working-directory: web/host
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+      - name: Typecheck, build, and run Linux Playwright tests
+        working-directory: web/host
+        run: |
+          npm run build
+          npm run test:e2e
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: web-v2-playwright
+          path: |
+            web/host/e2e/screenshots/
+            web/host/test-results/
+          if-no-files-found: warn
+          retention-days: 1

@@ -87,3 +87,7 @@ GitHub Actions 对 PR（含草稿）以及 `main`、`feat/native-plugin-workbenc
 - [设计范围](docs/superpowers/specs/2026-11-06-native-workbench-design.md)
 
 可选测试服务 1（最低宿主 0.4.0）已接入项目源/用例/执行/证据上下文、共享控制器和独立原生“测试设计”入口。开发配置使用 `workbench-testing-plugin-0.2.0`；仅在同一运行确有可用产物时安装其中 ZIP，再审查并信任启用，其包不加入固定六文件业务 companion。功能源码 b1a3e9c 的既有 Testing 本地原生流程、独立来源验收及下载核验已通过；完整已安装 owned 面板逐项点跑、任意用户电脑、真实 provider 和 Windows 11 人工验收继续单列。已有预置测试列表仍是独立示例。实际 Windows CI 与下载字节审计以准确源码对应的运行报告为准，不能用 Linux 参考编译替代。见 [测试插件安装与操作](docs/testing-plugin.md) 和 [测试服务](docs/testing-services.md)。
+
+## v2 预览
+
+上面的 WinUI 宿主保持原样。并行的本机服务、网页界面和 WinUI 3 WebView2 薄壳说明见 [架构 v2 预览](docs/architecture-v2.md)。它只监听本机回环，自动发送关闭，不改项目目录 schema 1，也不启用真实 webhook 或消息发送。

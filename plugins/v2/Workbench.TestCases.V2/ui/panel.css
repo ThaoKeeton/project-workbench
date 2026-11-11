@@ -1,0 +1,49 @@
+.cases {
+  display: grid;
+  gap: 12px;
+}
+
+.case-row {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+}
+
+.case-id {
+  margin: 0;
+  padding-top: 8px;
+  font-weight: 600;
+}
+
+.case-row label {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+}
+
+.case-row input {
+  width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+  padding: 8px;
+  border: 1px solid #d1d1d1;
+  border-radius: 4px;
+  font: inherit;
+}
+
+.case-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+@media (max-width: 959px) {
+  .case-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .case-id {
+    padding-top: 0;
+  }
+}
