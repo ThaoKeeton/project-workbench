@@ -22,6 +22,7 @@ import {
   readSessionDocument,
   redactDiagnostic,
   resolveDotnet,
+  windowsExecutable,
   resolveLocalAppData,
   resolveUiDist,
   resolveUserRoot,
@@ -147,8 +148,10 @@ describe("loopback session", () => {
     expect(readSessionDocument("")).toBeNull();
     expect(readServicePid("{")).toBeNull();
     expect(() => servicePidDocument(1)).toThrowError("invalid-arguments");
-    expect(resolveDotnet({ DOTNET_ROOT: "/opt/dotnet" }, "linux")).toBe(path.join("/opt/dotnet", "dotnet"));
-    expect(resolveDotnet({}, "win32")).toBe("dotnet.exe");
+    expect(resolveDotnet({ DOTNET_ROOT: "/opt/dotnet" }, "linux")).toBe("/opt/dotnet/dotnet");
+    expect(resolveDotnet({}, "win32")).toBe("C:\\Program Files\\dotnet\\dotnet.exe");
+    expect(windowsExecutable("taskkill.exe")).toBe("C:\\Windows\\System32\\taskkill.exe");
+    expect(windowsExecutable("WindowsPowerShell/v1.0/powershell.exe", "D:\\Windows")).toBe("D:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe");
   });
 });
 

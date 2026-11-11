@@ -13,6 +13,7 @@ import {
   servicePidDocument,
   sessionDocument,
   shouldRetireServiceProcess,
+  windowsExecutable,
 } from "./protocol";
 
 export interface ProcessControl {
@@ -60,7 +61,8 @@ export function hostProcessControl(platform: NodeJS.Platform): ProcessControl {
     signal(pid: number, signal: NodeJS.Signals, group: boolean): void {
       if (!Number.isInteger(pid) || pid <= 1) return;
       if (platform === "win32") {
-        spawnSync("taskkill", ["/pid", String(pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
+        const taskkill = windowsExecutable("taskkill.exe", process.env.SystemRoot || "C:\\Windows");
+        spawnSync(taskkill, ["/pid", String(pid), "/t", "/f"], { windowsHide: true, stdio: "ignore" });
         return;
       }
       try {
@@ -83,8 +85,9 @@ export function hostProcessControl(platform: NodeJS.Platform): ProcessControl {
         }
       }
       if (platform === "win32") {
+        const powershell = windowsExecutable("WindowsPowerShell/v1.0/powershell.exe", process.env.SystemRoot || "C:\\Windows");
         const result = spawnSync(
-          "powershell.exe",
+          powershell,
           ["-NoProfile", "-Command", `(Get-CimInstance Win32_Process -Filter "ProcessId=${pid}").CommandLine`],
           { encoding: "utf8", windowsHide: true, timeout: 5000 },
         );

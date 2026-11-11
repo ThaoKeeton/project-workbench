@@ -253,9 +253,26 @@ export function serviceLaunchArgs(options: {
 }
 
 export function resolveDotnet(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {
+  const api = platform === "win32" ? path.win32 : path.posix;
   const name = platform === "win32" ? "dotnet.exe" : "dotnet";
-  if (env.DOTNET_ROOT && env.DOTNET_ROOT.trim().length > 0) return path.join(env.DOTNET_ROOT, name);
-  return name;
+  if (env.DOTNET_ROOT && env.DOTNET_ROOT.trim().length > 0) return api.join(env.DOTNET_ROOT, name);
+  const candidates: string[] = [];
+  const home = platform === "win32" ? env.USERPROFILE : env.HOME;
+  if (home && home.trim().length > 0) candidates.push(api.join(home, ".dotnet", name));
+  if (platform === "win32") {
+    const programFiles = env.ProgramFiles && env.ProgramFiles.trim().length > 0 ? env.ProgramFiles : "C:\\Program Files";
+    candidates.push(api.join(programFiles, "dotnet", name));
+  } else {
+    candidates.push(`/usr/share/dotnet/${name}`, `/usr/bin/${name}`);
+  }
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[0] ?? name;
+}
+
+export function windowsExecutable(file: string, systemRoot = "C:\\Windows"): string {
+  return path.win32.normalize(path.win32.join(systemRoot, "System32", file));
 }
 
 export function findRepoRoot(start: string, exists: (target: string) => boolean = fs.existsSync): string {

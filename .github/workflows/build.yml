@@ -465,7 +465,9 @@ jobs:
       - name: Unit-test the Electron shell
         working-directory: desktop/shell
         run: |
-          npm ci
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          npm rebuild electron
           npm test
           npm run build
       - name: Build the existing React UI
@@ -478,14 +480,14 @@ jobs:
         working-directory: desktop/shell
         env:
           WORKBENCH_SHELL_LIVE: "1"
-        run: npx vitest run src/supervisor.live.test.ts
+        run: ./node_modules/.bin/vitest run src/supervisor.live.test.ts
       - name: Open the React UI in Electron
         working-directory: desktop/shell
         run: |
           set -euo pipefail
           root="$(mktemp -d)"
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          xvfb-run -a npx electron . --no-sandbox --disable-gpu --smoke \
+          xvfb-run -a ./node_modules/.bin/electron . --no-sandbox --disable-gpu --smoke \
             --user-root "$root" \
             --ui-dist "$GITHUB_WORKSPACE/web/host/dist" \
             --smoke-report "$GITHUB_WORKSPACE/artifacts/electron-smoke.json"
