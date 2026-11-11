@@ -95,9 +95,12 @@ internal sealed class PluginRuntimeState(string userRoot,
             if (Directory.Exists(_path)) throw new IOException("Background task state is not a regular file.");
             if (!File.Exists(_path)) { _plugins = new(StringComparer.Ordinal); return; }
             FileSystemGuard.EnsureRegularFile(_path);
-            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
-            var document = await JsonSerializer.DeserializeAsync<RuntimeStateDocument>(stream, ReadOptions, cancellationToken)
-                ?? throw new JsonException();
+            var document = await SharingViolationRetry.RunAsync(async () =>
+            {
+                await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                return await JsonSerializer.DeserializeAsync<RuntimeStateDocument>(stream, ReadOptions, cancellationToken)
+                    ?? throw new JsonException();
+            }, cancellationToken);
             if (document.Version != 1 || document.Plugins is null) throw new JsonException();
             foreach (var (pluginId, plugin) in document.Plugins)
             {

@@ -70,9 +70,13 @@ internal sealed partial class JsonPluginSettings(string directory, Action<Plugin
         FileSystemGuard.EnsureRegularFile(_path);
         try
         {
-            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
-            _values = await JsonSerializer.DeserializeAsync<Dictionary<string, JsonElement>>(stream, AtomicJsonFile.Options, cancellationToken)
-                ?? throw new JsonException("The settings document cannot be null.");
+            await SharingViolationRetry.RunAsync(async () =>
+            {
+                await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                _values = await JsonSerializer.DeserializeAsync<Dictionary<string, JsonElement>>(stream, AtomicJsonFile.Options, cancellationToken)
+                    ?? throw new JsonException("The settings document cannot be null.");
+                return true;
+            }, cancellationToken);
         }
         catch (JsonException)
         {

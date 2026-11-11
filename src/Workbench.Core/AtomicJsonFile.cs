@@ -10,7 +10,10 @@ internal static class AtomicJsonFile
         WriteIndented = true
     };
 
-    internal static async Task WriteAsync<T>(string path, T value, CancellationToken cancellationToken)
+    internal static Task WriteAsync<T>(string path, T value, CancellationToken cancellationToken)
+        => SharingViolationRetry.RunAsync(() => WriteOnceAsync(path, value, cancellationToken), cancellationToken);
+
+    private static async Task WriteOnceAsync<T>(string path, T value, CancellationToken cancellationToken)
     {
         FileSystemGuard.RejectLinks(path);
         var directory = Path.GetDirectoryName(path)!;
