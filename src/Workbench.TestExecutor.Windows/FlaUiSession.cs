@@ -129,7 +129,8 @@ public sealed class FlaUiSession : IUiAutomationSession
     private UiActionResult FillFileDialog(UiAction action)
     {
         var automation = _automation ??= new UIA3Automation();
-        var dialog = automation.GetDesktop().FindFirstDescendant(cf => cf.ByClassName("#32770"));
+        var desktop = automation.GetDesktop();
+        var dialog = desktop.FindFirstDescendant(cf => cf.ByClassName("#32770"));
         if (dialog is null) return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "dialog-missing");
         var filename = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1148"))
             ?? dialog.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit));
