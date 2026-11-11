@@ -13,9 +13,13 @@ export function resolveTheme(setting: ThemeSetting): "light" | "dark" {
 }
 
 export function applyTheme(setting: ThemeSetting): "light" | "dark" {
-  const theme = resolveTheme(setting);
+  const stored = setting === "light" || setting === "dark" ? setting : "system";
+  const theme = resolveTheme(stored);
   document.documentElement.dataset.theme = theme;
-  document.documentElement.dataset.themeSetting = setting;
-  localStorage.setItem(storageKey, setting);
+  document.documentElement.dataset.themeSetting = stored;
+  // Only the three allowlisted literals are written. Anything else becomes "system".
+  if (stored === "light") localStorage.setItem(storageKey, "light");
+  else if (stored === "dark") localStorage.setItem(storageKey, "dark");
+  else localStorage.setItem(storageKey, "system");
   return theme;
 }

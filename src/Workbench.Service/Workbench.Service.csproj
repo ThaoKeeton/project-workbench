@@ -11,6 +11,7 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
   <ItemGroup>
+    <InternalsVisibleTo Include="Workbench.Service.Tests" />
     <ProjectReference Include="../Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
     <ProjectReference Include="../Workbench.Core/Workbench.Core.csproj" />
     <ProjectReference Include="../../plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" ReferenceOutputAssembly="false" />

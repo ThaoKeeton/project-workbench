@@ -2,8 +2,16 @@ namespace Workbench.Service;
 
 public static class Program
 {
-    public static async Task<int> Main(string[] args)
+    public static Task<int> Main(string[] args) => RunAsync(args, CancellationToken.None);
+
+    internal static async Task<int> RunAsync(string[] args, CancellationToken cancellationToken)
     {
+        using var shutdown = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        Console.CancelKeyPress += (_, eventArgs) =>
+        {
+            eventArgs.Cancel = true;
+            shutdown.Cancel();
+        };
         try
         {
             var userRoot = Argument(args, "--user-root") ?? Path.Combine(
@@ -16,24 +24,18 @@ public static class Program
                 V2PluginsRoot = Argument(args, "--v2-plugins") ?? Path.Combine(AppContext.BaseDirectory, "preview-plugins"),
                 UiRoot = Argument(args, "--ui-dist") ?? FindUiRoot(),
                 AllowLan = args.Contains("--allow-lan", StringComparer.Ordinal)
-            });
-            Console.WriteLine("listening: " + host.BaseUrl);
-            if (printToken) Console.WriteLine("session-token: " + host.SessionToken);
-            Console.Out.Flush();
-            using var cancellation = new CancellationTokenSource();
-            Console.CancelKeyPress += (_, eventArgs) =>
-            {
-                eventArgs.Cancel = true;
-                cancellation.Cancel();
-            };
-            try { await host.WaitForShutdownAsync(cancellation.Token); }
+            }, shutdown.Token);
+            await Console.Out.WriteLineAsync("listening: " + host.BaseUrl);
+            if (printToken) await Console.Out.WriteLineAsync("session-token: " + host.SessionToken);
+            await Console.Out.FlushAsync();
+            try { await host.WaitForShutdownAsync(shutdown.Token); }
             catch (OperationCanceledException) { }
             await host.DisposeAsync();
             return 0;
         }
         catch (Exception)
         {
-            Console.Error.WriteLine("service-start-failed");
+            await Console.Error.WriteLineAsync("service-start-failed");
             return 1;
         }
     }

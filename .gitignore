@@ -18,3 +18,4 @@ web/host/dist/
 web/host/test-results/
 web/host/playwright-report/
 web/host/e2e/screenshots/
+web/host/coverage/

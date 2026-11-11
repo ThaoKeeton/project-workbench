@@ -13,6 +13,7 @@ public sealed class TestCasesModule : IWorkbenchPluginModule
     public const string PluginId = "com.projectworkbench.test-cases.v2";
     public const string DataSchema = "workbench.test-cases.v2.preview";
     private static readonly string[] RowIds = ["EX-001", "EX-002", "EX-003"];
+    private static readonly string[] CsvHeader = ["suite,id,action,expected"];
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly object _gate = new();
 
@@ -60,7 +61,7 @@ public sealed class TestCasesModule : IWorkbenchPluginModule
         return Validate(document);
     }
 
-    private async Task<CaseDocument> WriteAsync(PluginModuleRequest request, CancellationToken cancellationToken)
+    private static async Task<CaseDocument> WriteAsync(PluginModuleRequest request, CancellationToken cancellationToken)
     {
         Require(request.GrantedPermissions, "project.read");
         Require(request.GrantedPermissions, "plugin.data.write");
@@ -79,7 +80,7 @@ public sealed class TestCasesModule : IWorkbenchPluginModule
     {
         Require(request.GrantedPermissions, "local.file.export");
         var document = await ReadAsync(request, cancellationToken);
-        var lines = new[] { "suite,id,action,expected" }.Concat(document.Rows.Select(row =>
+        var lines = CsvHeader.Concat(document.Rows.Select(row =>
             string.Join(",", new[] { document.SuiteName, row.Id, row.Action, row.Expected }.Select(Csv))));
         var csv = new UTF8Encoding(encoderShouldEmitUTF8Identifier: true).GetBytes(string.Join("\r\n", lines) + "\r\n");
         var path = Path.Combine(request.DataDirectory, "sample-test-cases.csv");

@@ -81,6 +81,10 @@ public sealed class ServiceApiTests
         open.Headers.Authorization = new AuthenticationHeaderValue("Bearer", running.Host.SessionToken);
         var created = await running.Client.SendAsync(open);
         Assert.Equal(HttpStatusCode.NoContent, created.StatusCode);
+        var setCookie = created.Headers.GetValues("Set-Cookie").Single();
+        Assert.Contains("httponly", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("samesite=strict", setCookie, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("secure", setCookie, StringComparison.OrdinalIgnoreCase);
         var health = await running.Client.GetAsync("/api/v2/health");
         Assert.Equal(HttpStatusCode.OK, health.StatusCode);
     }
@@ -301,6 +305,24 @@ public sealed class ServiceApiTests
         var themeFile = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(running.Root, "v2-preview", "ui-theme.json")));
         Assert.Equal(2, themeFile.RootElement.GetProperty("schemaVersion").GetInt32());
         Assert.Equal("workbench.ui-theme.v2.preview", themeFile.RootElement.GetProperty("schema").GetString());
+    }
+
+    [Fact]
+    public async Task RunAsync_starts_on_loopback_and_stops_when_canceled()
+    {
+        var root = TempRoot();
+        using var cancel = new CancellationTokenSource();
+        var task = Program.RunAsync(
+        [
+            "--user-root", root,
+            "--v1-plugins", Path.Combine(root, "plugins-v1"),
+            "--v2-plugins", Path.Combine(AppContext.BaseDirectory, "preview-plugins")
+        ], cancel.Token);
+        var deadline = DateTime.UtcNow.AddSeconds(10);
+        while (!File.Exists(Path.Combine(root, ".workspaces", "catalog.json")) && DateTime.UtcNow < deadline)
+            await Task.Delay(50);
+        cancel.Cancel();
+        Assert.Equal(0, await task.WaitAsync(TimeSpan.FromSeconds(15)));
     }
 
     private static async Task<string> ReceiveAsync(ClientWebSocket socket)

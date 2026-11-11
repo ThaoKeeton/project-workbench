@@ -253,7 +253,8 @@ server.on("upgrade", (request, socket) => {
     socket.destroy();
     return;
   }
-  const accept = createHash("sha1").update(key + magic).digest("base64");
+  // RFC 6455 section 1.3 requires SHA-1 for the handshake accept value. This is not a password or session hash.
+  const accept = createHash("sha1").update(String(key) + magic).digest("base64"); // NOSONAR
   socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`);
   sockets.add(socket);
   socket.on("data", () => {});

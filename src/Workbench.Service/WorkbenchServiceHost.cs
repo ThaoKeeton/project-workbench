@@ -102,7 +102,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             if (!LoopbackGuard.IsLoopback(context.Connection.RemoteIpAddress) || !LoopbackGuard.IsLoopbackHost(context.Request.Host.Value))
             {
                 context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                await context.Response.WriteAsJsonAsync(new { error = "LoopbackOnly" }, Json);
+                await context.Response.WriteAsJsonAsync(new { error = "LoopbackOnly" }, Json, context.RequestAborted);
                 return;
             }
             await next();
@@ -119,7 +119,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             if (context.Request.Path.StartsWithSegments("/api") && !SessionTokens.Authorized(context, token))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await context.Response.WriteAsJsonAsync(new { error = "Unauthorized" }, Json);
+                await context.Response.WriteAsJsonAsync(new { error = "Unauthorized" }, Json, context.RequestAborted);
                 return;
             }
             await next();
@@ -128,7 +128,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
         app.UseExceptionHandler(handler => handler.Run(async context =>
         {
             context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-            await context.Response.WriteAsJsonAsync(new { error = "ServiceFailed" }, Json);
+            await context.Response.WriteAsJsonAsync(new { error = "ServiceFailed" }, Json, context.RequestAborted);
         }));
 
         app.MapGet("/api/v2/health", () => Results.Json(new { status = "ok", apiVersion = ApiVersion, bind = "loopback" }, Json));
@@ -186,7 +186,8 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             {
                 HttpOnly = true,
                 SameSite = SameSiteMode.Strict,
-                Secure = false,
+                // Secure only on HTTPS. Loopback preview is HTTP; setting Secure there would drop the cookie.
+                Secure = context.Request.IsHttps,
                 IsEssential = true,
                 Path = "/api"
             });
@@ -208,7 +209,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             if (context.Request.Path.StartsWithSegments("/api"))
             {
                 context.Response.StatusCode = StatusCodes.Status404NotFound;
-                await context.Response.WriteAsJsonAsync(new { error = "NotFound" }, Json);
+                await context.Response.WriteAsJsonAsync(new { error = "NotFound" }, Json, context.RequestAborted);
                 return;
             }
             if (uiRoot is null || !File.Exists(Path.Combine(uiRoot, "index.html")))
@@ -226,7 +227,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
         if (!context.WebSockets.IsWebSocketRequest)
         {
             context.Response.StatusCode = StatusCodes.Status400BadRequest;
-            await context.Response.WriteAsJsonAsync(new { error = "WebSocketRequired" }, Json);
+            await context.Response.WriteAsJsonAsync(new { error = "WebSocketRequired" }, Json, context.RequestAborted);
             return;
         }
         using var socket = await context.WebSockets.AcceptWebSocketAsync();
