@@ -11,6 +11,7 @@ const page: PageProbe = {
   recentTiles: true,
   homeHeading: true,
   headingCodes: "26089,19978,22909,65292,25991,21069",
+  greetCodes: "49",
   builtins: true,
   product: "ProjectWorkbench",
   apiVersion: API_VERSION,
