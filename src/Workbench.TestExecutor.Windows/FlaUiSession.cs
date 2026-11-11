@@ -6,6 +6,7 @@ using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Exceptions;
 using FlaUI.Core.Input;
+using FlaUI.Core.WindowsAPI;
 using FlaUI.UIA3;
 using Workbench.TestExecutor;
 
@@ -137,18 +138,27 @@ public sealed class FlaUiSession : IUiAutomationSession
         if (filename is null || !filename.Patterns.Value.IsSupported)
             return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "filename-missing");
         filename.Patterns.Value.Pattern.SetValue(action.Text ?? "");
-        var open = dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
-            .FirstOrDefault(button => IsOpenButton(button.Name));
+        var open = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1"))
+            ?? dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).FirstOrDefault(button => IsOpenButton(button.Name));
         if (open is null) return UiActionResult.Fail(ExecutorError.ActionFailed, false, "open-button-missing");
         if (open.Patterns.Invoke.IsSupported) open.Patterns.Invoke.Pattern.Invoke();
         else open.Click();
-        for (var attempt = 0; attempt < 20; attempt++)
+        if (DialogClosed(desktop)) return UiActionResult.Ok("file-selected");
+        filename.Focus();
+        Keyboard.Press(VirtualKeyShort.RETURN);
+        return DialogClosed(desktop)
+            ? UiActionResult.Ok("file-selected")
+            : UiActionResult.Fail(ExecutorError.ActionFailed, true, "dialog-open");
+    }
+
+    private static bool DialogClosed(AutomationElement desktop)
+    {
+        for (var attempt = 0; attempt < 5; attempt++)
         {
-            if (desktop.FindFirstDescendant(cf => cf.ByClassName("#32770")) is null)
-                return UiActionResult.Ok("file-selected");
+            if (desktop.FindFirstDescendant(cf => cf.ByClassName("#32770")) is null) return true;
             Thread.Sleep(100);
         }
-        return UiActionResult.Fail(ExecutorError.ActionFailed, true, "dialog-open");
+        return false;
     }
 
     private static bool IsOpenButton(string? name)
