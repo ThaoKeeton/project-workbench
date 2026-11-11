@@ -465,7 +465,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
             || sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2
-          npm ci --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          npm ci --ignore-scripts --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/electron/install.js
       - name: Run the Electron CDP suite
         env:
           EXECUTOR_ELECTRON: "1"
@@ -480,7 +481,7 @@ jobs:
   sonarcloud:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -525,6 +526,14 @@ jobs:
           lcov_report="$(pwd)/web/host/coverage/lcov.info"
           dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${lcov_report}"
           dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
+            || sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2
+          npm ci --ignore-scripts --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/electron/install.js
+          Xvfb :99 -screen 0 1280x1024x24 >/tmp/xvfb-sonar.log 2>&1 &
+          export DISPLAY=:99
+          export EXECUTOR_ELECTRON=1
           dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
           npm ci --ignore-scripts --prefix web/host
           npm rebuild esbuild --prefix web/host

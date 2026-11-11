@@ -67,7 +67,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             try { client = await _listener.AcceptTcpClientAsync(_shutdown.Token); }
             catch (Exception error) when (error is OperationCanceledException or ObjectDisposedException or SocketException) { break; }
             lock (_gate) _clients.Add(client);
-            _ = Task.Run(() => Serve(client));
+            _ = Task.Run(() => Serve(client), _shutdown.Token);
         }
     }
 
@@ -127,7 +127,9 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
         var keyLine = request.Split("\r\n").First(line => line.StartsWith("Sec-WebSocket-Key:", StringComparison.OrdinalIgnoreCase));
         var key = keyLine.Split(':', 2)[1].Trim();
         // RFC 6455 section 1.3 requires this exact SHA-1 accept value for the handshake. It is not a password hash.
+#pragma warning disable S4790
         var accept = Convert.ToBase64String(SHA1.HashData(Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+#pragma warning restore S4790
         var handshake = "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: " + accept + "\r\n\r\n";
         await stream.WriteAsync(Encoding.ASCII.GetBytes(handshake), cancellationToken);
     }

@@ -29,7 +29,12 @@ internal sealed class SampleForm : Form
         browse.Click += (_, _) =>
         {
             using var dialog = new OpenFileDialog { Title = "打开" };
-            if (dialog.ShowDialog(this) == DialogResult.OK) _value.Text = Path.GetFileName(dialog.FileName);
+            if (dialog.ShowDialog(this) == DialogResult.OK)
+            {
+                var name = Path.GetFileName(dialog.FileName);
+                _value.Text = name;
+                _value.AccessibleName = name;
+            }
         };
         var combo = new ComboBox { Name = "sample-expand", DropDownStyle = ComboBoxStyle.DropDownList, Location = new Point(24, 212), Width = 160 };
         combo.Items.AddRange(new object[] { "甲", "乙" });

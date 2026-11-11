@@ -229,13 +229,13 @@ public sealed class CdpWebSession : IWebSession
                 }
                 await Task.Delay(100, cancellationToken);
             }
-            session.Dispose();
+            session.ReleaseSocket();
             return null;
         }
         catch (Exception error) when (error is HttpRequestException or IOException or WebSocketException or TaskCanceledException or ExecutorDataException)
         {
             if (cancellationToken.IsCancellationRequested) throw;
-            session?.Dispose();
+            session?.ReleaseSocket();
             return null;
         }
     }
@@ -314,11 +314,11 @@ public sealed class CdpWebSession : IWebSession
 
     public async ValueTask DisposeAsync()
     {
-        Dispose();
+        ReleaseSocket();
         if (_owned is not null) await _owned.DisposeAsync();
     }
 
-    private void Dispose()
+    private void ReleaseSocket()
     {
         _socket?.Dispose();
         _http.Dispose();

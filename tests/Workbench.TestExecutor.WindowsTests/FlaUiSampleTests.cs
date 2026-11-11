@@ -29,7 +29,7 @@ public sealed class FlaUiSampleTests
             }
             Assert.True(filled);
             await opening;
-            var read = await session.ExecuteAsync(new UiAction("read", new ElementSelector(null, "sample-value"), null, "synthetic-dialog.txt", false), CancellationToken.None);
+            var read = await session.ExecuteAsync(new UiAction("read", new ElementSelector("synthetic-dialog.txt", null), null, "synthetic-dialog.txt", false), CancellationToken.None);
             Assert.Equal("synthetic-dialog.txt", read.Actual);
             File.Delete(chosen);
         }
