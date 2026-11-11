@@ -1,0 +1,11 @@
+{
+  "name": "test-executor-synthetic-electron",
+  "private": true,
+  "version": "0.0.0",
+  "main": "main.js",
+  "description": "Synthetic Electron sample for the test executor. No real product data.",
+  "dependencies": {
+    "electron": "33.4.11",
+    "three": "0.170.0"
+  }
+}

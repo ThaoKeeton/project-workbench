@@ -11,7 +11,7 @@
     "stepId": { "type": "string", "minLength": 1, "maxLength": 64 },
     "expected": { "type": "string", "maxLength": 500 },
     "actual": { "type": "string", "maxLength": 500 },
-    "engine": { "enum": ["web", "flaui", "ai"] },
+    "engine": { "enum": ["web", "flaui", "ai", "scene3d"] },
     "errorType": { "type": "string", "minLength": 1, "maxLength": 40 },
     "timeoutSeconds": { "type": "integer", "minimum": 0, "maximum": 300 },
     "attempts": { "type": "integer", "minimum": 0, "maximum": 4 },

@@ -7,13 +7,15 @@ using System.Text.Json;
 
 namespace Workbench.TestExecutor;
 
-public sealed record WebResult(bool Found, bool Ok, string Actual, bool FallbackEligible, byte[]? Png);
+public sealed record WebResult(bool Found, bool Ok, string Actual, bool FallbackEligible, byte[]? Png, string? Error = null);
 
 public interface IWebSession : IAsyncDisposable
 {
     bool IsConnected { get; }
 
     Task<WebResult> PerformAsync(TestStep step, CancellationToken cancellationToken);
+
+    Task<byte[]?> CapturePngAsync(CancellationToken cancellationToken);
 
     Task<string> SnapshotAsync(int maxBytes, CancellationToken cancellationToken);
 }
@@ -31,6 +33,8 @@ public sealed class DisconnectedWebSession : IWebSession
 
     public Task<WebResult> PerformAsync(TestStep step, CancellationToken cancellationToken)
         => Task.FromResult(new WebResult(false, false, ExecutorError.DebugPortMissing, true, null));
+
+    public Task<byte[]?> CapturePngAsync(CancellationToken cancellationToken) => Task.FromResult<byte[]?>(null);
 
     public Task<string> SnapshotAsync(int maxBytes, CancellationToken cancellationToken) => Task.FromResult("");
 
@@ -53,7 +57,7 @@ public sealed class DefaultWebSessionSource : IWebSessionSource
                 port = launched.Port;
             }
             if (port is not int debugPort) return DisconnectedWebSession.Instance;
-            var session = await CdpWebSession.ConnectAsync(debugPort, application.WindowTitle, application.Url, cancellationToken);
+            var session = await CdpWebSession.ConnectAsync(debugPort, application.WindowTitle, application.Url, cancellationToken, suite.PopupSelector);
             if (session is null)
             {
                 if (launched is not null) await launched.DisposeAsync();
@@ -110,12 +114,20 @@ public static class ElectronTargetLauncher
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
-        foreach (var argument in application.Arguments ?? [])
+        var debuggingPort = "--remote-debugging-port=" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
+        var userArguments = (application.Arguments ?? []).Where(argument => !argument.StartsWith("--remote-debugging-port=", StringComparison.Ordinal) && argument != "--remote-allow-origins=*").ToArray();
+        var dotnet = Path.GetFileName(application.Executable) is "dotnet" or "dotnet.exe";
+        if (!dotnet)
         {
-            if (!argument.StartsWith("--remote-debugging-port=", StringComparison.Ordinal))
-                start.ArgumentList.Add(argument);
+            start.ArgumentList.Add(debuggingPort);
+            start.ArgumentList.Add("--remote-allow-origins=*");
         }
-        start.ArgumentList.Add("--remote-debugging-port=" + port.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        foreach (var argument in userArguments) start.ArgumentList.Add(argument);
+        if (dotnet)
+        {
+            start.ArgumentList.Add(debuggingPort);
+            start.ArgumentList.Add("--remote-allow-origins=*");
+        }
         foreach (var pair in application.Environment ?? new Dictionary<string, string>())
             start.Environment[pair.Key] = pair.Value;
         var process = Process.Start(start) ?? throw new ExecutorDataException(ExecutorError.LaunchFailed);
@@ -153,7 +165,7 @@ public static class ElectronTargetLauncher
     private static async Task<bool> WaitAsync(int port, CancellationToken cancellationToken)
     {
         using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(2) };
-        var deadline = DateTime.UtcNow.AddSeconds(ExecutorSchemas.DefaultFlaUiTimeoutSeconds);
+        var deadline = DateTime.UtcNow.AddSeconds(30);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -169,6 +181,13 @@ public static class ElectronTargetLauncher
     }
 }
 
+/// <summary>
+/// Drives a page over its DevTools websocket.
+/// Playwright 1.64 <c>ConnectOverCDP</c> attaches to Electron but never lists the page
+/// (the browser context stays empty). <c>_electron.launch</c> is Node-only and injects
+/// <c>--inspect</c> plus a loader into the process. This client attaches to the page
+/// endpoint the app already exposes, without changing that process.
+/// </summary>
 public sealed class CdpWebSession : IWebSession
 {
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -177,23 +196,41 @@ public sealed class CdpWebSession : IWebSession
     private ClientWebSocket? _socket;
     private int _next = 1;
     private LaunchedTarget? _owned;
+    private string _popup = ExecutorSchemas.PopupSelector;
+    private string? _title;
+    private string? _url;
 
     private CdpWebSession(int port) => _port = port;
 
     public bool IsConnected => _socket?.State == WebSocketState.Open;
 
-    public static async Task<CdpWebSession?> ConnectAsync(int port, string? title, string? url, CancellationToken cancellationToken)
+    public static async Task<CdpWebSession?> ConnectAsync(int port, string? title, string? url, CancellationToken cancellationToken, string? popupSelector = null)
     {
         CdpWebSession? session = null;
         try
         {
-            session = new CdpWebSession(port);
-            if (!await session.ActivateAsync(title, url, cancellationToken))
+            session = new CdpWebSession(port)
             {
-                session.Dispose();
-                return null;
+                _popup = string.IsNullOrEmpty(popupSelector) ? ExecutorSchemas.PopupSelector : popupSelector,
+                _title = title,
+                _url = url
+            };
+            var deadline = DateTime.UtcNow.AddSeconds(15);
+            while (DateTime.UtcNow < deadline)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                try
+                {
+                    if (await session.ActivateAsync(title, url, cancellationToken)) return session;
+                }
+                catch (Exception error) when (error is HttpRequestException or IOException or WebSocketException or TaskCanceledException or ExecutorDataException)
+                {
+                    if (cancellationToken.IsCancellationRequested) throw;
+                }
+                await Task.Delay(100, cancellationToken);
             }
-            return session;
+            session.Dispose();
+            return null;
         }
         catch (Exception error) when (error is HttpRequestException or IOException or WebSocketException or TaskCanceledException or ExecutorDataException)
         {
@@ -220,14 +257,26 @@ public sealed class CdpWebSession : IWebSession
             var png = await ScreenshotAsync(cancellationToken);
             return new WebResult(true, true, "screenshot", false, png);
         }
-        var value = await EvaluateAsync(RequestFor(step), cancellationToken);
-        var found = value.TryGetProperty("found", out var foundValue) && foundValue.GetBoolean();
-        if (!found) return new WebResult(false, false, ExecutorError.ControlNotFound, true, null);
-        var ok = true;
-        if (value.TryGetProperty("ok", out var okValue) && okValue.ValueKind == JsonValueKind.False) ok = false;
-        var actual = ReadText(value, "actual") ?? ReadText(value, "value") ?? "ok";
-        if (step.Sensitive) actual = "[masked]";
-        return new WebResult(true, ok, actual, false, null);
+        if (step.Action == "wait-for") return await WaitForAsync(step, cancellationToken);
+        if (step.Action is "click" or "invoke" or "expand") return await ClickAsync(step, cancellationToken);
+        if (step.Action is "read-scene" or "assert-scene" or "project" or "drag" or "orbit") return await SceneAsync(step, cancellationToken);
+        var blocked = await PopupAsync(step, cancellationToken);
+        if (blocked is not null) return blocked;
+        return ToResult(step, await EvaluateAsync(RequestFor(step), cancellationToken));
+    }
+
+    public async Task<byte[]?> CapturePngAsync(CancellationToken cancellationToken)
+    {
+        if (!IsConnected) return null;
+        try
+        {
+            return await ScreenshotAsync(cancellationToken);
+        }
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+            return null;
+        }
     }
 
     public async Task<string> SnapshotAsync(int maxBytes, CancellationToken cancellationToken)
@@ -290,66 +339,156 @@ public sealed class CdpWebSession : IWebSession
 
     private async Task<byte[]> ScreenshotAsync(CancellationToken cancellationToken)
     {
-        var result = await CallAsync("Page.captureScreenshot", new { }, cancellationToken);
-        var data = result.GetProperty("data").GetString() ?? "";
-        return Convert.FromBase64String(data);
+        using var budget = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        budget.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            var result = await CallAsync("Page.captureScreenshot", new { format = "png" }, budget.Token);
+            if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("data", out var data))
+            {
+                var encoded = data.GetString() ?? "";
+                if (encoded.Length > 0) return Convert.FromBase64String(encoded);
+            }
+        }
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException or KeyNotFoundException or FormatException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+        }
+        var fallback = await EvaluateAsync(new { op = "screenshot", selector = "", text = "", role = "", name = "", value = "", expected = "", strategy = "element", popup = _popup, objectName = "", allowPopup = true }, cancellationToken);
+        if (fallback.ValueKind != JsonValueKind.Object || !fallback.TryGetProperty("rgba", out var rgba))
+            throw new ExecutorDataException(ExecutorError.CaptureFailed);
+        var pixels = Convert.FromBase64String(rgba.GetString() ?? "");
+        var width = fallback.GetProperty("width").GetInt32();
+        var height = fallback.GetProperty("height").GetInt32();
+        return PngImage.Create(width, height, pixels).Encode();
     }
 
     private Task WaitUntilResponsiveAsync(CancellationToken cancellationToken)
-        => EvaluateAsync(new { op = "ping", selector = "", text = "", role = "", name = "", value = "", expected = "" }, cancellationToken);
+        => EvaluateAsync(new { op = "ping", selector = "", text = "", role = "", name = "", value = "", expected = "", strategy = "element", popup = _popup, objectName = "", allowPopup = true }, cancellationToken);
+
+    private async Task<WebResult> WaitForAsync(TestStep step, CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var blocked = await PopupAsync(step, cancellationToken);
+            if (blocked is not null) return blocked;
+            var result = ToResult(step, await EvaluateAsync(RequestFor(step), cancellationToken));
+            if (result.Found && result.Ok) return result;
+            if (!cancellationToken.CanBeCanceled) return result;
+            await Task.Delay(100, cancellationToken);
+        }
+    }
+
+    private async Task<WebResult> ClickAsync(TestStep step, CancellationToken cancellationToken)
+    {
+        var blocked = await PopupAsync(step, cancellationToken);
+        if (blocked is not null) return blocked;
+        var strategies = step.Expected is { Length: > 0 } ? new[] { "element", "center", "center" } : new[] { "element" };
+        WebResult? last = null;
+        foreach (var strategy in strategies)
+        {
+            var value = await EvaluateAsync(RequestFor(step, strategy: strategy), cancellationToken);
+            last = ToResult(step, value);
+            if (last.Error == ExecutorError.UnexpectedPopup || !last.Found) return last;
+            if (strategy == "center" && step.Expected is { Length: > 0 } && !last.Actual.Contains(step.Expected, StringComparison.Ordinal)
+                && value.TryGetProperty("x", out var xValue) && value.TryGetProperty("y", out var yValue))
+            {
+                await DispatchClickAsync(xValue.GetDouble(), yValue.GetDouble(), cancellationToken);
+                last = ToResult(step, await EvaluateAsync(RequestFor(step, "read-body"), cancellationToken));
+            }
+            if (step.Expected is not { Length: > 0 } || last.Actual.Contains(step.Expected, StringComparison.Ordinal))
+            {
+                var opened = await PopupAsync(step, cancellationToken);
+                return opened ?? last with { Ok = true };
+            }
+        }
+        var after = await PopupAsync(step, cancellationToken);
+        return after ?? last ?? new WebResult(false, false, ExecutorError.ActionFailed, false, null);
+    }
+
+    private async Task<WebResult> SceneAsync(TestStep step, CancellationToken cancellationToken)
+    {
+        var blocked = await PopupAsync(step, cancellationToken);
+        if (blocked is not null) return blocked;
+        if (step.Action is "drag" or "orbit")
+        {
+            var projected = await EvaluateAsync(RequestFor(step, "project"), cancellationToken);
+            var point = ToResult(step, projected);
+            if (!point.Found || !projected.TryGetProperty("x", out var xValue) || !projected.TryGetProperty("y", out var yValue))
+                return point with { Ok = false };
+            var (dx, dy) = step.Action == "orbit" ? (80d, 0d) : ScenePointer.ParseDelta(step.Input);
+            foreach (var move in ScenePointer.Drag(xValue.GetDouble(), yValue.GetDouble(), dx, dy))
+            {
+                await CallAsync("Input.dispatchMouseEvent", new
+                {
+                    type = move.Type,
+                    x = move.X,
+                    y = move.Y,
+                    button = "left",
+                    buttons = move.Type == "mouseReleased" ? 0 : 1,
+                    clickCount = 1
+                }, cancellationToken);
+            }
+        }
+        if (step.Action == "project") return ToResult(step, await EvaluateAsync(RequestFor(step, "project"), cancellationToken));
+        var read = ToResult(step, await EvaluateAsync(RequestFor(step, "read-scene"), cancellationToken));
+        if (!read.Found || !read.Ok || step.Expected is not { Length: > 0 }) return read;
+        var ok = SceneAssert.Matches(read.Actual, step.Expected, step.Tolerance ?? 0, out var detail);
+        return read with { Ok = ok, Actual = ok ? read.Actual : detail };
+    }
+
+    private async Task<WebResult?> PopupAsync(TestStep step, CancellationToken cancellationToken)
+    {
+        if (step.AllowPopup || step.Action is "screenshot" or "switch-window") return null;
+        var value = await EvaluateAsync(RequestFor(step, "popup"), cancellationToken);
+        if (!value.TryGetProperty("popup", out var popup) || popup.ValueKind != JsonValueKind.True) return null;
+        return ToResult(step, value);
+    }
+
+    private async Task DispatchClickAsync(double x, double y, CancellationToken cancellationToken)
+    {
+        await CallAsync("Input.dispatchMouseEvent", new { type = "mousePressed", x, y, button = "left", buttons = 1, clickCount = 1 }, cancellationToken);
+        await CallAsync("Input.dispatchMouseEvent", new { type = "mouseReleased", x, y, button = "left", buttons = 0, clickCount = 1 }, cancellationToken);
+    }
 
     private async Task<JsonElement> EvaluateAsync(object request, CancellationToken cancellationToken)
     {
-        var expression = "(() => {\nconst request = " + JsonSerializer.Serialize(request) + ";\n" + DomScript + "\n})()";
-        var result = await CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, cancellationToken);
-        return result.GetProperty("result").GetProperty("value");
+        var result = await CallAsync("Runtime.evaluate", new { expression = CdpExpression.Build(request), returnByValue = true }, cancellationToken);
+        if (!result.TryGetProperty("result", out var inner) || !inner.TryGetProperty("value", out var value))
+            return default;
+        return value;
     }
-
-    private const string DomScript = """
-        const visible = (el) => !!el && el.getAttribute('aria-hidden') !== 'true';
-        const roleOf = (el) => el.getAttribute('role') || ({BUTTON:'button',A:'link',INPUT:'textbox',TEXTAREA:'textbox',SELECT:'combobox'}[el.tagName] || '');
-        const nameOf = (el) => el.getAttribute('aria-label') || el.innerText || '';
-        const all = () => Array.from(document.querySelectorAll('body *'));
-        if (request.op === 'ping') return {found:true, ok:true};
-        const find = () => {
-          if (request.selector) return document.querySelector(request.selector);
-          const nodes = all();
-          if (request.role) return nodes.find(el => roleOf(el) === request.role && (!request.name || nameOf(el).includes(request.name))) || null;
-          if (request.text) return nodes.find(el => (el.innerText || '').includes(request.text)) || null;
-          return null;
-        };
-        const el = find();
-        if (!el && request.op !== 'snapshot' && request.op !== 'network' && request.op !== 'assert-network') return {found:false};
-        if (request.op === 'click' || request.op === 'invoke' || request.op === 'expand') {
-          const rect = el.getBoundingClientRect();
-          const x = rect.left + rect.width / 2;
-          const y = rect.top + rect.height / 2;
-          el.click();
-          return {found:true, ok:true, visible: visible(el), x, y};
-        }
-        if (request.op === 'type' || request.op === 'set-value' || request.op === 'open-file') {
-          el.focus();
-          el.value = request.value || '';
-          el.dispatchEvent(new Event('input', {bubbles:true}));
-          return {found:true, ok:true, value: el.value};
-        }
-        return {found:true};
-        """;
 
     private async Task<JsonElement> CallAsync(string method, object parameters, CancellationToken cancellationToken)
     {
-        if (_socket is not { State: WebSocketState.Open }) throw new ExecutorDataException(ExecutorError.DebugPortMissing);
+        if (_socket is not { State: WebSocketState.Open } && !await ActivateAsync(_title, _url, cancellationToken))
+            throw new ExecutorDataException(ExecutorError.DebugPortMissing);
+        var socket = _socket ?? throw new ExecutorDataException(ExecutorError.DebugPortMissing);
         var id = _next++;
         var payload = JsonSerializer.Serialize(new { id, method, @params = parameters });
-        await _socket.SendAsync(Encoding.UTF8.GetBytes(payload), WebSocketMessageType.Text, true, cancellationToken);
+        await socket.SendAsync(Encoding.UTF8.GetBytes(payload), WebSocketMessageType.Text, true, cancellationToken);
+        while (true)
+        {
+            var message = await ReadMessageAsync(cancellationToken);
+            using var document = JsonDocument.Parse(message);
+            if (!document.RootElement.TryGetProperty("id", out var messageId) || messageId.GetInt32() != id)
+                continue;
+            if (document.RootElement.TryGetProperty("error", out _)) throw new ExecutorDataException(ExecutorError.ActionFailed);
+            return document.RootElement.GetProperty("result").Clone();
+        }
+    }
+
+    private async Task<byte[]> ReadMessageAsync(CancellationToken cancellationToken)
+    {
         var buffer = new byte[1024 * 256];
         using var message = new MemoryStream();
         WebSocketReceiveResult received;
         do
         {
-            // A file browser loading a network path can block the renderer. Keep the same
-            // in-flight call until the page answers or the step timeout cancels it.
-            var pending = _socket.ReceiveAsync(buffer, cancellationToken);
+            // Opening a network directory can block the renderer for one to two minutes.
+            // Keep this same call until the page answers or the step timeout cancels it.
+            var pending = _socket!.ReceiveAsync(buffer, cancellationToken);
             while (!pending.IsCompleted)
             {
                 var pause = Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
@@ -361,9 +500,7 @@ public sealed class CdpWebSession : IWebSession
             message.Write(buffer, 0, received.Count);
         }
         while (!received.EndOfMessage);
-        using var document = JsonDocument.Parse(message.ToArray());
-        if (document.RootElement.TryGetProperty("error", out _)) throw new ExecutorDataException(ExecutorError.ActionFailed);
-        return document.RootElement.GetProperty("result").Clone();
+        return message.ToArray();
     }
 
     private string VersionUrl(string path) => "http://127.0.0.1:" + _port.ToString(System.Globalization.CultureInfo.InvariantCulture) + path;
@@ -371,10 +508,13 @@ public sealed class CdpWebSession : IWebSession
     private static CdpPage? Pick(IReadOnlyList<CdpPage> pages, string? title, string? url)
     {
         var candidates = pages.Where(page => page.Type is null or "page").ToArray();
+        if (url is { Length: > 0 })
+        {
+            var byUrl = candidates.FirstOrDefault(page => page.Url?.Contains(url, StringComparison.Ordinal) == true);
+            if (byUrl is not null) return byUrl;
+        }
         if (title is { Length: > 0 })
             return candidates.FirstOrDefault(page => page.Title?.Contains(title, StringComparison.Ordinal) == true);
-        if (url is { Length: > 0 })
-            return candidates.FirstOrDefault(page => page.Url?.Contains(url, StringComparison.Ordinal) == true);
         return candidates.FirstOrDefault();
     }
 
@@ -390,16 +530,34 @@ public sealed class CdpWebSession : IWebSession
         return uri.Host is "127.0.0.1" or "localhost" or "::1";
     }
 
-    private static object RequestFor(TestStep step) => new
+    private object RequestFor(TestStep step, string? op = null, string? strategy = null) => new
     {
-        op = step.Action,
+        op = op ?? step.Action,
         selector = step.Target?.Selector ?? "",
         text = step.Target?.Text ?? "",
         role = step.Target?.Role ?? "",
         name = step.Target?.Name ?? "",
         value = step.Input ?? "",
-        expected = step.Expected ?? ""
+        expected = step.Expected ?? "",
+        strategy = strategy ?? "element",
+        popup = _popup,
+        objectName = step.Target?.ObjectName ?? "",
+        allowPopup = step.AllowPopup
     };
+
+    private static WebResult ToResult(TestStep step, JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+            return new WebResult(false, false, ExecutorError.ActionFailed, false, null);
+        if (value.TryGetProperty("popup", out var popup) && popup.ValueKind == JsonValueKind.True)
+            return new WebResult(true, false, ReadText(value, "actual") ?? "", false, null, ExecutorError.UnexpectedPopup);
+        var found = value.TryGetProperty("found", out var foundValue) && foundValue.ValueKind == JsonValueKind.True && foundValue.GetBoolean();
+        if (!found) return new WebResult(false, false, ExecutorError.ControlNotFound, true, null);
+        var ok = !value.TryGetProperty("ok", out var okValue) || okValue.ValueKind != JsonValueKind.False;
+        var actual = ReadText(value, "actual") ?? ReadText(value, "value") ?? "ok";
+        if (step.Sensitive) actual = "[masked]";
+        return new WebResult(true, ok, actual, false, null);
+    }
 
     private sealed record CdpPage(string? Id, string? Title, string? Url, string? Type, string? WebSocketDebuggerUrl);
 }

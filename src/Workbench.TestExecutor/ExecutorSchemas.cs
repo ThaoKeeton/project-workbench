@@ -12,6 +12,14 @@ public static class ExecutorSchemas
     public const int Version = 2;
     public const int DefaultFlaUiTimeoutSeconds = 15;
     public const int DefaultAiTimeoutSeconds = 60;
+
+    /// <summary>
+    /// A network folder opened inside the page can block the renderer for one to two minutes.
+    /// Web and 3D steps wait at least this long before the call is abandoned.
+    /// </summary>
+    public const int RendererBlockSeconds = 120;
+
+    public const string PopupSelector = ".ant-modal";
     public const int MaxAttempts = 2;
     public const string BuiltinSuiteId = "synthetic-window";
     public const string DefaultComputerUseModel = "computer-use-preview";
@@ -44,4 +52,5 @@ public static class ExecutorError
     public const string BaselineMissing = "BaselineMissing";
     public const string BudgetExceeded = "BudgetExceeded";
     public const string Cancelled = "Cancelled";
+    public const string UnexpectedPopup = "UnexpectedPopup";
 }

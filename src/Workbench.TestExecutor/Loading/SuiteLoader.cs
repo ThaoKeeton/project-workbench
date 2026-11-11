@@ -65,7 +65,8 @@ public sealed class SuiteLoader
             application,
             (dto.Masks ?? []).Select(NormalizeMask).ToArray(),
             dto.Cases.Select(NormalizeCase).ToArray(),
-            NormalizeVisual(dto.Visual));
+            NormalizeVisual(dto.Visual),
+            NormalizePopup(dto.PopupSelector));
     }
 
     private static ApplicationTarget? NormalizeApplication(ApplicationDto? application)
@@ -124,14 +125,16 @@ public sealed class SuiteLoader
 
     private static TestStep NormalizeStep(StepDto step)
     {
-        if (!TextRules.IsSafeId(step.Id) || step.Type is not ("web" or "flaui" or "ai") || string.IsNullOrEmpty(step.Action))
+        if (!TextRules.IsSafeId(step.Id) || step.Type is not ("web" or "flaui" or "ai" or "scene3d") || string.IsNullOrEmpty(step.Action))
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
         if (!TextRules.IsOptionalText(step.Expected, 500) || !TextRules.IsOptionalText(step.Input, 500))
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
+        if (step.Tolerance is < 0 or > 1000) throw new ExecutorDataException(ExecutorError.InvalidSuite);
         var kind = step.Type switch
         {
             "ai" => StepKind.Ai,
             "web" => StepKind.Web,
+            "scene3d" => StepKind.Scene3d,
             _ => StepKind.FlaUi
         };
         var target = NormalizeSelector(step.Target);
@@ -140,9 +143,18 @@ public sealed class SuiteLoader
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
         if (kind == StepKind.Web && step.Action == "switch-window" && target?.Title is null && target?.Url is null)
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
-        var timeout = step.TimeoutSeconds ?? (kind == StepKind.Ai ? ExecutorSchemas.DefaultAiTimeoutSeconds : ExecutorSchemas.DefaultFlaUiTimeoutSeconds);
+        if (kind == StepKind.Scene3d && step.Action is not ("read-scene" or "project" or "drag" or "orbit" or "assert-scene" or "screenshot"))
+            throw new ExecutorDataException(ExecutorError.InvalidSuite);
+        if (kind == StepKind.Scene3d && step.Action != "screenshot" && target?.HasDomLocator != true && target?.ObjectName is null)
+            throw new ExecutorDataException(ExecutorError.InvalidSuite);
+        var timeout = step.TimeoutSeconds ?? kind switch
+        {
+            StepKind.Ai => ExecutorSchemas.DefaultAiTimeoutSeconds,
+            StepKind.Web or StepKind.Scene3d => ExecutorSchemas.RendererBlockSeconds,
+            _ => ExecutorSchemas.DefaultFlaUiTimeoutSeconds
+        };
         if (timeout is < 1 or > 300) throw new ExecutorDataException(ExecutorError.InvalidSuite);
-        return new TestStep(step.Id!, kind, step.Action, target, BlankToNull(step.Expected), BlankToNull(step.Input), timeout, step.AllowFallback ?? true, step.Sensitive ?? false);
+        return new TestStep(step.Id!, kind, step.Action, target, BlankToNull(step.Expected), BlankToNull(step.Input), timeout, step.AllowFallback ?? true, step.Sensitive ?? false, step.AllowPopup ?? false, step.Tolerance);
     }
 
     private static MaskSpec NormalizeMask(MaskDto mask)
@@ -167,11 +179,20 @@ public sealed class SuiteLoader
         var role = BlankToNull(selector.Role);
         var title = BlankToNull(selector.Title);
         var url = BlankToNull(selector.Url);
-        if (name is null && automationId is null && css is null && text is null && role is null && title is null && url is null) return null;
+        var objectName = BlankToNull(selector.Object);
+        if (name is null && automationId is null && css is null && text is null && role is null && title is null && url is null && objectName is null) return null;
         if (!TextRules.IsOptionalText(name, 200) || !TextRules.IsOptionalText(automationId, 200) || !TextRules.IsOptionalText(css, 200)
-            || !TextRules.IsOptionalText(text, 200) || !TextRules.IsOptionalText(role, 40) || !TextRules.IsOptionalText(title, 120) || !TextRules.IsOptionalText(url, 200))
+            || !TextRules.IsOptionalText(text, 200) || !TextRules.IsOptionalText(role, 40) || !TextRules.IsOptionalText(title, 120) || !TextRules.IsOptionalText(url, 200)
+            || !TextRules.IsOptionalText(objectName, 80))
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
-        return new ElementSelector(name, automationId, css, text, role, title, url);
+        return new ElementSelector(name, automationId, css, text, role, title, url, objectName);
+    }
+
+    private static string NormalizePopup(string? selector)
+    {
+        var popup = BlankToNull(selector) ?? ExecutorSchemas.PopupSelector;
+        if (!TextRules.IsSafeText(popup, 80)) throw new ExecutorDataException(ExecutorError.InvalidSuite);
+        return popup;
     }
 
     private static string? BlankToNull(string? value) => string.IsNullOrEmpty(value) ? null : value;
@@ -193,6 +214,7 @@ public sealed class SuiteLoader
         public List<MaskDto>? Masks { get; init; }
         public List<CaseDto>? Cases { get; init; }
         public VisualDto? Visual { get; init; }
+        public string? PopupSelector { get; init; }
     }
 
     private sealed class ApplicationDto
@@ -241,6 +263,8 @@ public sealed class SuiteLoader
         public int? TimeoutSeconds { get; init; }
         public bool? AllowFallback { get; init; }
         public bool? Sensitive { get; init; }
+        public bool? AllowPopup { get; init; }
+        public double? Tolerance { get; init; }
     }
 
     private sealed class SelectorDto
@@ -252,6 +276,7 @@ public sealed class SuiteLoader
         public string? Role { get; init; }
         public string? Title { get; init; }
         public string? Url { get; init; }
+        public string? Object { get; init; }
     }
 
     private sealed class MaskDto

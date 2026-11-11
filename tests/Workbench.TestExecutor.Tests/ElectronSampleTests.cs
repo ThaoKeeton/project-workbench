@@ -1,0 +1,126 @@
+using Workbench.TestExecutor;
+using Xunit;
+
+namespace Workbench.TestExecutor.Tests;
+
+public sealed class ElectronSampleTests
+{
+    [Fact]
+    public void Cdp_expression_is_a_function_and_scene_numbers_allow_tolerance()
+    {
+        var expression = CdpExpression.Build(new { op = "wait-for", selector = "#status" });
+        Assert.StartsWith("(() => {", expression, StringComparison.Ordinal);
+        Assert.Contains("const request = ", expression, StringComparison.Ordinal);
+        Assert.Contains("el.click()", expression, StringComparison.Ordinal);
+        Assert.False(CdpExpression.UsesAssignmentComma(expression));
+        Assert.False(CdpExpression.UsesAssignmentComma("(() => { const request = {\"op\":\"wait-for\"}; return 1; })()"));
+        Assert.True(CdpExpression.UsesAssignmentComma("(x = document.querySelector('#a');, x.click())"));
+
+        const string Scene = """
+            {"camera":{"x":0,"y":4,"z":8,"fov":50,"azimuth":0},"meshes":[{"name":"cube","min":{"x":-1,"y":-1,"z":-1},"max":{"x":1,"y":1,"z":1},"vertices":[{"x":-1,"y":-1,"z":1}]}]}
+            """;
+        Assert.True(SceneAssert.Matches(Scene, "camera.y=4±0.2;mesh.cube.size=2±0.05;mesh.cube.vertex.0.z=1±0", 0, out _));
+        Assert.False(SceneAssert.Matches(Scene, "camera.azimuth=2±0.1", 0, out var detail));
+        Assert.Contains("camera.azimuth=", detail, StringComparison.Ordinal);
+        Assert.False(SceneAssert.Matches("not-json", "camera.y=4", 0, out var unreadable));
+        Assert.Equal("scene-unreadable", unreadable);
+        var drag = ScenePointer.Drag(10, 20, 80, 0);
+        Assert.Equal("mousePressed", drag[0].Type);
+        Assert.Equal("mouseReleased", drag[^1].Type);
+        Assert.Equal(90, drag[^1].X);
+        Assert.Equal((40d, 10d), ScenePointer.ParseDelta("40,10"));
+    }
+
+    [Fact]
+    public void Web_steps_wait_long_enough_for_a_blocked_renderer()
+    {
+        var suite = new SuiteLoader().Load("""
+            {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"blocked","name":"阻塞","popupSelector":".ant-modal","cases":[{"id":"CASE-1","name":"等待","steps":[{"id":"wait","type":"web","action":"wait-for","target":{"selector":"#status"}},{"id":"orbit","type":"scene3d","action":"orbit","target":{"selector":"#view","object":"cube"}}]}]}
+            """);
+        Assert.Equal(".ant-modal", suite.PopupSelector);
+        Assert.Equal(ExecutorSchemas.RendererBlockSeconds, suite.Cases[0].Steps[0].TimeoutSeconds);
+        Assert.Equal(StepKind.Scene3d, suite.Cases[0].Steps[1].Kind);
+        Assert.Equal("cube", suite.Cases[0].Steps[1].Target!.ObjectName);
+        Assert.Equal(ExecutorSchemas.RendererBlockSeconds, suite.Cases[0].Steps[1].TimeoutSeconds);
+    }
+
+    [Fact]
+    public async Task Synthetic_page_runs_click_retry_popup_and_scene()
+    {
+        await using var host = SyntheticCdpHost.StartOn(0, "合成电子样品", null);
+        await RunSampleAsync(new ApplicationTarget(null, "合成电子样品", host.Port, Attach: true));
+    }
+
+    [Fact]
+    public async Task Electron_sample_runs_the_cdp_suite()
+    {
+        var electron = FindElectron();
+        if (electron is null)
+        {
+            if (Environment.GetEnvironmentVariable("EXECUTOR_ELECTRON") == "1")
+                throw new InvalidOperationException("The synthetic Electron binary was not installed.");
+            return;
+        }
+        if (!OperatingSystem.IsWindows())
+            File.SetUnixFileMode(electron, File.GetUnixFileMode(electron) | UnixFileMode.UserExecute);
+        var directory = FixtureDirectory();
+        await RunSampleAsync(new ApplicationTarget(null, "合成电子样品", null, electron, [directory], new Dictionary<string, string> { ["ELECTRON_DISABLE_SANDBOX"] = "1" }, Url: "index.html"));
+    }
+
+    private static async Task RunSampleAsync(ApplicationTarget application)
+    {
+        var loaded = new SuiteLoader().Load(File.ReadAllText(Path.Combine(FixtureDirectory(), "suite.json")));
+        var suite = loaded with { Application = application };
+        var root = Fixtures.Temp();
+        var reports = Path.Combine(root, "reports");
+        var computer = new FakeComputerUseProvider();
+        var runner = Fixtures.Runner(new ScriptedFactory(), computer, new RecordingExporter(), new RecordingDeadline(), root, reports);
+        var sink = new ListSink();
+        await runner.RunAsync(suite, new RunRequest("electron-run", Fixtures.Policy(), reports), sink, CancellationToken.None);
+        Assert.Equal(0, computer.ObserveCalls);
+        Assert.Contains("\"tokens\":0", File.ReadAllText(Path.Combine(reports, "ai-usage.json")), StringComparison.Ordinal);
+        var trace = string.Join(" || ", sink.Steps.Select(step => step.StepId + "=" + step.Status + "/" + step.ErrorType + "/" + step.Message));
+        Assert.True(sink.Steps.Any(step => step.StepId == "start" && step.Status == "passed" && step.Engine == "web"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "status" && step.Status == "passed"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "read-camera" && step.Status == "passed" && step.Engine == "scene3d"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "orbit" && step.Status == "passed" && step.Engine == "scene3d"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "open-modal" && step.Status == "failed" && step.ErrorType == ExecutorError.UnexpectedPopup), trace);
+        foreach (var name in new[] { "CASE-UI-wait-start", "CASE-UI-start", "CASE-UI-status", "CASE-UI-shot-ui", "CASE-SCENE-read-camera", "CASE-SCENE-orbit", "CASE-SCENE-shot-scene" })
+            Assert.True(File.Exists(Path.Combine(reports, name + ".png")), name);
+        var sceneShot = Path.Combine(reports, "CASE-SCENE-shot-scene.png");
+        var png = await File.ReadAllBytesAsync(sceneShot);
+        Assert.Equal(0, VisualDiff.MismatchRatio(png, png, 0, []));
+        var mutated = PngImage.Decode(png);
+        mutated[0, 0] = new Rgba8(255, 0, 0, 255);
+        Assert.True(VisualDiff.MismatchRatio(mutated.Encode(), png, 0, []) > 0);
+        var report = System.Text.Json.JsonSerializer.Deserialize<FailureReport>(await File.ReadAllTextAsync(Path.Combine(reports, "CASE-POPUP-open-modal-UnexpectedPopup.json")), new System.Text.Json.JsonSerializerOptions(System.Text.Json.JsonSerializerDefaults.Web));
+        Assert.Equal("合成弹窗：请先完成加载", report!.Actual);
+        var markdown = await File.ReadAllTextAsync(Path.Combine(reports, "CASE-POPUP-open-modal-UnexpectedPopup.md"));
+        Assert.Contains("合成弹窗：请先完成加载", markdown, StringComparison.Ordinal);
+        Directory.Delete(root, true);
+    }
+
+    private static string? FindElectron()
+    {
+        var directory = FixtureDirectory();
+        foreach (var name in new[] { "electron", "electron.exe" })
+        {
+            var candidate = Path.Combine(directory, "node_modules", "electron", "dist", name);
+            if (File.Exists(candidate)) return candidate;
+        }
+        return null;
+    }
+
+    private static string FixtureDirectory()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var depth = 0; depth < 8 && dir is not null; depth++, dir = dir.Parent)
+        {
+            var candidate = Path.Combine(dir.FullName, "tests", "fixtures", "TestExecutor.SyntheticElectron");
+            if (File.Exists(Path.Combine(candidate, "suite.json"))) return candidate;
+            candidate = Path.Combine(dir.FullName, "fixtures", "TestExecutor.SyntheticElectron");
+            if (File.Exists(Path.Combine(candidate, "suite.json"))) return candidate;
+        }
+        throw new DirectoryNotFoundException("Synthetic Electron fixture was not found.");
+    }
+}

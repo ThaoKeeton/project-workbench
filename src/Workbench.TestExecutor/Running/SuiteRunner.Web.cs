@@ -4,7 +4,7 @@ public sealed partial class SuiteRunner
 {
     private async Task<StepOutcome> ExecuteWebFirstAsync(TestSuite suite, TestCase testCase, TestStep step, IUiAutomationSession session, IWebSession web, RunRequest request, IRunSink sink, CancellationToken cancellationToken)
     {
-        var canDrive = web.IsConnected && (step.Target?.HasDomLocator == true || step.Action is "screenshot" or "switch-window" or "open-file");
+        var canDrive = web.IsConnected && (step.Kind == StepKind.Scene3d || step.Target?.HasDomLocator == true || step.Action is "screenshot" or "switch-window" or "open-file");
         if (canDrive)
         {
             var attempt = await AttemptWebAsync(suite, testCase, step, session, web, request, sink, cancellationToken);
@@ -15,7 +15,8 @@ public sealed partial class SuiteRunner
                 return await ExecuteFlaAsync(suite, testCase, step, session, request, sink, cancellationToken);
             if (step.AllowFallback && testCase.AllowFallback && request.Policy.CanUseComputer)
                 return await ExecuteAiAsync(suite, testCase, step, session, request, sink, attempt.Log, cancellationToken);
-            return await FailAsync(suite, testCase, step, request, sink, "web", attempt.Error, attempt.Actual, attempt.Attempts, false, attempt.Log, attempt.Masked, cancellationToken);
+            var failedEngine = step.Kind == StepKind.Scene3d ? "scene3d" : "web";
+            return await FailAsync(suite, testCase, step, request, sink, failedEngine, attempt.Error, attempt.Actual, attempt.Attempts, false, attempt.Log, attempt.Masked, cancellationToken);
         }
         if (step.Target?.HasUiTarget == true || step.Action == "open-file")
             return await ExecuteFlaAsync(suite, testCase, step, session, request, sink, cancellationToken);
@@ -33,10 +34,11 @@ public sealed partial class SuiteRunner
         var error = ExecutorError.ActionFailed;
         var actual = "";
         var repaired = false;
+        var engine = step.Kind == StepKind.Scene3d ? "scene3d" : "web";
         for (var attempt = 1; attempt <= ExecutorSchemas.MaxAttempts; attempt++)
         {
-            Publish(sink, request, suite, testCase, current, attempt == 1 ? "running" : "retrying", "web", null, attempt, false, Describe(current));
-            masked = await CaptureAsync(suite, session, log, cancellationToken) ?? masked;
+            Publish(sink, request, suite, testCase, current, attempt == 1 ? "running" : "retrying", engine, null, attempt, false, Describe(current));
+            masked = await CaptureSurfaceAsync(suite, session, web, log, cancellationToken) ?? masked;
             WebResult result;
             using (var deadline = _deps.Deadlines.Start(TimeSpan.FromSeconds(current.TimeoutSeconds), cancellationToken))
             {
@@ -46,7 +48,11 @@ public sealed partial class SuiteRunner
                     result = new WebResult(false, false, ExecutorError.Timeout, false, null);
                 }
             }
-            log.Add(Line(attempt, "web", result.Actual + " " + Describe(current)));
+            var after = await CaptureSurfaceAsync(suite, session, web, log, cancellationToken);
+            if (after is not null) masked = after;
+            log.Add(Line(attempt, engine, result.Actual + " " + Describe(current)));
+            if (result.Error == ExecutorError.UnexpectedPopup)
+                return new WebTry(true, null, result.Error, result.Actual, attempt, false, log, masked);
             if (result.Actual == "native-dialog")
                 return new WebTry(true, null, ExecutorError.ControlNotFound, result.Actual, attempt, true, log, masked);
             if (result.Png is not null)
@@ -60,8 +66,8 @@ public sealed partial class SuiteRunner
                 result = result with { Ok = false, Actual = result.Actual };
             if (result.Found && result.Ok)
             {
-                Publish(sink, request, suite, testCase, current, "passed", "web", null, attempt, false, "passed");
-                await _deps.Artifacts.WriteEvidenceAsync(request.ReportDirectory, testCase.Id, current.Id, "passed", "web", log, masked, cancellationToken);
+                Publish(sink, request, suite, testCase, current, "passed", engine, null, attempt, false, "passed");
+                await _deps.Artifacts.WriteEvidenceAsync(request.ReportDirectory, testCase.Id, current.Id, "passed", engine, log, masked, cancellationToken);
                 return new WebTry(false, StepOutcome.Pass(masked), "", result.Actual, attempt, false, log, masked);
             }
             error = result.Found ? ExecutorError.AssertionMismatch : result.Actual == ExecutorError.Timeout ? ExecutorError.Timeout : ExecutorError.ControlNotFound;

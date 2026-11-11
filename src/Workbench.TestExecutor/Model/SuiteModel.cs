@@ -4,7 +4,8 @@ public enum StepKind
 {
     Web,
     FlaUi,
-    Ai
+    Ai,
+    Scene3d
 }
 
 public enum ExportMode
@@ -21,7 +22,8 @@ public sealed record ElementSelector(
     string? Text = null,
     string? Role = null,
     string? Title = null,
-    string? Url = null)
+    string? Url = null,
+    string? ObjectName = null)
 {
     public string Display =>
         Selector is { Length: > 0 } ? "selector=" + Selector :
@@ -67,7 +69,9 @@ public sealed record TestStep(
     string? Input,
     int TimeoutSeconds,
     bool AllowFallback,
-    bool Sensitive);
+    bool Sensitive,
+    bool AllowPopup = false,
+    double? Tolerance = null);
 
 public sealed record TestCase(string Id, string Name, bool AllowFallback, IReadOnlyList<TestStep> Steps);
 
@@ -79,7 +83,8 @@ public sealed record TestSuite(
     ApplicationTarget? Application,
     IReadOnlyList<MaskSpec> Masks,
     IReadOnlyList<TestCase> Cases,
-    VisualSettings? Visual = null);
+    VisualSettings? Visual = null,
+    string PopupSelector = ".ant-modal");
 
 public readonly record struct PixelRect(int X, int Y, int Width, int Height);
 

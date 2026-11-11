@@ -439,12 +439,41 @@ jobs:
       - uses: actions/setup-dotnet@v6.1.0
         with:
           global-json-file: global.json
-      - name: FlaUI integration tests against the synthetic sample
-        run: dotnet test tests/Workbench.TestExecutor.WindowsTests/Workbench.TestExecutor.WindowsTests.csproj -c Release --nologo --logger "trx;LogFileName=test-executor-windows.trx" --results-directory artifacts/tests
+      - name: FlaUI file-dialog fallback against the synthetic window
+        run: dotnet test tests/Workbench.TestExecutor.WindowsTests/Workbench.TestExecutor.WindowsTests.csproj -c Release --nologo --filter FullyQualifiedName~Native_file_dialog --logger "trx;LogFileName=test-executor-windows.trx" --results-directory artifacts/tests
       - uses: actions/upload-artifact@v7.0.2
         if: always()
         with:
           name: test-executor-windows-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  test-executor-electron:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+      - name: Install a display and the synthetic Electron sample
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
+            || sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2
+          npm ci --prefix tests/fixtures/TestExecutor.SyntheticElectron
+      - name: Run the Electron CDP suite
+        env:
+          EXECUTOR_ELECTRON: "1"
+        run: xvfb-run -a dotnet test tests/Workbench.TestExecutor.Tests/Workbench.TestExecutor.Tests.csproj -c Release --nologo --filter FullyQualifiedName~Electron_sample --logger "trx;LogFileName=test-executor-electron.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: test-executor-electron-results
           path: artifacts/tests
           if-no-files-found: error
           retention-days: 1

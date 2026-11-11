@@ -99,7 +99,7 @@ public sealed partial class SuiteRunner
 
     private Task<StepOutcome> DispatchAsync(TestSuite suite, TestCase testCase, TestStep step, IUiAutomationSession session, IWebSession web, RunRequest request, IRunSink sink, CancellationToken cancellationToken)
     {
-        var preferWeb = step.Kind == StepKind.Web || (step.Kind == StepKind.Ai && web.IsConnected && step.Target?.HasDomLocator == true);
+        var preferWeb = step.Kind is StepKind.Web or StepKind.Scene3d || (step.Kind == StepKind.Ai && web.IsConnected && step.Target?.HasDomLocator == true);
         if (preferWeb) return ExecuteWebFirstAsync(suite, testCase, step, session, web, request, sink, cancellationToken);
         return step.Kind == StepKind.Ai
             ? ExecuteAiAsync(suite, testCase, step, session, request, sink, [], cancellationToken)
@@ -218,6 +218,28 @@ public sealed partial class SuiteRunner
         {
             return new Observed(null, error.Code, error.Code);
         }
+    }
+
+    private async Task<MaskedImage?> CaptureSurfaceAsync(TestSuite suite, IUiAutomationSession session, IWebSession web, List<string> log, CancellationToken cancellationToken)
+    {
+        if (web.IsConnected)
+        {
+            try
+            {
+                var png = await web.CapturePngAsync(cancellationToken);
+                if (png is { Length: > 8 })
+                {
+                    await _deps.Originals.SaveAsync(png, cancellationToken);
+                    var rectangles = suite.Masks.OfType<RectangleMask>().Select(mask => new PixelRect(mask.X, mask.Y, mask.Width, mask.Height)).ToArray();
+                    return _deps.Masker.Apply(png, rectangles);
+                }
+            }
+            catch (Exception error) when (error is ExecutorDataException or IOException)
+            {
+                log.Add("capture-failed");
+            }
+        }
+        return await CaptureAsync(suite, session, log, cancellationToken);
     }
 
     private async Task<MaskedImage?> CaptureAsync(TestSuite suite, IUiAutomationSession session, List<string> log, CancellationToken cancellationToken)

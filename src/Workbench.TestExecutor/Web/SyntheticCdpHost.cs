@@ -7,8 +7,9 @@ using System.Text.Json;
 namespace Workbench.TestExecutor;
 
 /// <summary>
-/// Loopback CDP stand-in for a desktop Electron app. Linux CI uses it instead of a real browser.
-/// The same <c>--remote-debugging-port</c> flag the launcher passes to Electron is accepted here.
+/// Loopback CDP stand-in used by fast unit tests. The CI sample that stands in for a real
+/// desktop app is the Electron fixture under tests/fixtures/TestExecutor.SyntheticElectron.
+/// This host still accepts the same <c>--remote-debugging-port</c> flag.
 /// </summary>
 public sealed class SyntheticCdpHost : IAsyncDisposable
 {
@@ -230,6 +231,11 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
         public string? Marker { get; set; }
         private bool _recording;
         private readonly List<RecordedInput> _recorded = [];
+        private bool _modal;
+        private bool _armStart;
+        private bool _dragging;
+        private double _lastX;
+        private double _azimuth;
 
         private SyntheticModel(List<Page> pages) => _pages = pages;
 
@@ -243,7 +249,11 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 SyntheticNode.Button("#hidden", "隐藏", "hidden-secret-text", false),
                 SyntheticNode.Button("#long", "长文本", new string('字', 400), true),
                 SyntheticNode.Input("#file", "文件"),
-                SyntheticNode.Input("#native-file", "原生文件")
+                SyntheticNode.Input("#native-file", "原生文件"),
+                SyntheticNode.Button("#start", "开始", "开始", true),
+                SyntheticNode.Button("#popup", "弹出", "弹出", true),
+                SyntheticNode.Status("#status", ""),
+                SyntheticNode.Button("#view", "视图", "canvas", true)
             ]),
             new Page("other", "第二个窗口", "http://synthetic.local/other", [SyntheticNode.Status("#other", "第二页")])
         ]);
@@ -272,6 +282,11 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 var page = _pages.Single(item => item.Id == pageId);
                 return "{\"id\":" + id + ",\"result\":{\"data\":\"" + Convert.ToBase64String(page.Screenshot()) + "\"}}";
             }
+            if (method == "Input.dispatchMouseEvent")
+            {
+                Pointer(root.GetProperty("params"));
+                return "{\"id\":" + id + ",\"result\":{}}";
+            }
             if (method != "Runtime.evaluate")
                 return "{\"id\":" + id + ",\"result\":{}}";
             var expression = root.GetProperty("params").GetProperty("expression").GetString() ?? "";
@@ -298,6 +313,16 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             }
             if (op == "snapshot") return Snapshot(page);
             if (op == "ping") return "{\"found\":true,\"ok\":true}";
+            if (op == "popup")
+                return _modal
+                    ? "{\"found\":true,\"ok\":false,\"popup\":true,\"actual\":" + JsonSerializer.Serialize("合成弹窗：请先完成加载") + "}"
+                    : "{\"found\":false}";
+            if (op == "read-body")
+                return "{\"found\":true,\"ok\":true,\"actual\":" + JsonSerializer.Serialize(Body(page)) + "}";
+            if (op is "read-scene" or "assert-scene")
+                return "{\"found\":true,\"ok\":true,\"actual\":" + JsonSerializer.Serialize(SceneJson()) + "}";
+            if (op == "project")
+                return "{\"found\":true,\"ok\":true,\"x\":160,\"y\":120,\"actual\":\"160,120\"}";
             if (Text(request, "selector") == "#slow") Thread.Sleep(400);
             if (Text(request, "selector") == "#slower") Thread.Sleep(2500);
             if (op is "network" or "assert-network")
@@ -315,8 +340,15 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                         page.Nodes.Single(item => item.Selector == "#value").Text = input.Value;
                         page.Requests.Add("http://synthetic.local/submit");
                     }
+                    if (node.Selector == "#start")
+                    {
+                        _armStart = true;
+                        Remember("click", node.Selector, node.Text, "");
+                        return "{\"found\":true,\"ok\":true,\"x\":40,\"y\":30,\"actual\":" + JsonSerializer.Serialize(Body(page)) + "}";
+                    }
+                    if (node.Selector == "#popup") _modal = true;
                     Remember("click", node.Selector, node.Text, "");
-                    return "{\"found\":true,\"visible\":" + (node.Visible ? "true" : "false") + "}";
+                    return "{\"found\":true,\"visible\":" + (node.Visible ? "true" : "false") + ",\"actual\":" + JsonSerializer.Serialize(Body(page)) + "}";
                 case "open-file":
                     if (node.Selector == "#native-file")
                         return "{\"found\":true,\"ok\":false,\"actual\":\"native-dialog\"}";
@@ -339,6 +371,54 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 default:
                     return "{\"found\":false}";
             }
+        }
+
+        private void Pointer(JsonElement parameters)
+        {
+            var type = parameters.TryGetProperty("type", out var typeValue) ? typeValue.GetString() : "";
+            var x = parameters.TryGetProperty("x", out var xValue) && xValue.TryGetDouble(out var parsed) ? parsed : 0;
+            if (type == "mousePressed")
+            {
+                _dragging = true;
+                _lastX = x;
+            }
+            else if (type == "mouseMoved" && _dragging)
+            {
+                _azimuth += (x - _lastX) * 0.01;
+                _lastX = x;
+            }
+            else if (type == "mouseReleased")
+            {
+                if (_armStart)
+                {
+                    _armStart = false;
+                    var page = _pages.Single(item => item.Id == "main");
+                    page.Nodes.Single(item => item.Selector == "#status").Text = "已开始";
+                }
+                _dragging = false;
+            }
+        }
+
+        private string Body(Page page)
+        {
+            var parts = page.Nodes.Where(node => node.Visible && node.Text.Length > 0).Select(node => node.Text).ToList();
+            if (_modal) parts.Add("合成弹窗：请先完成加载");
+            return string.Join('\n', parts);
+        }
+
+        private string SceneJson()
+        {
+            var camera = new { x = Math.Sin(_azimuth) * 9, y = 4d, z = Math.Cos(_azimuth) * 9, fov = 50d, azimuth = _azimuth };
+            var cube = new
+            {
+                name = "cube",
+                min = new { x = -1d, y = -1d, z = -1d },
+                max = new { x = 1d, y = 1d, z = 1d },
+                vertices = new[] { new { x = -1d, y = -1d, z = 1d } }
+            };
+            var sphere = new { name = "sphere", min = new { x = 2.2, y = -0.8, z = -0.8 }, max = new { x = 3.8, y = 0.8, z = 0.8 }, vertices = Array.Empty<object>() };
+            var cone = new { name = "cone", min = new { x = -3.7, y = -0.7, z = -0.7 }, max = new { x = -2.3, y = 0.7, z = 0.7 }, vertices = Array.Empty<object>() };
+            return JsonSerializer.Serialize(new { camera, meshes = new object[] { cube, sphere, cone } });
         }
 
         private void Remember(string op, string selector, string text, string value)
