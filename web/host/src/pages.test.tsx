@@ -89,17 +89,65 @@ describe("preview pages", () => {
     expect(onSwitched).toHaveBeenCalled();
   });
 
+  it("opens a plugin and reports a failed project switch", async () => {
+    const user = userEvent.setup();
+    render(<MemoryRouter><PluginsPage plugins={[
+      ...snapshot.plugins,
+      { id: "broken", name: "损坏", version: "0.0.1", contract: "v1", state: "Failed", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
+      { id: "stopping", name: "停止中", version: "0.0.1", contract: "v1", state: "Stopping", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
+      { id: "enabled", name: "已开", version: "0.0.1", contract: "v1", state: "Enabled", trusted: false, loaded: true, diagnostics: [], permissions: [], uiPath: null },
+      { id: "other", name: "其他", version: "0.0.1", contract: "v1", state: "Mystery", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
+    ]} /></MemoryRouter>);
+    expect(document.body.textContent).toContain("失败");
+    expect(document.body.textContent).toContain("未知");
+    await user.click(screen.getByRole("button", { name: "打开插件" }));
+    cleanup();
+    const api = client();
+    api.switchProject = vi.fn(async () => { throw new Error("nope"); });
+    const archived = {
+      ...snapshot,
+      projects: {
+        ...snapshot.projects,
+        projects: [...snapshot.projects.projects, { id: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", name: "归档项目", isArchived: true }],
+      },
+    };
+    render(<ProjectsPage client={api} snapshot={archived} onSwitched={vi.fn()} />);
+    expect(document.body.textContent).toContain("已归档");
+    await user.click(screen.getByRole("button", { name: "切换到此项目" }));
+    expect(await screen.findByText("无法切换项目。")).toBeTruthy();
+  });
+
   it("loads the sample cases", async () => {
     const user = userEvent.setup();
     URL.createObjectURL = () => "blob:preview";
     URL.revokeObjectURL = () => undefined;
     render(<MemoryRouter><CasesPage client={client()} /></MemoryRouter>);
     const step = await screen.findByDisplayValue("启用本地插件");
+    const expected = screen.getByLabelText("EX-001 预期");
     await user.clear(step);
     await user.type(step, "查看本地示例");
+    await user.clear(expected);
+    await user.type(expected, "仍留在本机");
     await user.click(screen.getByRole("button", { name: "保存示例草稿" }));
     expect(await screen.findByText("已保存到本机，未发送。")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "导出本地 CSV" }));
     expect(await screen.findByText("已导出到本机，未发送。")).toBeTruthy();
+    cleanup();
+    const failing = client();
+    failing.cases = vi.fn(async () => { throw new Error("nope"); });
+    render(<MemoryRouter><CasesPage client={failing} /></MemoryRouter>);
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "无法读取示例用例。");
+    cleanup();
+    const saving = client();
+    saving.saveCases = vi.fn(async () => { throw new Error("nope"); });
+    render(<MemoryRouter><CasesPage client={saving} /></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "保存示例草稿" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "没有保存。");
+    cleanup();
+    const exporting = client();
+    exporting.exportCases = vi.fn(async () => { throw new Error("nope"); });
+    render(<MemoryRouter><CasesPage client={exporting} /></MemoryRouter>);
+    await user.click(await screen.findByRole("button", { name: "导出本地 CSV" }));
+    expect(await screen.findByRole("alert")).toHaveProperty("textContent", "没有导出。");
   });
 });
