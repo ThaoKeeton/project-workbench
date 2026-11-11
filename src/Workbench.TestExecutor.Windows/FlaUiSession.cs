@@ -41,6 +41,7 @@ public sealed class FlaUiSessionFactory : IUiAutomationSessionFactory
 public sealed class FlaUiSession : IUiAutomationSession
 {
     private readonly Process _process;
+    private readonly int _processId;
     private readonly string? _windowTitle;
     private UIA3Automation? _automation;
     private Application? _application;
@@ -49,6 +50,8 @@ public sealed class FlaUiSession : IUiAutomationSession
     public FlaUiSession(Process process, string? windowTitle)
     {
         _process = process;
+        // GetMainWindow disposes the Process it was given, so keep the id separately.
+        _processId = process.Id;
         _windowTitle = windowTitle;
     }
 
@@ -147,7 +150,7 @@ public sealed class FlaUiSession : IUiAutomationSession
     private AutomationElement? FindFileDialog(UIA3Automation automation)
     {
         var desktop = automation.GetDesktop();
-        var processId = _process.Id;
+        var processId = _processId;
         return desktop.FindFirstDescendant(cf => cf.ByProcessId(processId).And(cf.ByClassName("#32770")));
     }
 
