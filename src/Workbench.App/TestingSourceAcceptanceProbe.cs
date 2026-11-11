@@ -262,11 +262,15 @@ internal static partial class TestingSourceAcceptanceProbe
     private static string Hash(byte[] bytes) => Convert.ToHexStringLower(SHA256.HashData(bytes));
     private static async Task<byte[]> ReadBytesAsync(string path, int maximum)
     {
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        return await SharingViolationRetry.RunAsync(() => ReadBytesOnceAsync(path, maximum, cts.Token), cts.Token);
+    }
+    private static async Task<byte[]> ReadBytesOnceAsync(string path, int maximum, CancellationToken cancellationToken)
+    {
         HostRuntime.RejectLinks(path);
         await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
         Require(file.Length is > 0 && file.Length <= maximum, "SourceFileBound");
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        var bytes = new byte[(int)file.Length]; await file.ReadExactlyAsync(bytes, cts.Token);
+        var bytes = new byte[(int)file.Length]; await file.ReadExactlyAsync(bytes, cancellationToken);
         Require(file.ReadByte() == -1, "SourceFileChanged");
         return bytes;
     }
@@ -275,9 +279,28 @@ internal static partial class TestingSourceAcceptanceProbe
     private static async Task<string> HashFileAsync(string path, int maximum) => Hash(await ReadBytesAsync(path, maximum));
     private static async Task WriteNewAsync(string path, byte[] bytes)
     {
-        HostRuntime.RejectLinks(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await using var file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 65536, FileOptions.Asynchronous);
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        await file.WriteAsync(bytes, cts.Token); await file.FlushAsync(cts.Token); file.Flush(true);
+        await SharingViolationRetry.RunAsync(() => WriteNewOnceAsync(path, bytes, cts.Token), cts.Token);
+    }
+    private static async Task WriteNewOnceAsync(string path, byte[] bytes, CancellationToken cancellationToken)
+    {
+        HostRuntime.RejectLinks(path); Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        FileStream? file = null;
+        try
+        {
+            file = new FileStream(path, FileMode.CreateNew, FileAccess.Write, FileShare.Read, 65536, FileOptions.Asynchronous);
+            await file.WriteAsync(bytes, cancellationToken); await file.FlushAsync(cancellationToken); file.Flush(true);
+        }
+        catch (Exception error) when (SharingViolationRetry.IsSharingViolation(error))
+        {
+            if (file is not null)
+            {
+                try { await file.DisposeAsync(); } catch (Exception) { /* Keep the sharing violation for the limited retry. */ }
+                file = null;
+            }
+            try { if (File.Exists(path)) File.Delete(path); } catch (Exception) { /* Keep the sharing violation for the limited retry. */ }
+            throw;
+        }
+        finally { if (file is not null) await file.DisposeAsync(); }
     }
 }

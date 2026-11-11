@@ -48,9 +48,12 @@ internal sealed class PluginStateStore(string userRoot)
             if (File.Exists(_path))
             {
                 FileSystemGuard.EnsureRegularFile(_path);
-                await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
-                var document = await JsonSerializer.DeserializeAsync<PluginStateDocument>(stream, ReadOptions, cancellationToken)
-                    ?? throw new JsonException("The state document cannot be null.");
+                var document = await SharingViolationRetry.RunAsync(async () =>
+                {
+                    await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                    return await JsonSerializer.DeserializeAsync<PluginStateDocument>(stream, ReadOptions, cancellationToken)
+                        ?? throw new JsonException("The state document cannot be null.");
+                }, cancellationToken);
                 if (document.Version != 1 || document.Plugins is null || document.Plugins.Any(p =>
                     !PackageValidator.IsSafePluginId(p.Key) || p.Value is null ||
                     p.Value.TrustedFingerprint is { } fingerprint && (fingerprint.Length != 64 || !fingerprint.All(Uri.IsHexDigit))))

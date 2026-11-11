@@ -72,7 +72,7 @@ internal sealed class TestDirectory : IDisposable
                 retainedMappedFile |= RemoveOwnedDirectory(path);
             else
             {
-                try { File.Delete(path); }
+                try { DeleteOwnedFile(path); }
                 catch (Exception error) when ((error is IOException or UnauthorizedAccessException) && IsMappedFixture(path))
                 {
                     // Noncollectible plugin DLLs stay mapped until the test process exits.
@@ -81,8 +81,23 @@ internal sealed class TestDirectory : IDisposable
                 }
             }
         }
-        if (!retainedMappedFile) Directory.Delete(directory);
+        if (!retainedMappedFile) DeleteOwnedDirectory(directory);
         return retainedMappedFile;
+    }
+
+    // Windows can report a just-closed host.lock as still shared. Retry only that code, then surface a real leak.
+    private static void DeleteOwnedFile(string path) => DeleteOwned(() => File.Delete(path));
+    private static void DeleteOwnedDirectory(string path) => DeleteOwned(() => Directory.Delete(path));
+    private static void DeleteOwned(Action delete)
+    {
+        for (var attempt = 1; ; attempt++)
+        {
+            try { delete(); return; }
+            catch (Exception error) when (SharingViolationRetry.IsSharingViolation(error) && attempt < SharingViolationRetry.MaxAttempts)
+            {
+                Thread.Sleep(25);
+            }
+        }
     }
 
     private static bool IsMappedFixture(string path) => OperatingSystem.IsWindows()

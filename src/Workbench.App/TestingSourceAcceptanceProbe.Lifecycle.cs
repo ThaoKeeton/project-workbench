@@ -89,7 +89,11 @@ internal static partial class TestingSourceAcceptanceProbe
         var staging = Path.Combine(directory, "source-acceptance-release-v1.release.tmp");
         var target = Path.Combine(directory, "source-acceptance-release-v1.release.json");
         HostRuntime.RejectLinks(target); Require(!File.Exists(target) && !Directory.Exists(target), "SourceReleaseTargetExists");
-        await WriteNewAsync(staging, bytes); HostRuntime.RejectLinks(staging); HostRuntime.RejectLinks(target); File.Move(staging, target);
+        await WriteNewAsync(staging, bytes);
+        await SharingViolationRetry.RunAsync(() =>
+        {
+            HostRuntime.RejectLinks(staging); HostRuntime.RejectLinks(target); File.Move(staging, target); return Task.CompletedTask;
+        }, CancellationToken.None);
     }
     private static async Task ReleaseOpenAsync(Held held)
         => Require((await held.Manager.ExecuteCommandAsync(Id, "source-acceptance-release")).Succeeded, "SourceExplicitOpenReleaseFailed");

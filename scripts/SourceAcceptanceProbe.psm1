@@ -318,6 +318,33 @@ function Assert-SourceAcceptanceRestart($Seed, $Native) {
         if ($match.Count -ne 1 -or $match[0].length -ne $file.length -or $match[0].sha256 -cne $file.sha256) { throw 'SourceRestartDurableMismatch' }
     }
 }
+function Test-SourceAcceptanceSafeStage([object]$Value) {
+    # Host-authored tokens only. A failure report must not contribute free-form text, paths or logs.
+    $allowed = @(
+        'initialize-or-native-smoke','unhandled-ui-exception','launch-callback-failed','shutdown',
+        'sdk-generated-main-application-constructor','initializing-compiled-application-xaml','application-resources-ready',
+        'launch-callback-entered','constructing-main-window','window-constructor-entered','creating-navigation-view',
+        'creating-content-controls','creating-info-bar','window-content-ready','activating-main-window','main-window-activated',
+        'opening-host-runtime','constructing-project-runtime','applying-pending-package-maintenance','discovering-packages',
+        'restoring-enabled-packages','host-initialization-completed','loading-host-theme','opening-home-page')
+    return $Value -is [string] -and $Value -cin $allowed
+}
+function Read-SourceAcceptanceFailureFacts([string]$Path) {
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $null }
+    $data = Read-SourceAcceptanceJson $Path 262144
+    if ($data -isnot [Collections.IDictionary]) { return $null }
+    $stage = if ($data.Contains('stage') -and (Test-SourceAcceptanceSafeStage $data['stage'])) { [string]$data['stage'] } else { $null }
+    $hresult = $null
+    if ($data.Contains('errorHResult') -and $data['errorHResult'] -is [string] -and $data['errorHResult'] -cmatch '^0x[0-9A-F]{8}$') { $hresult = [string]$data['errorHResult'] }
+    $startup = $null
+    if ($data.Contains('startupStages') -and $data['startupStages'] -is [System.Collections.IEnumerable] -and $data['startupStages'] -isnot [string]) {
+        $last = $null
+        foreach ($row in @($data['startupStages'])) { $last = $row }
+        if ($last -is [Collections.IDictionary] -and $last.Contains('stage') -and (Test-SourceAcceptanceSafeStage $last['stage'])) { $startup = [string]$last['stage'] }
+    }
+    if ($null -eq $stage -and $null -eq $hresult -and $null -eq $startup) { return $null }
+    return @{ Stage = $stage; HResult = $hresult; StartupStage = $startup }
+}
 function Complete-SourceAcceptanceProbeReport {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$ReportPath, [Parameter(Mandatory)][int]$ProcessId,
@@ -330,13 +357,19 @@ function Complete-SourceAcceptanceProbeReport {
         [bool]$ObservationFailed = $false, [bool]$Terminated = $false, [AllowNull()][Collections.IDictionary]$ExpectedSeed = $null)
     $runnerPath = [IO.Path]::ChangeExtension($ReportPath,'runner.json'); Assert-SourceAcceptanceNoLinks $runnerPath
     if (Test-Path -LiteralPath $runnerPath) { throw 'SourcePhaseAlreadyCompleted' }
-    $reason = $null; $nativeStatus = 'unavailable'; $native = $null
+    $reason = $null; $nativeStatus = 'unavailable'; $native = $null; $failureFacts = $null
     try {
         if ($ObservationFailed) { throw 'SourceObservationFailed' }
         if ($Terminated) { throw 'SourceProcessTerminated' }
         if (-not $HasExited) { throw 'SourceProcessStillOwned' }
         if (-not (Test-SourceAcceptanceInteger $ExitCode 0 0) -or -not (Test-SourceAcceptanceInteger $ProcessCreationFileTimeUtc 1) -or
-            -not (Test-SourceAcceptanceInteger $ProcessExitFileTimeUtc $ProcessCreationFileTimeUtc)) { throw 'SourceProcessFailed' }
+            -not (Test-SourceAcceptanceInteger $ProcessExitFileTimeUtc $ProcessCreationFileTimeUtc)) {
+            # A non-zero exit still fails. When the report already exists, keep only fixed stage and HRESULT tokens.
+            if (-not (Test-SourceAcceptanceInteger $ExitCode 0 0) -and (Test-Path -LiteralPath $ReportPath -PathType Leaf)) {
+                try { $failureFacts = Read-SourceAcceptanceFailureFacts $ReportPath } catch { $failureFacts = $null }
+            }
+            throw 'SourceProcessFailed'
+        }
         foreach ($expected in @($ExpectedPackageHash,$ExpectedHostExeHash,$ExpectedHostDllHash)) { if (-not (Test-SourceAcceptanceHex $expected 64)) { throw 'SourceExpectedIdentityInvalid' } }
         if (-not (Test-SourceAcceptanceHex $ExpectedSourceCommit 40)) { throw 'SourceExpectedIdentityInvalid' }
         $native = Read-SourceAcceptanceJson $ReportPath; $nativeStatus = 'available'
@@ -352,12 +385,24 @@ function Complete-SourceAcceptanceProbeReport {
         hasExited = $HasExited; exitCode = $ExitCode; terminated = $Terminated; observationFailed = $ObservationFailed; leaseRoots = @($LeaseRoots);
         nativeReport = $nativeStatus; runnerError = $reason; sourceCommit = $ExpectedSourceCommit; packageSha256 = $ExpectedPackageHash;
         hostExeSha256 = $ExpectedHostExeHash; hostDllSha256 = $ExpectedHostDllHash; nativeReportSha256 = $null }
+    if ($null -ne $failureFacts) {
+        if ($null -ne $failureFacts.Stage) { $runner.failureStage = $failureFacts.Stage }
+        if ($null -ne $failureFacts.HResult) { $runner.failureHResult = $failureFacts.HResult }
+        if ($null -ne $failureFacts.StartupStage) { $runner.startupStage = $failureFacts.StartupStage }
+    }
     if ($null -eq $reason) { $runner.nativeReportSha256 = Get-SourceAcceptanceHash (Read-SourceAcceptanceBytes $ReportPath 262144) }
     Write-SourceAcceptanceNewJson $runnerPath $runner
     if ($null -ne $reason) {
-        # Safe fixed vocabulary only. Never echo report fields, paths, exception text, provider body or credentials.
-        Write-Host (ConvertTo-Json -InputObject @{ kind = 'SourceAcceptanceFailure'; schemaVersion = 1; phase = $ExpectedPhase;
-            processId = $ProcessId; processCreationFileTimeUtc = $ProcessCreationFileTimeUtc; hasExited = $HasExited; terminated = $Terminated; reason = $reason } -Compress)
+        # Safe fixed vocabulary only. Stage and HRESULT are copied only when they match that vocabulary.
+        # Never echo report paths, exception text, startup arguments, provider body or credentials.
+        $notice = [ordered]@{ kind = 'SourceAcceptanceFailure'; schemaVersion = 1; phase = $ExpectedPhase;
+            processId = $ProcessId; processCreationFileTimeUtc = $ProcessCreationFileTimeUtc; hasExited = $HasExited; terminated = $Terminated; reason = $reason }
+        if ($null -ne $failureFacts) {
+            if ($null -ne $failureFacts.Stage) { $notice.stage = $failureFacts.Stage }
+            if ($null -ne $failureFacts.HResult) { $notice.hresult = $failureFacts.HResult }
+            if ($null -ne $failureFacts.StartupStage) { $notice.startupStage = $failureFacts.StartupStage }
+        }
+        Write-Host (ConvertTo-Json -InputObject $notice -Compress)
         throw $reason
     }
     return $runner
