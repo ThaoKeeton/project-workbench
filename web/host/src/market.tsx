@@ -57,7 +57,7 @@ export function MarketPage({ onOpen }: { onOpen: (id: string) => void }) {
       <ul className="catalog">
         {list.map((item) => (
           <li key={item.id}>
-            <button type="button" className="catalog-main" onClick={() => navigate(`/market/${item.id}`)}>
+            <button type="button" className="catalog-main" onClick={() => { void navigate(`/market/${item.id}`); }}>
               <Icon name={iconFor(item.id)} />
               <span>
                 <strong>{item.name}</strong>
@@ -66,7 +66,7 @@ export function MarketPage({ onOpen }: { onOpen: (id: string) => void }) {
               </span>
             </button>
             <Badge value={item.badge} />
-            <button type="button" className={installed.has(item.id) ? "btn" : "btn"} onClick={() => (installed.has(item.id) ? onOpen(item.pluginId ?? item.id) : setPending(item))}>
+            <button type="button" className="btn" onClick={() => (installed.has(item.id) ? onOpen(item.pluginId ?? item.id) : setPending(item))}>
               {installed.has(item.id) ? "打开" : "安装"}
             </button>
           </li>

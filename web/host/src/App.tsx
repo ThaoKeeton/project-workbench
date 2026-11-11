@@ -109,11 +109,13 @@ export function App() {
       setConfirm({
         title: "远程操作确认",
         body: `你即将在「${device.name}」上打开 ${plugin?.name ?? "插件"}。对方屏幕会看到此次操作，并可随时断开。`,
-        onConfirm: () => navigate(`/plugin/${id}`),
+        onConfirm: () => {
+          void navigate(`/plugin/${id}`);
+        },
       });
       return;
     }
-    navigate(`/plugin/${id}`);
+    void navigate(`/plugin/${id}`);
   };
 
   if (!token) return <p role="alert">未找到本机会话。请从工作台外壳打开。</p>;
@@ -148,7 +150,7 @@ export function App() {
       deviceOpen={deviceOpen}
       onToggleDevice={() => setDeviceOpen((open) => !open)}
       onPickDevice={(id) => { setDeviceId(id); setDeviceOpen(false); }}
-      onPair={() => { setDeviceOpen(false); navigate("/devices"); }}
+      onPair={() => { setDeviceOpen(false); void navigate("/devices"); }}
       onOpenPlugin={openPlugin}
       remote={remote}
     >
@@ -165,7 +167,7 @@ export function App() {
           <Route path="/devices" element={<PairingPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage minimumWidth={snapshot.diagnostics.nativeWindow.minimumWidth} />} />
           <Route path="/settings" element={<SettingsPage setting={setting} onChange={chooseTheme} restore={restore} onRestore={setRestore} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} />} />
-          <Route path="/offline" element={<OfflinePage onRetry={() => { void reload(); navigate("/"); }} />} />
+          <Route path="/offline" element={<OfflinePage onRetry={() => { void reload(); void navigate("/"); }} />} />
           <Route path="/plugin/:id/stopped" element={<PluginWorkspace client={client} crashed remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
           <Route path="/plugin/:id/empty/:scene" element={<PluginEmpty client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
           <Route path="/plugin/:id" element={<PluginWorkspace client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
