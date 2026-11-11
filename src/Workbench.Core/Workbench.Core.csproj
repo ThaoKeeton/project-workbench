@@ -2,7 +2,7 @@
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
     <InternalsVisibleTo Include="Workbench.Core.Tests" />
-    <InternalsVisibleTo Include="Workbench.App" />
+    <Compile Include="../Workbench.App/SharingViolationRetry.cs" Link="SharingViolationRetry.cs" />
     <ProjectReference Include="../Workbench.Sdk/Workbench.Sdk.csproj" />
   </ItemGroup>
   <!-- The SDK's framework references identify the .NET contract assemblies.

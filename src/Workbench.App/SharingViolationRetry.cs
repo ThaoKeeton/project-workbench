@@ -1,9 +1,11 @@
 namespace Workbench.Core;
 
+// Compiled into the host and, separately, into Core. The explicit NativeReference
+// build compiles these host sources as its own assembly, so this helper cannot be
+// an internal Core type reached through InternalsVisibleTo. Each assembly gets its
+// own copy. Exclusive host.lock and testing.lock opens must not use it.
 /// <summary>
 /// Limited retries for a raw Win32 sharing violation on ordinary data reads and writes.
-/// Exclusive store leases must not use this. A held host.lock or testing.lock is ownership,
-/// and retrying it would turn a refused second opener into a wait for the owner to leave.
 /// </summary>
 internal static class SharingViolationRetry
 {
