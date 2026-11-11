@@ -79,7 +79,10 @@ internal static class ProjectWorkspaceStorage
         }
     }
 
-    internal static async Task<byte[]?> ReadAsync(string path, int limit, string limitCode, CancellationToken cancellationToken)
+    internal static Task<byte[]?> ReadAsync(string path, int limit, string limitCode, CancellationToken cancellationToken)
+        => SharingViolationRetry.RunAsync(() => ReadOnceAsync(path, limit, limitCode, cancellationToken), cancellationToken);
+
+    private static async Task<byte[]?> ReadOnceAsync(string path, int limit, string limitCode, CancellationToken cancellationToken)
     {
         _ = PathIn(Path.GetDirectoryName(path)!, Path.GetFileName(path));
         if (!Exists(path)) return null;
@@ -112,16 +115,21 @@ internal static class ProjectWorkspaceStorage
                 lease.Dispose();
                 throw Error("UnsafePath");
             }
+            // Held leases stay StoreBusy. Do not route this exclusive open through SharingViolationRetry.
             catch (IOException) when (attempt < 79) { await Task.Delay(25, cancellationToken); }
             catch (IOException) { throw Error("StoreBusy"); }
         }
     }
 
-    internal static async Task AtomicWriteAsync(string path, byte[] bytes, bool overwrite, CancellationToken cancellationToken)
+    internal static Task AtomicWriteAsync(string path, byte[] bytes, bool overwrite, CancellationToken cancellationToken)
+        => SharingViolationRetry.RunAsync(() => WriteOnceAsync(path, bytes, overwrite, cancellationToken), cancellationToken);
+
+    private static async Task WriteOnceAsync(string path, byte[] bytes, bool overwrite, CancellationToken cancellationToken)
     {
         var directory = Path.GetDirectoryName(path)!;
         DirectoryPath(directory, create: true);
         if (Exists(path)) RegularFile(path);
+        // A new staging name per attempt, so a sharing violation on Move does not reuse a partial file.
         var temporary = PathIn(directory, $".{Path.GetFileName(path)}.{Guid.NewGuid():N}.tmp");
         var owned = false;
         try

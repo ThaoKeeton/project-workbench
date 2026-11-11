@@ -236,6 +236,45 @@ foreach ($mutation in @(
 Exercise 'no-exit' {} 'stop-figma' { param($p) Complete $p -Exited $false }
 Exercise 'bad-exit' {} 'stop-figma' { param($p) Complete $p -ExitCode 1 }
 Exercise 'terminated' {} 'stop-figma' { param($p) Complete $p -Terminated $true }
+# Non-zero exit with an existing report keeps SourceProcessFailed and adds only safe stage/HRESULT tokens.
+$factDir = Join-Path $temp 'nonzero-existing-report'; New-Item $factDir -ItemType Directory | Out-Null
+$factPath = Join-Path $factDir 'seed.json'
+$privateRoot = 'C:\synthetic\ProjectWorkbench-source-acceptance-probe\' + ('a' * 32)
+$privateText = 'synthetic-private-root-token'
+Write-Json $factPath @{
+    succeeded = $false; stage = 'initialize-or-native-smoke'; userRoot = $privateRoot; error = "HostOperationFailed (Storage). $privateText";
+    nativeMessage = $null; errorHResult = '0x80070020';
+    startupStages = @(@{ stage = 'constructing-project-runtime'; threadId = 10; utc = '2026-11-10T15:52:14.7010974+00:00' },
+        @{ stage = 'restoring-enabled-packages'; threadId = 6; utc = '2026-11-10T15:52:14.7123509+00:00' });
+    completedUtc = '2026-11-10T15:52:15.0000000+00:00' }
+$factMessages = [Collections.Generic.List[string]]::new()
+$factCaught = $false
+try {
+    Complete $factPath seed -ExitCode 1 6>&1 | ForEach-Object { $factMessages.Add([string]$_) }
+} catch { $factCaught = $true; if ($_.Exception.Message -cne 'SourceProcessFailed') { throw } }
+if (-not $factCaught) { throw 'A non-zero source process with an existing report was accepted.' }
+$factRunnerPath = [IO.Path]::ChangeExtension($factPath, 'runner.json')
+$factRunner = Get-Content -LiteralPath $factRunnerPath -Raw | ConvertFrom-Json
+$factNotice = $factMessages -join "`n"
+if ($factRunner.succeeded -or $factRunner.runnerError -cne 'SourceProcessFailed' -or $factRunner.nativeReport -cne 'unavailable' -or
+    $factRunner.failureStage -cne 'initialize-or-native-smoke' -or $factRunner.failureHResult -cne '0x80070020' -or
+    $factRunner.startupStage -cne 'restoring-enabled-packages') { throw 'Runner did not keep the safe stage and HRESULT from the existing report.' }
+if ($factNotice -notmatch '"stage":"initialize-or-native-smoke"' -or $factNotice -notmatch '"hresult":"0x80070020"' -or
+    $factNotice -notmatch '"startupStage":"restoring-enabled-packages"' -or $factNotice -notmatch '"reason":"SourceProcessFailed"') {
+    throw 'Console notice omitted the safe stage or HRESULT.'
+}
+foreach ($secret in @($privateRoot, $privateText, 'threadId')) {
+    if ($factNotice.Contains($secret) -or (Get-Content -LiteralPath $factRunnerPath -Raw).Contains($secret)) { throw 'Failure notice echoed a report path, private text or startup log field.' }
+}
+$script:cases++
+$unsafeDir = Join-Path $temp 'nonzero-unsafe-report'; New-Item $unsafeDir -ItemType Directory | Out-Null
+$unsafePath = Join-Path $unsafeDir 'seed.json'
+Write-Json $unsafePath @{ succeeded = $false; stage = 'C:\synthetic\secret-stage'; errorHResult = '0x80070020 '; startupStages = @(@{ stage = '../secret' }) }
+Assert-Refused { Complete $unsafePath seed -ExitCode 1 }
+$unsafeRunner = Get-Content -LiteralPath ([IO.Path]::ChangeExtension($unsafePath, 'runner.json')) -Raw
+if ($unsafeRunner.Contains('secret') -or $unsafeRunner.Contains('failureStage') -or $unsafeRunner.Contains('failureHResult') -or $unsafeRunner.Contains('startupStage')) {
+    throw 'Unsafe report text was copied into the runner.'
+}
 Exercise 'no-leases' {} 'stop-figma' { param($p) Complete $p -Leases @() }
 foreach ($phase in @('seed','verify','stop-ai')) { Exercise ('incomplete-records-' + $phase) {} $phase }
 foreach ($case in @('duplicate-json','case-duplicate-json','trailing-json','oversized-json','linked-report','linked-parent')) {

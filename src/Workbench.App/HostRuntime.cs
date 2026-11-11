@@ -86,6 +86,8 @@ internal sealed class HostRuntime : IAsyncDisposable
         try { return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
         catch (IOException error) when (OperatingSystem.IsWindows() && (error.HResult & 0xFFFF) is 32 or 33)
         {
+            // Ownership, not a transient data-file scan. The wrapper's HResult is not the raw sharing code,
+            // and this path must not wait for the current owner to release the lease.
             throw new UserStoreInUseException(error);
         }
     }
