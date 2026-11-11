@@ -199,7 +199,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   margin-bottom: 12px;
 }
 
-.metrics { grid-template-columns: 1.1fr 1fr 0.8fr 0.9fr 180px; }
+.metrics { grid-template-columns: repeat(5, minmax(0, 1fr)); }
 .cards, .split { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 
 .card {
@@ -211,7 +211,12 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 
 .card h2, .card h3 { margin: 0 0 6px; font-size: 15px; }
-.metric { align-items: flex-end; }
+.metric {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-height: 108px;
+}
 .metric strong {
   font-family: var(--font-mono);
   font-size: 28px;
@@ -233,6 +238,16 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: var(--accent);
 }
 
+.device-table { display: grid; }
+.device-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.5fr) 88px minmax(0, 1.2fr);
+  align-items: center;
+  column-gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+}
+.device-row .note { justify-self: end; text-align: right; color: var(--text-muted); font-size: 12px; }
 .list { display: grid; }
 .list a, .list div.line {
   display: flex;
@@ -278,6 +293,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 
 @media (max-width: 959px) {
   .metrics, .cards, .split, .page-head, .row { grid-template-columns: 1fr; display: grid; }
+  .device-row { grid-template-columns: minmax(0, 1.2fr) 72px minmax(0, 1fr); column-gap: 8px; }
   .search-results { left: 12px; right: 12px; }
   .page-head h1 { font-size: 24px; }
 }

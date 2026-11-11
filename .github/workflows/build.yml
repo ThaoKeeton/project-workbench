@@ -462,8 +462,17 @@ jobs:
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         run: |
+          set -euo pipefail
           dotnet tool install --global dotnet-sonarscanner
           export PATH="$PATH:$HOME/.dotnet/tools"
-          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**"
           dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
+          set +e
           dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+          status=$?
+          set -e
+          echo "SonarQube Cloud quality gate:"
+          curl -fsS -H "Authorization: Bearer ${SONAR_TOKEN}" "https://sonarcloud.io/api/qualitygates/project_status?projectKey=ThaoKeeton_project-workbench" | jq '{status: .projectStatus.status, conditions: .projectStatus.conditions}' || echo "Quality gate API was not readable."
+          echo "Top open issues:"
+          curl -fsS -H "Authorization: Bearer ${SONAR_TOKEN}" "https://sonarcloud.io/api/issues/search?componentKeys=ThaoKeeton_project-workbench&resolved=false&ps=10&s=SEVERITY&asc=false" | jq '[.issues[] | {severity, type, rule, component, line, message}]' || echo "Issue API was not readable."
+          exit "$status"

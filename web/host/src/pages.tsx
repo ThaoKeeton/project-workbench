@@ -66,10 +66,22 @@ export function HomePage({ snapshot }: { snapshot: Snapshot }) {
       </article>
       <article className="card" style={{ marginTop: 12 }}>
         <h2>设备一览</h2>
-        <div className="list">
-          <div className="line"><span className="status"><span className="dot on" />本机 · 星河笔记本</span><span className="status"><span className="dot on" />在线</span><span>当前工作</span></div>
-          <div className="line"><span className="status"><span className="dot on" />书房工作站</span><span>在线</span><span className="tiny">合成演示 · 局域网未连接</span></div>
-          <div className="line"><span className="status"><span className="dot off" />会议演示机</span><span>离线</span><span className="tiny">合成演示 · 上次 昨天 18:40</span></div>
+        <div className="device-table">
+          <div className="device-row">
+            <span className="status"><span className="dot on" />本机 · 星河笔记本</span>
+            <span className="status"><span className="dot on" />在线</span>
+            <span className="note">当前工作</span>
+          </div>
+          <div className="device-row">
+            <span className="status"><span className="dot on" />书房工作站</span>
+            <span className="status"><span className="dot on" />在线</span>
+            <span className="note">合成演示 · 局域网未连接</span>
+          </div>
+          <div className="device-row">
+            <span className="status"><span className="dot off" />会议演示机</span>
+            <span className="status"><span className="dot off" />离线</span>
+            <span className="note">合成演示 · 上次 昨天 18:40</span>
+          </div>
         </div>
       </article>
       <p className="footer-note">发送保持关闭 · 局域网默认仅本机 · 契约 v2 与 schema 1 并行 · 实时通道：{snapshot.channel}</p>
