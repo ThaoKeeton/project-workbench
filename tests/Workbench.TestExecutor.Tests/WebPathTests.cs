@@ -234,14 +234,20 @@ public sealed class WebPathTests
         var dir = new DirectoryInfo(AppContext.BaseDirectory);
         for (var depth = 0; depth < 8 && dir is not null; depth++, dir = dir.Parent)
         {
-            foreach (var relative in new[]
+            IEnumerable<string> hits;
+            try
             {
-                Path.Combine("tests", "fixtures", "TestExecutor.SyntheticCdp", "bin", "Release", "net10.0", "TestExecutor.SyntheticCdp.dll"),
-                Path.Combine("fixtures", "TestExecutor.SyntheticCdp", "bin", "Release", "net10.0", "TestExecutor.SyntheticCdp.dll")
-            })
+                hits = Directory.EnumerateFiles(dir.FullName, "TestExecutor.SyntheticCdp.dll", SearchOption.AllDirectories);
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
             {
-                var candidate = Path.Combine(dir.FullName, relative);
-                if (File.Exists(candidate)) return candidate;
+                hits = [];
+            }
+            foreach (var hit in hits)
+            {
+                if (hit.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}", StringComparison.Ordinal)
+                    && !hit.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}", StringComparison.Ordinal))
+                    return hit;
             }
         }
         throw new FileNotFoundException("The synthetic CDP host was not built.", staged);

@@ -24,7 +24,7 @@
       <_SynthDir>$(MSBuildThisFileDirectory)../fixtures/TestExecutor.SyntheticCdp/bin/$(Configuration)/net10.0/</_SynthDir>
     </PropertyGroup>
     <ItemGroup>
-      <_Synth Include="$(_SynthDir)**\*" />
+      <_Synth Include="$(_SynthDir)**/*" />
       <_Synth Include="$(_SynthDir)TestExecutor.SyntheticCdp" Condition="Exists('$(_SynthDir)TestExecutor.SyntheticCdp')" />
       <_Synth Include="$(_SynthDir)TestExecutor.SyntheticCdp.exe" Condition="Exists('$(_SynthDir)TestExecutor.SyntheticCdp.exe')" />
     </ItemGroup>
