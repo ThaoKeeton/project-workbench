@@ -297,6 +297,9 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 return "{\"found\":true,\"events\":" + JsonSerializer.Serialize(events) + "}";
             }
             if (op == "snapshot") return Snapshot(page);
+            if (op == "ping") return "{\"found\":true,\"ok\":true}";
+            if (Text(request, "selector") == "#slow") Thread.Sleep(400);
+            if (Text(request, "selector") == "#slower") Thread.Sleep(2500);
             if (op is "network" or "assert-network")
                 return "{\"found\":true,\"ok\":" + (page.Requests.Any(url => url.Contains(Text(request, "expected"), StringComparison.Ordinal)) ? "true" : "false") + ",\"actual\":" + JsonSerializer.Serialize(string.Join(',', page.Requests)) + ",\"urls\":" + JsonSerializer.Serialize(page.Requests) + "}";
             var node = Find(page, request);

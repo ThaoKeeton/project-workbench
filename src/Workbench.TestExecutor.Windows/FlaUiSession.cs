@@ -70,8 +70,7 @@ public sealed class FlaUiSession : IUiAutomationSession
     {
         cancellationToken.ThrowIfCancellationRequested();
         var window = Window();
-        using var image = window.Capture();
-        using var bitmap = image.Bitmap;
+        using var bitmap = window.Capture();
         using var stream = new MemoryStream();
         bitmap.Save(stream, ImageFormat.Png);
         return Task.FromResult(new RawFrame(stream.ToArray(), PasswordRegions(window)));
@@ -131,10 +130,11 @@ public sealed class FlaUiSession : IUiAutomationSession
         var automation = _automation ??= new UIA3Automation();
         var dialog = automation.GetDesktop().FindFirstDescendant(cf => cf.ByClassName("#32770"));
         if (dialog is null) return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "dialog-missing");
-        var edit = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1148"))
+        var filename = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1148"))
             ?? dialog.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit));
-        if (edit?.Patterns.Value.IsSupported != true) return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "filename-missing");
-        edit.Patterns.Value.Pattern.SetValue(action.Text ?? "");
+        if (filename is null || !filename.Patterns.Value.IsSupported)
+            return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "filename-missing");
+        filename.Patterns.Value.Pattern.SetValue(action.Text ?? "");
         var open = dialog.FindFirstDescendant(cf => cf.ByName("打开"))
             ?? dialog.FindFirstDescendant(cf => cf.ByName("Open"));
         if (open is null) return UiActionResult.Fail(ExecutorError.ActionFailed, false, "open-button-missing");
@@ -161,6 +161,7 @@ public sealed class FlaUiSession : IUiAutomationSession
         _automation ??= new UIA3Automation();
         _application ??= Application.Attach(_process);
         var window = _application.GetMainWindow(_automation, TimeSpan.FromSeconds(10));
+        if (window is null) throw new ElementNotAvailableException("window");
         if (_windowTitle is { Length: > 0 } && !string.Equals(window.Name, _windowTitle, StringComparison.Ordinal))
             throw new ElementNotAvailableException("window");
         _window = window;

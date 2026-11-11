@@ -1,4 +1,4 @@
-using System.Net.Http.Headers;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Workbench.TestExecutor;
@@ -47,17 +47,42 @@ public sealed class WebPathTests
         Assert.Equal("第二页", other.Actual);
         var missing = await connected.PerformAsync(Step("missing", "click", selector: "#missing"), CancellationToken.None);
         Assert.False(missing.Found);
+        var slow = Stopwatch.StartNew();
+        var waited = await connected.PerformAsync(Step("slow", "click", selector: "#slow"), CancellationToken.None);
+        slow.Stop();
+        Assert.False(waited.Found);
+        Assert.True(slow.ElapsedMilliseconds >= 300);
+        var slower = Stopwatch.StartNew();
+        await connected.PerformAsync(Step("slower", "click", selector: "#slower"), CancellationToken.None);
+        slower.Stop();
+        Assert.True(slower.ElapsedMilliseconds >= 2000);
+        using var impatient = new CancellationTokenSource(TimeSpan.FromMilliseconds(100));
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => connected.PerformAsync(Step("slow-cancel", "click", selector: "#slow"), impatient.Token));
     }
 
     [Fact]
     public async Task Launcher_starts_the_synthetic_electron_stand_in_and_attaches_by_title()
     {
-        var exe = Path.Combine(AppContext.BaseDirectory, "synthetic-cdp", "TestExecutor.SyntheticCdp");
-        Assert.True(File.Exists(exe));
-        if (!OperatingSystem.IsWindows())
-            File.SetUnixFileMode(exe, File.GetUnixFileMode(exe) | UnixFileMode.UserExecute);
+        var dir = Path.Combine(AppContext.BaseDirectory, "synthetic-cdp");
+        var dll = Path.Combine(dir, "TestExecutor.SyntheticCdp.dll");
+        Assert.True(File.Exists(dll));
+        var apphost = Path.Combine(dir, OperatingSystem.IsWindows() ? "TestExecutor.SyntheticCdp.exe" : "TestExecutor.SyntheticCdp");
+        string executable;
+        IReadOnlyList<string> arguments;
+        if (File.Exists(apphost))
+        {
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(apphost, File.GetUnixFileMode(apphost) | UnixFileMode.UserExecute);
+            executable = apphost;
+            arguments = ["--window-title=自定义标题"];
+        }
+        else
+        {
+            executable = DotnetMuxer();
+            arguments = ["exec", dll, "--window-title=自定义标题"];
+        }
         var port = ElectronTargetLauncher.FreePort();
-        var launched = await ElectronTargetLauncher.LaunchAsync(new ApplicationTarget(null, "自定义标题", port, exe, ["--window-title=自定义标题"], new Dictionary<string, string> { ["SYNTHETIC_MARKER"] = "synthetic" }), CancellationToken.None);
+        var launched = await ElectronTargetLauncher.LaunchAsync(new ApplicationTarget(null, "自定义标题", port, executable, arguments, new Dictionary<string, string> { ["SYNTHETIC_MARKER"] = "synthetic" }), CancellationToken.None);
         await using (launched)
         {
             using var http = new HttpClient();
@@ -215,6 +240,17 @@ public sealed class WebPathTests
         Assert.All(handler.Bodies, body => Assert.DoesNotContain("zz-synthetic-credential-zz", body, StringComparison.Ordinal));
         var closed = await CdpWebSession.ConnectAsync(1, null, null, CancellationToken.None);
         Assert.Null(closed);
+    }
+
+    private static string DotnetMuxer()
+    {
+        var path = Environment.GetEnvironmentVariable("PATH") ?? "";
+        foreach (var directory in path.Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries))
+        {
+            var candidate = Path.Combine(directory, OperatingSystem.IsWindows() ? "dotnet.exe" : "dotnet");
+            if (File.Exists(candidate)) return candidate;
+        }
+        throw new InvalidOperationException("dotnet muxer was not found");
     }
 
     private static TestStep Step(string id, string action, string? selector = null, string? text = null, string? role = null, string? name = null, string? title = null, string? input = null, string? expected = null)

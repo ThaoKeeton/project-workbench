@@ -207,6 +207,7 @@ public sealed class CdpWebSession : IWebSession
 
     public async Task<WebResult> PerformAsync(TestStep step, CancellationToken cancellationToken)
     {
+        await WaitUntilResponsiveAsync(cancellationToken);
         if (step.Action == "switch-window")
         {
             var switched = await ActivateAsync(step.Target?.Title ?? step.Target?.Name, step.Target?.Url, cancellationToken);
@@ -294,12 +295,46 @@ public sealed class CdpWebSession : IWebSession
         return Convert.FromBase64String(data);
     }
 
+    private Task WaitUntilResponsiveAsync(CancellationToken cancellationToken)
+        => EvaluateAsync(new { op = "ping", selector = "", text = "", role = "", name = "", value = "", expected = "" }, cancellationToken);
+
     private async Task<JsonElement> EvaluateAsync(object request, CancellationToken cancellationToken)
     {
-        var expression = "(() => { const request = " + JsonSerializer.Serialize(request) + "; return window.__workbench(request); })()";
+        var expression = "(() => {\nconst request = " + JsonSerializer.Serialize(request) + ";\n" + DomScript + "\n})()";
         var result = await CallAsync("Runtime.evaluate", new { expression, returnByValue = true }, cancellationToken);
         return result.GetProperty("result").GetProperty("value");
     }
+
+    private const string DomScript = """
+        const visible = (el) => !!el && el.getAttribute('aria-hidden') !== 'true';
+        const roleOf = (el) => el.getAttribute('role') || ({BUTTON:'button',A:'link',INPUT:'textbox',TEXTAREA:'textbox',SELECT:'combobox'}[el.tagName] || '');
+        const nameOf = (el) => el.getAttribute('aria-label') || el.innerText || '';
+        const all = () => Array.from(document.querySelectorAll('body *'));
+        if (request.op === 'ping') return {found:true, ok:true};
+        const find = () => {
+          if (request.selector) return document.querySelector(request.selector);
+          const nodes = all();
+          if (request.role) return nodes.find(el => roleOf(el) === request.role && (!request.name || nameOf(el).includes(request.name))) || null;
+          if (request.text) return nodes.find(el => (el.innerText || '').includes(request.text)) || null;
+          return null;
+        };
+        const el = find();
+        if (!el && request.op !== 'snapshot' && request.op !== 'network' && request.op !== 'assert-network') return {found:false};
+        if (request.op === 'click' || request.op === 'invoke' || request.op === 'expand') {
+          const rect = el.getBoundingClientRect();
+          const x = rect.left + rect.width / 2;
+          const y = rect.top + rect.height / 2;
+          el.click();
+          return {found:true, ok:true, visible: visible(el), x, y};
+        }
+        if (request.op === 'type' || request.op === 'set-value' || request.op === 'open-file') {
+          el.focus();
+          el.value = request.value || '';
+          el.dispatchEvent(new Event('input', {bubbles:true}));
+          return {found:true, ok:true, value: el.value};
+        }
+        return {found:true};
+        """;
 
     private async Task<JsonElement> CallAsync(string method, object parameters, CancellationToken cancellationToken)
     {
@@ -308,8 +343,25 @@ public sealed class CdpWebSession : IWebSession
         var payload = JsonSerializer.Serialize(new { id, method, @params = parameters });
         await _socket.SendAsync(Encoding.UTF8.GetBytes(payload), WebSocketMessageType.Text, true, cancellationToken);
         var buffer = new byte[1024 * 256];
-        var received = await _socket.ReceiveAsync(buffer, cancellationToken);
-        using var document = JsonDocument.Parse(Encoding.UTF8.GetString(buffer, 0, received.Count));
+        using var message = new MemoryStream();
+        WebSocketReceiveResult received;
+        do
+        {
+            // A file browser loading a network path can block the renderer. Keep the same
+            // in-flight call until the page answers or the step timeout cancels it.
+            var pending = _socket.ReceiveAsync(buffer, cancellationToken);
+            while (!pending.IsCompleted)
+            {
+                var pause = Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+                if (await Task.WhenAny(pending, pause) == pause && !pending.IsCompleted)
+                    continue;
+                break;
+            }
+            received = await pending;
+            message.Write(buffer, 0, received.Count);
+        }
+        while (!received.EndOfMessage);
+        using var document = JsonDocument.Parse(message.ToArray());
         if (document.RootElement.TryGetProperty("error", out _)) throw new ExecutorDataException(ExecutorError.ActionFailed);
         return document.RootElement.GetProperty("result").Clone();
     }
