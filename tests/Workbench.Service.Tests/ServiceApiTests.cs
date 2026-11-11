@@ -25,6 +25,18 @@ public sealed class ServiceApiTests
         Assert.True(LoopbackGuard.IsLoopbackHost("localhost"));
         Assert.False(LoopbackGuard.IsLoopbackHost("example.invalid"));
         Assert.False(LoopbackGuard.IsLoopbackHost("10.0.0.8"));
+        Assert.False(LoopbackGuard.IsLoopbackHost(null));
+        Assert.False(LoopbackGuard.IsLoopbackHost("  "));
+        Assert.False(LoopbackGuard.IsLoopbackHost("["));
+        Assert.True(LoopbackGuard.IsLoopbackHost("[::1]"));
+        Assert.True(LoopbackGuard.IsLoopbackHost("::1"));
+        Assert.False(SessionTokens.IsAcceptable("short"));
+        Assert.False(SessionTokens.IsAcceptable(new string('a', 129)));
+        Assert.False(SessionTokens.IsAcceptable("has space"));
+        Assert.True(SessionTokens.IsAcceptable(new string('b', 16)));
+        Assert.False(SessionTokens.Equals("abc", "abcd"));
+        Assert.False(UiThemeStore.IsSetting(null));
+        Assert.False(UiThemeStore.IsSetting("neon"));
     }
 
     [Fact]
@@ -56,6 +68,9 @@ public sealed class ServiceApiTests
         Assert.Equal("ok", health.GetProperty("status").GetString());
         Assert.Equal("loopback", health.GetProperty("bind").GetString());
         Assert.Equal(WorkbenchServiceHost.ApiVersion, health.GetProperty("apiVersion").GetString());
+        var page = await running.Client.GetAsync("/not-a-page");
+        Assert.Equal(HttpStatusCode.NotFound, page.StatusCode);
+        Assert.Equal(0, page.Content.Headers.ContentLength ?? (await page.Content.ReadAsByteArrayAsync()).Length);
     }
 
     [Fact]
@@ -308,6 +323,85 @@ public sealed class ServiceApiTests
     }
 
     [Fact]
+    public async Task Startup_rejects_a_missing_host_and_a_weak_token()
+    {
+        var root = TempRoot();
+        await Assert.ThrowsAsync<ArgumentNullException>(() => WorkbenchServiceHost.StartAsync(null!));
+        await Assert.ThrowsAsync<ArgumentException>(() => WorkbenchServiceHost.StartAsync(Options(root) with { SessionToken = "short" }));
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() => UiThemeStore.WriteAsync(root, "neon", CancellationToken.None));
+        Delete(root);
+    }
+
+    [Fact]
+    public async Task Unknown_routes_plugins_and_theme_files_stay_local()
+    {
+        var root = TempRoot();
+        var ui = Path.Combine(root, "ui");
+        Directory.CreateDirectory(ui);
+        await File.WriteAllTextAsync(Path.Combine(ui, "index.html"), "<!doctype html><title>preview</title>");
+        await File.WriteAllTextAsync(Path.Combine(ui, "app.js"), "console.log(1)");
+        var v2 = Path.Combine(root, "plugins-v2", "com.projectworkbench.rejected");
+        Directory.CreateDirectory(v2);
+        await File.WriteAllTextAsync(Path.Combine(v2, "plugin.v2.json"), """
+        {
+          "contract": "workbench.plugin.v2",
+          "contractVersion": "2.0.0-preview.1",
+          "id": "com.projectworkbench.rejected",
+          "name": "拒绝示例",
+          "version": "0.1.0",
+          "description": "声明了发送权限，预览宿主必须拒绝加载。",
+          "autoSend": false,
+          "backend": { "entryAssembly": "Missing.dll", "entryType": "Missing.Module" },
+          "ui": { "kind": "web-package", "module": "./ui/Missing.tsx", "mount": "embedded" },
+          "permissions": [ { "id": "project.read", "reason": "读取", "sensitive": false } ]
+        }
+        """);
+        await using var running = await StartAsync(root, v2Root: Path.Combine(root, "plugins-v2"), uiRoot: ui);
+        var missingApi = await running.Client.GetAsync("/api/v2/missing");
+        Assert.Equal(HttpStatusCode.NotFound, missingApi.StatusCode);
+        Assert.Equal("NotFound", (await missingApi.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        var page = await running.Client.GetAsync("/");
+        Assert.Equal(HttpStatusCode.OK, page.StatusCode);
+        Assert.Contains("preview", await page.Content.ReadAsStringAsync(), StringComparison.Ordinal);
+        var script = await running.Client.GetAsync("/app.js");
+        Assert.Equal(HttpStatusCode.OK, script.StatusCode);
+
+        var invalidSwitch = await running.Client.PostAsJsonAsync("/api/v2/projects/active", new { id = "", expectedRevision = "" });
+        Assert.Equal(HttpStatusCode.BadRequest, invalidSwitch.StatusCode);
+        var projects = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/projects");
+        var absent = await running.Client.PostAsJsonAsync("/api/v2/projects/active", new
+        {
+            id = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+            expectedRevision = projects.GetProperty("revision").GetString()
+        });
+        Assert.Equal(HttpStatusCode.NotFound, absent.StatusCode);
+        var malformed = await running.Client.PostAsJsonAsync("/api/v2/projects/active", new
+        {
+            id = "not-an-id",
+            expectedRevision = projects.GetProperty("revision").GetString()
+        });
+        Assert.Equal(HttpStatusCode.BadRequest, malformed.StatusCode);
+        Assert.Equal("InvalidId", (await malformed.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+        var unsafePlugin = await running.Client.GetAsync("/api/v2/plugins/not-safe/cases");
+        Assert.Equal(HttpStatusCode.NotFound, unsafePlugin.StatusCode);
+        var unavailable = await running.Client.GetAsync("/api/v2/plugins/com.projectworkbench.rejected/cases");
+        Assert.Equal(HttpStatusCode.Conflict, unavailable.StatusCode);
+        var oversized = await running.Client.PutAsync("/api/v2/plugins/com.projectworkbench.test-cases.v2/cases", new StringContent(new string('x', 32769)));
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversized.StatusCode);
+        var socket = await running.Client.GetAsync("/api/v2/events");
+        Assert.Equal(HttpStatusCode.BadRequest, socket.StatusCode);
+
+        var themePath = Path.Combine(root, "v2-preview", "ui-theme.json");
+        Directory.CreateDirectory(Path.GetDirectoryName(themePath)!);
+        await File.WriteAllTextAsync(themePath, """{"schema":"nope","schemaVersion":1,"setting":"dark"}""");
+        var theme = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/theme");
+        Assert.Equal("system", theme.GetProperty("setting").GetString());
+        var diagnostics = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/diagnostics");
+        Assert.Contains("MissingAssembly", diagnostics.GetProperty("issues").EnumerateArray().Select(item => item.GetProperty("code").GetString()));
+    }
+
+    [Fact]
     public async Task RunAsync_starts_on_loopback_and_stops_when_canceled()
     {
         var root = TempRoot();
@@ -323,7 +417,8 @@ public sealed class ServiceApiTests
             "--user-root", root,
             "--v1-plugins", Path.Combine(root, "plugins-v1"),
             "--v2-plugins", plugins,
-            "--ui-dist", Path.Combine(root, "empty-ui")
+            "--ui-dist", Path.Combine(root, "empty-ui"),
+            "--print-token"
         ], cancel.Token);
         var deadline = DateTime.UtcNow.AddSeconds(10);
         while (!output.ToString().Contains("listening: http://127.0.0.1:", StringComparison.Ordinal) && !task.IsCompleted && DateTime.UtcNow < deadline)
@@ -332,6 +427,33 @@ public sealed class ServiceApiTests
         var code = await task.WaitAsync(TimeSpan.FromSeconds(15));
         Console.SetOut(previousOut);
         Assert.Equal(0, code);
+        Assert.Contains("session-token: ", output.ToString(), StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task RunAsync_reports_failure_when_startup_is_refused()
+    {
+        var beside = Path.Combine(AppContext.BaseDirectory, "ui");
+        Directory.CreateDirectory(beside);
+        var besideIndex = Path.Combine(beside, "index.html");
+        await File.WriteAllTextAsync(besideIndex, "<!doctype html>");
+        var error = new StringWriter();
+        var previous = Console.Error;
+        Console.SetError(error);
+        try
+        {
+            var withBeside = await Program.RunAsync(["--allow-lan", "--user-root"], CancellationToken.None);
+            File.Delete(besideIndex);
+            var withoutUi = await Program.RunAsync(["--allow-lan"], CancellationToken.None);
+            Assert.Equal(1, withBeside);
+            Assert.Equal(1, withoutUi);
+            Assert.Contains("service-start-failed", error.ToString(), StringComparison.Ordinal);
+        }
+        finally
+        {
+            Console.SetError(previous);
+            if (File.Exists(besideIndex)) File.Delete(besideIndex);
+        }
     }
 
     private static async Task<string> ReceiveAsync(ClientWebSocket socket)
@@ -342,12 +464,12 @@ public sealed class ServiceApiTests
         return Encoding.UTF8.GetString(buffer, 0, received.Count);
     }
 
-    private static async Task<Running> StartAsync(string? root = null, bool authenticated = true, string? v2Root = null)
+    private static async Task<Running> StartAsync(string? root = null, bool authenticated = true, string? v2Root = null, string? uiRoot = null)
     {
         root ??= TempRoot();
         var pluginsV2 = v2Root ?? Path.Combine(root, "plugins-v2");
         CopySample(pluginsV2);
-        var host = await WorkbenchServiceHost.StartAsync(Options(root, pluginsV2));
+        var host = await WorkbenchServiceHost.StartAsync(Options(root, pluginsV2, uiRoot: uiRoot));
         var handler = new HttpClientHandler { CookieContainer = new CookieContainer(), UseCookies = true };
         var client = new HttpClient(handler) { BaseAddress = new Uri(host.BaseUrl) };
         if (authenticated)
@@ -355,11 +477,12 @@ public sealed class ServiceApiTests
         return new Running(host, client, root);
     }
 
-    private static WorkbenchServiceOptions Options(string root, string? v2Root = null, bool allowLan = false) => new()
+    private static WorkbenchServiceOptions Options(string root, string? v2Root = null, bool allowLan = false, string? uiRoot = null) => new()
     {
         UserRoot = root,
         V1PluginsRoot = Path.Combine(root, "plugins-v1"),
         V2PluginsRoot = v2Root ?? Path.Combine(root, "plugins-v2"),
+        UiRoot = uiRoot,
         AllowLan = allowLan
     };
 

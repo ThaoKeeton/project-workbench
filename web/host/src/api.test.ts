@@ -31,6 +31,8 @@ describe("api client", () => {
     expect(await (await client.exportCases()).text()).toBe("suite");
     expect(await client.openSession()).toBe(true);
     expect(await client.theme()).toBe("system");
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ setting: "light" }), { status: 200 })));
+    expect(await new ApiClient("preview-session").theme()).toBe("light");
     await client.saveTheme("dark");
   });
 

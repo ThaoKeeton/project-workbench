@@ -1,9 +1,13 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { NavLink, Route, Routes, useNavigate } from "react-router-dom";
+import { Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiClient, readSessionToken, type Diagnostics, type Info, type PluginItem, type Projects } from "./api";
-import { Icon } from "./icons";
-import { CasesPage, DevicesPage, DiagnosticsPage, HomePage, PluginsPage, ProjectsPage, SettingsPage } from "./pages";
+import { deviceLabel, devices, pinnedPlugins, type DeviceId } from "./catalog";
+import { CommandPalette, HomePage } from "./launcher";
+import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
+import { Confirm } from "./market";
+import { Shell } from "./shell";
 import { applyTheme, readStoredSetting, type ThemeSetting } from "./theme";
+import { DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SettingsPage } from "./workspace";
 
 export type Snapshot = {
   info: Info;
@@ -13,23 +17,20 @@ export type Snapshot = {
   channel: string;
 };
 
-const commands = [
-  { label: "打开诊断", path: "/diagnostics" },
-  { label: "打开插件", path: "/plugins" },
-  { label: "打开设置", path: "/settings" },
-  { label: "测试设计", path: "/plugins/test-cases" },
-];
-
 export function App() {
   const token = readSessionToken();
   const client = useMemo(() => new ApiClient(token), [token]);
-  const compact = useCompact();
   const navigate = useNavigate();
+  const location = useLocation();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [error, setError] = useState("");
-  const [query, setQuery] = useState("");
-  const [menuOpen, setMenuOpen] = useState(false);
   const [setting, setSetting] = useState<ThemeSetting>(readStoredSetting());
+  const [deviceId, setDeviceId] = useState<DeviceId>("local");
+  const [deviceOpen, setDeviceOpen] = useState(false);
+  const [paletteOpen, setPaletteOpen] = useState(false);
+  const [confirm, setConfirm] = useState<{ title: string; body: string; onConfirm: () => void } | null>(null);
+  const [restore, setRestore] = useState(true);
+  const [reduceMotion, setReduceMotion] = useState(false);
 
   const reload = useCallback(async () => {
     const [info, projects, plugins, diagnostics] = await Promise.all([
@@ -38,6 +39,7 @@ export function App() {
       client.plugins(),
       client.diagnostics(),
     ]);
+    setError("");
     setSnapshot((current) => ({ info, projects, plugins, diagnostics, channel: current?.channel ?? "未连接" }));
   }, [client]);
 
@@ -48,6 +50,10 @@ export function App() {
     media.addEventListener("change", apply);
     return () => media.removeEventListener("change", apply);
   }, [setting]);
+
+  useEffect(() => {
+    document.documentElement.dataset.motion = reduceMotion ? "reduce" : "full";
+  }, [reduceMotion]);
 
   useEffect(() => {
     if (!token) return;
@@ -79,93 +85,111 @@ export function App() {
     };
   }, [client, reload, token]);
 
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const chooseTheme = (next: ThemeSetting) => {
     setSetting(next);
     applyTheme(next);
     client.saveTheme(next).catch(() => undefined);
   };
 
+  const openPlugin = (id: string) => {
+    const plugin = pinnedPlugins.find((item) => item.id === id);
+    const device = devices.find((item) => item.id === deviceId);
+    if (device?.remote) {
+      setConfirm({
+        title: "远程操作确认",
+        body: `你即将在「${device.name}」上打开 ${plugin?.name ?? "插件"}。对方屏幕会看到此次操作，并可随时断开。`,
+        onConfirm: () => navigate(`/plugin/${id}`),
+      });
+      return;
+    }
+    navigate(`/plugin/${id}`);
+  };
+
   if (!token) return <p role="alert">未找到本机会话。请从工作台外壳打开。</p>;
 
-  const active = snapshot?.projects.projects.find((project) => project.id === snapshot.projects.activeProjectId);
-  const matches = query.trim()
-    ? commands.filter((item) => item.label.includes(query.trim()))
-    : [];
+  const projectName = snapshot?.projects.projects.find((project) => project.id === snapshot.projects.activeProjectId)?.name ?? "星河协作";
+  const remote = devices.find((item) => item.id === deviceId)?.remote ?? false;
+  const palette = paletteOpen ? (
+    <CommandPalette
+      projects={(snapshot?.projects.projects ?? [
+        { id: "xinghe", name: "星河协作", isArchived: false },
+        { id: "lighthouse", name: "灯塔实验", isArchived: false },
+      ]).filter((item) => !item.isArchived)}
+      activeProjectId={snapshot?.projects.activeProjectId ?? ""}
+      onClose={() => setPaletteOpen(false)}
+      onOpenPlugin={openPlugin}
+      onPickDevice={(id) => { setDeviceId(id); setDeviceOpen(false); }}
+      onSwitchProject={(id) => {
+        const revision = snapshot?.projects.revision;
+        if (!revision) return;
+        client.switchProject(id, revision).then(async (projects) => {
+          const [info, plugins, diagnostics] = await Promise.all([client.info(), client.plugins(), client.diagnostics()]);
+          setSnapshot({ info, projects, plugins, diagnostics, channel: snapshot?.channel ?? "已连接" });
+        }).catch(() => setError("无法切换项目。"));
+      }}
+    />
+  ) : null;
 
   return (
-    <div className="app" data-layout={compact ? "compact" : "wide"}>
-      <header className="topbar">
-        <div className="wordmark">Project Workbench</div>
-        <div className="search">
-          <Icon name="search" />
-          <input
-            aria-label="搜索命令、插件或设备"
-            placeholder="搜索命令、插件或设备"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
-        {matches.length > 0 ? (
-          <div className="search-results">
-            {matches.map((item) => (
-              <button key={item.path} type="button" onClick={() => { setQuery(""); void navigate(item.path); }}>{item.label}</button>
-            ))}
-          </div>
-        ) : null}
-        <div className="device">
-          <button className="device-pill" type="button" aria-label="当前设备：本机" aria-expanded={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
-            <span className="dot on" />
-            本机 · 星河笔记本
-          </button>
-          {menuOpen ? (
-            <div className="device-menu" role="menu">
-              <div className="device-line"><span>本机 · 星河笔记本</span><span className="status"><span className="dot on" />在线 · 当前工作</span></div>
-              <p>其他设备是合成演示，局域网未连接。</p>
-            </div>
-          ) : null}
-        </div>
-      </header>
-      <nav className="nav" aria-label="主导航">
-        <div className="nav-label">当前项目</div>
-        <div className="nav-note">{active?.name ?? "正在读取"}</div>
-        <NavLink to="/" end><Icon name="home" />首页</NavLink>
-        <NavLink to="/plugins"><Icon name="market" />市场</NavLink>
-        <NavLink to="/projects"><Icon name="projects" />项目</NavLink>
-        <NavLink to="/devices"><Icon name="devices" />设备</NavLink>
-        <NavLink to="/diagnostics"><Icon name="diagnostics" />诊断</NavLink>
-        <div className="section-label">工作</div>
-        <NavLink to="/plugins/test-cases">测试设计</NavLink>
-        <NavLink to="/settings"><Icon name="settings" />设置</NavLink>
-      </nav>
-      <main className="main">
-        {error ? <p role="alert">{error}</p> : null}
-        {!snapshot && !error ? <p>正在读取本机服务…</p> : null}
-        {snapshot ? (
-          <Routes>
-            <Route path="/" element={<HomePage snapshot={snapshot} />} />
-            <Route path="/plugins" element={<PluginsPage plugins={snapshot.plugins} />} />
-            <Route path="/plugins/test-cases" element={<CasesPage client={client} />} />
-            <Route path="/projects" element={<ProjectsPage client={client} snapshot={snapshot} onSwitched={setSnapshot} />} />
-            <Route path="/devices" element={<DevicesPage />} />
-            <Route path="/diagnostics" element={<DiagnosticsPage snapshot={snapshot} />} />
-            <Route path="/settings" element={<SettingsPage setting={setting} onChange={chooseTheme} />} />
-          </Routes>
-        ) : null}
-      </main>
-    </div>
+    <Shell
+      projectName={projectName}
+      deviceId={deviceId}
+      deviceOpen={deviceOpen}
+      onToggleDevice={() => setDeviceOpen((open) => !open)}
+      onPickDevice={(id) => { setDeviceId(id); setDeviceOpen(false); }}
+      onPair={() => { setDeviceOpen(false); navigate("/devices"); }}
+      onOpenPlugin={openPlugin}
+      remote={remote}
+    >
+      {error && !snapshot ? <OfflinePage onRetry={() => { setError(""); void reload(); }} /> : null}
+      {!snapshot && !error ? <p className="page">正在读取本机服务…</p> : null}
+      {snapshot ? (
+        <Routes>
+          <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} />} />
+          <Route path="/market" element={<MarketPage onOpen={openPlugin} />} />
+          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} />} />
+          <Route path="/market/updates" element={<UpdatesPage />} />
+          <Route path="/market/import" element={<ImportPage onOpen={openPlugin} />} />
+          <Route path="/market/:id" element={<MarketDetail />} />
+          <Route path="/devices" element={<PairingPage />} />
+          <Route path="/diagnostics" element={<DiagnosticsPage minimumWidth={snapshot.diagnostics.nativeWindow.minimumWidth} />} />
+          <Route path="/settings" element={<SettingsPage setting={setting} onChange={chooseTheme} restore={restore} onRestore={setRestore} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} />} />
+          <Route path="/offline" element={<OfflinePage onRetry={() => { void reload(); navigate("/"); }} />} />
+          <Route path="/plugin/:id/stopped" element={<PluginWorkspace client={client} crashed remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
+          <Route path="/plugin/:id/empty/:scene" element={<PluginEmpty client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
+          <Route path="/plugin/:id" element={<PluginWorkspace client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
+        </Routes>
+      ) : null}
+      {location.pathname !== "/" ? palette : null}
+      {confirm ? (
+        <Confirm
+          title={confirm.title}
+          body={confirm.body}
+          confirmLabel="确认并继续"
+          primaryFirst={false}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => { confirm.onConfirm(); setConfirm(null); }}
+        />
+      ) : null}
+    </Shell>
   );
 }
 
-function useCompact(): boolean {
-  const [compact, setCompact] = useState(() => window.matchMedia("(max-width: 959px)").matches);
-  useEffect(() => {
-    const media = window.matchMedia("(max-width: 959px)");
-    const apply = () => setCompact(media.matches);
-    media.addEventListener("change", apply);
-    apply();
-    return () => media.removeEventListener("change", apply);
-  }, []);
-  return compact;
+function PluginEmpty({ client, remoteName }: { client: ApiClient; remoteName?: string }) {
+  const { scene = "suite" } = useParams();
+  const empty = scene === "target" || scene === "agent" || scene === "key" ? scene : "suite";
+  return <PluginWorkspace client={client} remoteName={remoteName} empty={empty} />;
 }
 
 function messageOf(error: unknown): string {
