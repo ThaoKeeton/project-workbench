@@ -8,6 +8,7 @@ export interface PageProbe {
   today: boolean;
   recentTiles: boolean;
   homeHeading: boolean;
+  headingCodes: string;
   builtins: boolean;
   product: string;
   apiVersion: string;
@@ -41,6 +42,11 @@ export function previewProbeScript(): string {
     const health = await read("/api/v2/health");
     const diagnostics = await read("/api/v2/diagnostics");
     const labels = ["市场", "设备", "诊断", "设置"];
+    const expectedHeading = "26089,19978,22909,65292,25991,21069";
+    const headingCodes = Array.from(document.querySelectorAll(".greet h1, h1")).map((node) => {
+      const text = (node.textContent || "").replace(/[\\s\\u200b\\uFEFF]/g, "");
+      return Array.from(text).map((char) => String(char.codePointAt(0))).join(",");
+    }).filter((codes, index, all) => codes.length > 0 && all.indexOf(codes) === index).join("|");
     return {
       title: document.title,
       sessionPresent: token.length >= 16,
@@ -48,7 +54,8 @@ export function previewProbeScript(): string {
       commandBar: Boolean(document.querySelector(".command-bar")),
       today: Boolean(document.querySelector(".today")),
       recentTiles: Boolean(document.querySelector(".tiles")),
-      homeHeading: document.querySelector("h1")?.textContent === "早上好，文前",
+      homeHeading: headingCodes.split("|").includes(expectedHeading),
+      headingCodes,
       builtins: labels.every((label) => document.querySelector('nav.rail a[aria-label="' + label + '"]')),
       product: info.product,
       apiVersion: info.apiVersion,
@@ -88,7 +95,7 @@ export function smokeFailures(report: SmokeReport): string[] {
   if (!report.commandBar) failures.push("command-bar");
   if (!report.today) failures.push("today");
   if (!report.recentTiles) failures.push("recent-tiles");
-  if (!report.homeHeading) failures.push("home-heading");
+  if (!report.homeHeading) failures.push(`home-heading:${report.headingCodes}`);
   if (!report.builtins) failures.push("host-builtins");
   if (report.product !== "ProjectWorkbench") failures.push("product");
   if (report.apiVersion !== API_VERSION) failures.push("api-version");
