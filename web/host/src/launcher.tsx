@@ -56,7 +56,7 @@ export function HomePage({ onOpenPalette, date = new Date(), palette }: { onOpen
 function PluginTile({ id, name, hint, icon }: { id: string; name: string; hint: string; icon: "clipboard" | "chat" | "flask" }) {
   const navigate = useNavigate();
   return (
-    <button type="button" className="tile" onClick={() => navigate(`/plugin/${id}`)}>
+    <button type="button" className="tile" onClick={() => { void navigate(`/plugin/${id}`); }}>
       <Icon name={icon} size={28} />
       <strong>{name}</strong>
       <span>{hint}</span>
@@ -91,7 +91,7 @@ export function CommandPalette({
     }));
     const commands: PaletteEntry[] = [
       { id: "summary", group: "命令", label: "生成今日站会摘要", run: () => onOpenPlugin("upcam") },
-      { id: "market", group: "命令", label: "打开插件市场", run: () => navigate("/market") },
+      { id: "market", group: "命令", label: "打开插件市场", run: () => { void navigate("/market"); } },
     ];
     const deviceEntries: PaletteEntry[] = devices.map((device) => ({
       id: device.id,

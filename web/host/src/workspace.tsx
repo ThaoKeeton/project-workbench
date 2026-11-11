@@ -137,7 +137,7 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
         rows={[["进程", "Xinghe.Tasks.exe · 未运行"], ["路径", "C:\\Apps\\Xinghe.Tasks.exe · 不存在"], ["上次附着", "11月10日 21:18 · 本机 · 星河笔记本"]]}
         primary="重新检测"
         secondary="选择窗口"
-        onPrimary={() => navigate("/plugin/runner")}
+        onPrimary={() => void navigate("/plugin/runner")}
       />
     );
   }
@@ -150,7 +150,7 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
         rows={[["配对", "已配对 · 11月8日 21:16"], ["心跳", "今天 11:14:02 · 已超过 90 秒"], ["Agent", "未响应 · 无待处理任务"], ["远程确认", "尚无待确认操作"]]}
         primary="重新检查"
         secondary="改在本机运行"
-        onPrimary={() => navigate("/plugin/runner")}
+        onPrimary={() => void navigate("/plugin/runner")}
       />
     );
   }
@@ -163,7 +163,7 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
         rows={[["FlaUI 步骤", "可以立即运行"], ["AI 步骤", "会停在「待配置」，不外发画面"], ["密钥", "只写入 Windows 凭据管理器，界面不回显"]]}
         primary="打开运行设置"
         secondary="仅用 FlaUI 继续"
-        onPrimary={() => navigate("/settings")}
+        onPrimary={() => void navigate("/settings")}
       />
     );
   }
@@ -174,7 +174,7 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
       heading="下一步"
       rows={[["1.", "在「测试设计」中导入或编写用例"], ["2.", "保存套件后回到这里"], ["3.", "选择目标程序与设备再开始运行"]]}
       primary="打开测试设计"
-      onPrimary={() => navigate("/plugin/test")}
+      onPrimary={() => void navigate("/plugin/test")}
     />
   );
 }
@@ -222,8 +222,8 @@ function CrashState({ name }: { name: string }) {
       <p>插件进程意外退出。画布里的未保存编辑可能丢失，你可以重新加载或查看诊断。</p>
       <p className="mono">exit 1 · renderer timeout after 12s</p>
       <div className="row-actions">
-        <button type="button" className="btn-accent" onClick={() => navigate(`/plugin/${name === "测试设计" ? "test" : "upcam"}`)}>重新加载</button>
-        <button type="button" className="btn" onClick={() => navigate("/diagnostics")}>查看诊断</button>
+        <button type="button" className="btn-accent" onClick={() => void navigate(`/plugin/${name === "测试设计" ? "test" : "upcam"}`)}>重新加载</button>
+        <button type="button" className="btn" onClick={() => void navigate("/diagnostics")}>查看诊断</button>
       </div>
       <div className="log-block">
         <h2>最近日志</h2>
@@ -246,7 +246,7 @@ export function OfflinePage({ onRetry }: { onRetry: () => void }) {
       <p>宿主无法联系本机服务。插件、设备发现与市场安装都暂不可用。</p>
       <div className="row-actions">
         <button type="button" className="btn-accent" onClick={onRetry}>重试</button>
-        <button type="button" className="btn" onClick={() => navigate("/diagnostics")}>打开诊断</button>
+        <button type="button" className="btn" onClick={() => void navigate("/diagnostics")}>打开诊断</button>
       </div>
       <div className="log-block">
         <h2>上次已知状态</h2>
@@ -275,7 +275,7 @@ export function PairingPage() {
       <p>在另一台已安装工作台的设备上输入下方代码</p>
       <p className="pair-code">7K4M — XQ2P</p>
       <p className="sub">代码 10 分钟内有效，仅限同一局域网</p>
-      <button type="button" className="btn" onClick={() => navigate("/")}>返回</button>
+      <button type="button" className="btn" onClick={() => void navigate("/")}>返回</button>
       <div className="log-block">
         <h2>配对步骤</h2>
         <ul className="log-rows">
@@ -344,7 +344,7 @@ export function SettingsPage({
         <legend className="sr">主题</legend>
         {options.map(([value, label, hint]) => (
           <label key={value} className={setting === value ? "is-on" : ""}>
-            <input type="radio" name="theme" value={value} checked={setting === value} onChange={() => onChange(value)} />
+            <input type="radio" name="theme" aria-label={label} value={value} checked={setting === value} onChange={() => onChange(value)} />
             <span><strong>{label}</strong><small>{hint}</small></span>
           </label>
         ))}

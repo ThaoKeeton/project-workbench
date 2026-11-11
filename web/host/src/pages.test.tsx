@@ -108,7 +108,7 @@ describe("launcher pages", () => {
     await user.click(screen.getByRole("button", { name: "导出本地 CSV" }));
     expect(await screen.findByText("已导出到本机，未发送。")).toBeTruthy();
     cleanup();
-    const failing = { ...client, cases: vi.fn(async () => { throw new Error("nope"); }), saveCases: client.saveCases, exportCases: client.exportCases } as unknown as ApiClient;
+    const failing = { ...client, cases: vi.fn(async () => { throw new Error("nope"); }) } as unknown as ApiClient;
     render(<MemoryRouter initialEntries={["/plugin/test"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={failing} />} /></Routes></MemoryRouter>);
     expect(await screen.findByRole("alert")).toHaveProperty("textContent", "无法读取示例用例。");
     cleanup();
