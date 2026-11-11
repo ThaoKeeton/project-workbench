@@ -74,6 +74,7 @@ cd web/host && npm ci && npx playwright install --with-deps chromium && npm run 
 | GET | `/api/v2/events` | WebSocket。先发 `ready`，项目切换后发 `project-changed` |
 | GET/PUT | `/api/v2/plugins/com.projectworkbench.test-cases.v2/cases` | 示例用例 |
 | POST | `/api/v2/plugins/com.projectworkbench.test-cases.v2/export` | 本地 CSV，不发送 |
+| GET/PUT | `/api/v2/ui/theme` | 界面主题 `system` / `light` / `dark`。文件是 `v2-preview/ui-theme.json`，`schemaVersion` 为 2 |
 
 不兼容的变更要提高 `preview` 版本，并继续留在 `/api/v2` 之外的新路径上，直到有意发布稳定的 v2。不要把新字段写进 schema 1 的目录、上下文或测试存储。
 
@@ -86,6 +87,18 @@ cd web/host && npm ci && npx playwright install --with-deps chromium && npm run 
 - 本预览迁的是仓库里的测试用例示例，新 id 是 `com.projectworkbench.test-cases.v2`。原来的 `com.projectworkbench.test-cases` WinUI 插件保持不动。
 - 预置三行仍是 EX-001、EX-002、EX-003。数据写在 v2 目录，不写 `.workbench-project/testing`。
 - `autoSend` 必须是 `false`。`message.send` 以及任何未列入允许集的权限都会让模块保持未加载。标记 `sensitive: true` 的权限在本预览里也不授予；以后凡是发送，都要在本机单独确认。
+
+## 墨色主题
+
+网页壳使用「墨色」这一套变量，深色和浅色都有，默认跟随系统。设置页可以改成「跟随系统 / 浅色 / 深色」。选择先写入 `localStorage` 键 `workbench.theme`，再交给 `PUT /api/v2/ui/theme`。这个文件不进入 schema 1。
+
+变量名与代码里的自定义属性一一对应：`bg`、`surface-1`、`surface-2`、`surface-3`、`border`、`text-primary`、`text-secondary`、`text-muted`、`accent`、`accent-on`、`success`、`warn`、`danger`、`focus-ring`、`radius-sm`（6px）、`radius-md`（8px）。生效的主题写在 `document.documentElement.dataset.theme`，取值为 `light` 或 `dark`。选择本身写在 `data-theme-setting`。
+
+嵌在同一窗口里的插件直接使用这些变量，并读取 `data-theme`。不要另做一套颜色，也不要在运行时请求字体 CDN。界面字体是随包分发的 Geist Sans、Geist Mono 和 Noto Sans SC，许可证都是 SIL OFL。
+
+点缀色只用于主按钮、进度和焦点。深色模式下主按钮文字用 `accent-on`（`#0B0C0E`），不用白色。状态除了颜色，还有文字。没有霓虹、大渐变或背景模糊。
+
+WinUI 薄壳在 Windows 上读取系统背景色，把标题栏按钮刷成同一套深色或浅色。这台 Linux 环境没有 WinUI / WebView2，标题栏跟随系统这一点还不能在这里验证。本机窗口宽度低于 1,100 仍会被拉回。
 
 ## 局域网安全（现在只设计，只实现本机）
 

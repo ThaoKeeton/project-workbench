@@ -102,6 +102,15 @@ export class ApiClient {
     return response.ok;
   }
 
+  async theme(): Promise<"system" | "light" | "dark"> {
+    const body = await this.json<{ setting: string }>("/api/v2/ui/theme");
+    return body.setting === "light" || body.setting === "dark" ? body.setting : "system";
+  }
+
+  async saveTheme(setting: "system" | "light" | "dark"): Promise<void> {
+    await this.json("/api/v2/ui/theme", { method: "PUT", body: JSON.stringify({ setting }) });
+  }
+
   private async json<T>(path: string, init?: RequestInit): Promise<T> {
     const response = await this.send(path, init);
     return (await response.json()) as T;

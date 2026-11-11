@@ -171,6 +171,15 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             }
             catch (ProjectWorkspaceStoreException error) { return ProjectError(error); }
         });
+        app.MapGet("/api/v2/ui/theme", async (CancellationToken cancellationToken) =>
+            Results.Json(new { schema = UiThemeStore.Schema, schemaVersion = 2, setting = await UiThemeStore.ReadAsync(_userRoot, cancellationToken) }, Json));
+        app.MapPut("/api/v2/ui/theme", async (ThemeSettingBody body, CancellationToken cancellationToken) =>
+        {
+            if (!UiThemeStore.IsSetting(body.Setting))
+                return Results.Json(new { error = "InvalidTheme" }, Json, statusCode: StatusCodes.Status400BadRequest);
+            await UiThemeStore.WriteAsync(_userRoot, body.Setting!, cancellationToken);
+            return Results.Json(new { schema = UiThemeStore.Schema, schemaVersion = 2, setting = body.Setting }, Json);
+        });
         app.MapPost("/api/v2/session", (HttpContext context) =>
         {
             context.Response.Cookies.Append(SessionTokens.CookieName, token, new CookieOptions
@@ -365,6 +374,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
         => socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, endOfMessage: true, cancellationToken);
 
     private sealed record SwitchBody(string? Id, string? ExpectedRevision);
+    private sealed record ThemeSettingBody(string? Setting);
 
     private sealed class PreviewEvents
     {

@@ -4,6 +4,16 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>项目工作台</title>
+    <script>
+      (function () {
+        var stored = localStorage.getItem("workbench.theme");
+        var setting = stored === "light" || stored === "dark" || stored === "system" ? stored : "system";
+        var dark = window.matchMedia("(prefers-color-scheme: dark)").matches;
+        var theme = setting === "system" ? (dark ? "dark" : "light") : setting;
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.dataset.themeSetting = setting;
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

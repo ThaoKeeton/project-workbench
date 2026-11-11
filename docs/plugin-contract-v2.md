@@ -70,6 +70,15 @@ v2 包使用单独的 `plugin.v2.json`。不要把它放到现有 WinUI 宿主�
 
 `ui.module` 指向包内的网页模块。宿主把它嵌进现有页面，而不是新开窗口。本预览的示例模块是 `plugins/v2/Workbench.TestCases.V2/ui/TestCasesPanel.tsx`，由主界面在 `/plugins/test-cases` 挂载。模块通过宿主传入的函数读写 `/api/v2`，自己不保存会话令牌。
 
+## 主题契约（v2 预览，不改 schema 1）
+
+宿主把当前主题放在文档根上：
+
+- `document.documentElement.dataset.theme`：`light` 或 `dark`，这是已经解析后的主题。
+- `document.documentElement.dataset.themeSetting`：`system`、`light` 或 `dark`，这是用户的选择。
+
+插件样式使用宿主的自定义属性，不要写死颜色：`--bg`、`--surface-1`、`--surface-2`、`--surface-3`、`--border`、`--text-primary`、`--text-secondary`、`--text-muted`、`--accent`、`--accent-on`、`--success`、`--warn`、`--danger`、`--focus-ring`、`--radius-sm`、`--radius-md`。深色主按钮的文字用 `--accent-on`。色值见 [架构 v2](architecture-v2.md) 的墨色主题一节。
+
 ## 示例插件
 
 `plugins/v2/Workbench.TestCases.V2` 是「测试用例 · 示例」的 v2 证明：

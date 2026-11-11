@@ -283,6 +283,26 @@ public sealed class ServiceApiTests
         Assert.Equal(created.Project.Id, changed.RootElement.GetProperty("activeProjectId").GetString());
     }
 
+    [Fact]
+    public async Task Theme_choice_is_stored_beside_schema_1()
+    {
+        await using var running = await StartAsync();
+        var initial = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/theme");
+        Assert.Equal(2, initial.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("system", initial.GetProperty("setting").GetString());
+        var saved = await running.Client.PutAsJsonAsync("/api/v2/ui/theme", new { setting = "dark" });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var again = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/theme");
+        Assert.Equal("dark", again.GetProperty("setting").GetString());
+        var rejected = await running.Client.PutAsJsonAsync("/api/v2/ui/theme", new { setting = "neon" });
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        var catalog = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(running.Root, ".workspaces", "catalog.json")));
+        Assert.Equal(1, catalog.RootElement.GetProperty("schemaVersion").GetInt32());
+        var themeFile = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(running.Root, "v2-preview", "ui-theme.json")));
+        Assert.Equal(2, themeFile.RootElement.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal("workbench.ui-theme.v2.preview", themeFile.RootElement.GetProperty("schema").GetString());
+    }
+
     private static async Task<string> ReceiveAsync(ClientWebSocket socket)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

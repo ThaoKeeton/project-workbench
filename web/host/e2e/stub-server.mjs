@@ -30,6 +30,7 @@ function fresh() {
       { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "示例项目", isArchived: false },
     ],
     cases: {},
+    themeSetting: "system",
   };
 }
 
@@ -191,6 +192,15 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/api/v2/projects") return sendJson(response, 200, projectsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/plugins") return sendJson(response, 200, pluginsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/diagnostics") return sendJson(response, 200, diagnosticsBody());
+  if (request.method === "GET" && url.pathname === "/api/v2/ui/theme") {
+    return sendJson(response, 200, { schema: "workbench.ui-theme.v2.preview", schemaVersion: 2, setting: state.themeSetting });
+  }
+  if (request.method === "PUT" && url.pathname === "/api/v2/ui/theme") {
+    const body = JSON.parse(await readBody(request));
+    if (body.setting !== "system" && body.setting !== "light" && body.setting !== "dark") return sendJson(response, 400, { error: "InvalidTheme" });
+    state.themeSetting = body.setting;
+    return sendJson(response, 200, { schema: "workbench.ui-theme.v2.preview", schemaVersion: 2, setting: state.themeSetting });
+  }
   if (request.method === "POST" && url.pathname === "/api/v2/session") {
     response.writeHead(204, {
       "Cache-Control": "no-store",

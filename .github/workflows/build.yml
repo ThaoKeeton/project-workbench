@@ -429,3 +429,41 @@ jobs:
             web/host/test-results/
           if-no-files-found: warn
           retention-days: 1
+  sonarcloud:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Skip when SONAR_TOKEN is not configured
+        id: sonar_gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "SONAR_TOKEN is not configured. Skipping SonarQube Cloud analysis."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-dotnet@v6.1.0
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-java@v4.7.1
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - name: Analyze the preview service and web UI
+        if: steps.sonar_gate.outputs.skip != 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          dotnet tool install --global dotnet-sonarscanner
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**"
+          dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
+          dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
