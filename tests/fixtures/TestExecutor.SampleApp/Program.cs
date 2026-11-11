@@ -20,6 +20,7 @@ internal sealed class SampleForm : Form
         Text = "合成被测窗口";
         StartPosition = FormStartPosition.Manual;
         Location = new Point(40, 40);
+        TopMost = true;
         ClientSize = new Size(420, 280);
         _name = new TextBox { Name = "sample-name", Location = new Point(24, 24), Width = 240 };
         var ok = new Button { Name = "sample-ok", Text = "确定", Location = new Point(24, 72), Width = 120 };
@@ -28,7 +29,14 @@ internal sealed class SampleForm : Form
         var browse = new Button { Name = "sample-browse", Text = "浏览", Location = new Point(160, 72), Width = 120 };
         browse.Click += (_, _) =>
         {
-            using var dialog = new OpenFileDialog { Title = "打开", CheckFileExists = false, CheckPathExists = false };
+            using var dialog = new OpenFileDialog
+            {
+                Title = "合成文件对话框",
+                CheckFileExists = false,
+                CheckPathExists = false,
+                RestoreDirectory = false,
+                FileName = ""
+            };
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 var name = Path.GetFileName(dialog.FileName);

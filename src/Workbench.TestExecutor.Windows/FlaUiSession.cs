@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Drawing;
 using System.Drawing.Imaging;
 using System.Runtime.InteropServices;
 using FlaUI.Core;
@@ -130,42 +131,210 @@ public sealed class FlaUiSession : IUiAutomationSession
     private UiActionResult FillFileDialog(UiAction action)
     {
         var automation = _automation ??= new UIA3Automation();
-        var desktop = automation.GetDesktop();
-        var dialog = desktop.FindFirstDescendant(cf => cf.ByClassName("#32770"));
+        var dialog = FindFileDialog(automation);
         if (dialog is null) return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "dialog-missing");
-        var filename = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1148"))
-            ?? dialog.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit));
-        if (filename is null || !filename.Patterns.Value.IsSupported)
-            return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "filename-missing");
-        filename.Patterns.Value.Pattern.SetValue(action.Text ?? "");
-        var open = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1"))
-            ?? dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button)).FirstOrDefault(button => IsOpenButton(button.Name));
+        var filename = FindFileNameEdit(dialog);
+        if (filename is null) return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "filename-missing");
+        var open = FindOpenButton(dialog);
         if (open is null) return UiActionResult.Fail(ExecutorError.ActionFailed, false, "open-button-missing");
-        if (open.Patterns.Invoke.IsSupported) open.Patterns.Invoke.Pattern.Invoke();
-        else open.Click();
-        if (DialogClosed(desktop)) return UiActionResult.Ok("file-selected");
-        filename.Focus();
-        Keyboard.Press(VirtualKeyShort.RETURN);
-        return DialogClosed(desktop)
-            ? UiActionResult.Ok("file-selected")
-            : UiActionResult.Fail(ExecutorError.ActionFailed, true, "dialog-open");
+        var handle = NativeHandle(dialog);
+        var path = action.Text ?? "";
+        BringToFront(dialog, handle);
+        CommitFileName(filename, path);
+        if (ConfirmOpen(dialog, filename, open, handle)) return UiActionResult.Ok("file-selected");
+        return UiActionResult.Fail(ExecutorError.ActionFailed, true, $"dialog-open:{dialog.Name}:{open.Name}:{ReadValue(filename)}");
     }
 
-    private static bool DialogClosed(AutomationElement desktop)
+    private AutomationElement? FindFileDialog(UIA3Automation automation)
     {
-        for (var attempt = 0; attempt < 5; attempt++)
+        var desktop = automation.GetDesktop();
+        var processId = _process.Id;
+        return desktop.FindFirstDescendant(cf => cf.ByProcessId(processId).And(cf.ByClassName("#32770")))
+            ?? desktop.FindFirstDescendant(cf => cf.ByClassName("#32770"));
+    }
+
+    private static AutomationElement? FindFileNameEdit(AutomationElement dialog)
+    {
+        var host = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1148"));
+        if (host is not null && host.ControlType == ControlType.Edit) return host;
+        return host?.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit))
+            ?? dialog.FindFirstDescendant(cf => cf.ByAutomationId("1001"))
+            ?? dialog.FindFirstDescendant(cf => cf.ByControlType(ControlType.Edit));
+    }
+
+    private static AutomationElement? FindOpenButton(AutomationElement dialog)
+    {
+        var byId = dialog.FindFirstDescendant(cf => cf.ByAutomationId("1"));
+        if (byId is not null && IsPushButton(byId)) return byId;
+        return dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+            .Concat(dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.SplitButton)))
+            .FirstOrDefault(button => IsOpenButton(button.Name));
+    }
+
+    private static bool ConfirmOpen(AutomationElement dialog, AutomationElement filename, AutomationElement open, IntPtr handle)
+    {
+        // Enter confirms the filename the edit actually holds. Invoke on the
+        // modern Open split button only drops its menu and leaves #32770 up.
+        Try(() => filename.Focus());
+        if (HasFocus(filename)) Keyboard.Press(VirtualKeyShort.RETURN);
+        if (Closed(handle)) return true;
+        Try(() => ClickOpen(open));
+        if (Closed(handle)) return true;
+        ActivateDefault(handle, open);
+        if (Closed(handle)) return true;
+        Try(() => dialog.Focus());
+        Try(() => Keyboard.TypeSimultaneously(VirtualKeyShort.LMENU, VirtualKeyShort.KEY_O));
+        return Closed(handle);
+    }
+
+    private static void CommitFileName(AutomationElement filename, string path)
+    {
+        Try(() => filename.Focus());
+        if (HasFocus(filename))
         {
-            if (desktop.FindFirstDescendant(cf => cf.ByClassName("#32770")) is null) return true;
+            Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_A);
+            if (TryPlaceOnClipboard(path)) Keyboard.TypeSimultaneously(VirtualKeyShort.CONTROL, VirtualKeyShort.KEY_V);
+            else Keyboard.Type(path);
+            Thread.Sleep(150);
+        }
+        if (!ValueHasFile(filename, path)) Try(() => WriteValue(filename, path));
+    }
+
+    private static void WriteValue(AutomationElement filename, string path)
+    {
+        if (filename.Patterns.Value.IsSupported) filename.Patterns.Value.Pattern.SetValue(path);
+    }
+
+    private static void ClickOpen(AutomationElement open)
+    {
+        var rect = open.BoundingRectangle;
+        if (rect.Width < 8 || rect.Height < 8)
+        {
+            open.Click();
+            return;
+        }
+        var x = (int)Math.Round(rect.Left + Math.Min(rect.Width / 4d, 20d));
+        var y = (int)Math.Round(rect.Top + (rect.Height / 2d));
+        Mouse.Click(new Point(x, y));
+    }
+
+    private static void ActivateDefault(IntPtr dialog, AutomationElement open)
+    {
+        var button = NativeHandle(open);
+        if (button != IntPtr.Zero) PostMessage(button, BmClick, IntPtr.Zero, IntPtr.Zero);
+        if (dialog != IntPtr.Zero) PostMessage(dialog, WmCommand, (IntPtr)IdOk, button);
+    }
+
+    private static void BringToFront(AutomationElement dialog, IntPtr handle)
+    {
+        Keyboard.Press(VirtualKeyShort.LMENU);
+        if (handle != IntPtr.Zero) ForceForeground(handle);
+        Try(() => dialog.Focus());
+    }
+
+    private static void ForceForeground(IntPtr handle)
+    {
+        var foreground = GetForegroundWindow();
+        var current = GetCurrentThreadId();
+        var source = GetWindowThreadProcessId(foreground, out _);
+        var target = GetWindowThreadProcessId(handle, out _);
+        AttachThreadInput(current, source, true);
+        AttachThreadInput(current, target, true);
+        SetForegroundWindow(handle);
+        AttachThreadInput(current, target, false);
+        AttachThreadInput(current, source, false);
+    }
+
+    private static bool Closed(IntPtr handle)
+    {
+        if (handle == IntPtr.Zero) return false;
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            if (!IsWindow(handle)) return true;
             Thread.Sleep(100);
         }
         return false;
     }
 
+    private static bool ValueHasFile(AutomationElement filename, string path)
+    {
+        var value = ReadValue(filename);
+        if (value.Length == 0) return false;
+        var name = Path.GetFileName(path);
+        return value.Contains(path, StringComparison.OrdinalIgnoreCase)
+            || (name.Length > 0 && value.Contains(name, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string ReadValue(AutomationElement element)
+    {
+        if (!element.Patterns.Value.IsSupported) return element.Name ?? "";
+        try { return element.Patterns.Value.Pattern.Value ?? ""; }
+        catch (Exception error) when (error is COMException or ElementNotAvailableException)
+        {
+            return "";
+        }
+    }
+
+    private static bool HasFocus(AutomationElement element)
+    {
+        try { return element.Properties.HasKeyboardFocus.ValueOrDefault; }
+        catch (Exception error) when (error is COMException or ElementNotAvailableException)
+        {
+            return false;
+        }
+    }
+
+    private static IntPtr NativeHandle(AutomationElement element)
+    {
+        try { return element.Properties.NativeWindowHandle.ValueOrDefault; }
+        catch (Exception error) when (error is COMException or ElementNotAvailableException)
+        {
+            return IntPtr.Zero;
+        }
+    }
+
+    private static void Try(Action action)
+    {
+        try { action(); }
+        catch (Exception error) when (error is COMException or ElementNotAvailableException or TimeoutException or InvalidOperationException)
+        {
+            // One confirmation gesture can miss while the dialog is opening. The next one still runs.
+        }
+    }
+
+    private static bool TryPlaceOnClipboard(string text)
+    {
+        if (!OpenClipboard(IntPtr.Zero)) return false;
+        var memory = IntPtr.Zero;
+        try
+        {
+            if (!EmptyClipboard()) return false;
+            memory = GlobalAlloc(GmemMoveable | GmemZeroInit, (nuint)((text.Length + 1) * sizeof(char)));
+            if (memory == IntPtr.Zero) return false;
+            var locked = GlobalLock(memory);
+            if (locked == IntPtr.Zero) return false;
+            try { Marshal.Copy(text.ToCharArray(), 0, locked, text.Length); }
+            finally { GlobalUnlock(memory); }
+            if (SetClipboardData(CfUnicodeText, memory) == IntPtr.Zero) return false;
+            memory = IntPtr.Zero;
+            return true;
+        }
+        finally
+        {
+            if (memory != IntPtr.Zero) GlobalFree(memory);
+            CloseClipboard();
+        }
+    }
+
+    private static bool IsPushButton(AutomationElement element)
+        => element.ControlType is ControlType.Button or ControlType.SplitButton;
+
     private static bool IsOpenButton(string? name)
     {
         if (string.IsNullOrWhiteSpace(name)) return false;
         var trimmed = name.Replace("&", "", StringComparison.Ordinal).Trim();
-        return trimmed.Equals("打开", StringComparison.Ordinal) || trimmed.Equals("Open", StringComparison.OrdinalIgnoreCase);
+        return trimmed.StartsWith("打开", StringComparison.Ordinal)
+            || trimmed.StartsWith("Open", StringComparison.OrdinalIgnoreCase);
     }
 
     private AutomationElement? Find(ElementSelector? selector)
@@ -213,4 +382,56 @@ public sealed class FlaUiSession : IUiAutomationSession
         var rect = element.BoundingRectangle;
         return new PixelRect((int)(rect.X - bounds.X), (int)(rect.Y - bounds.Y), (int)rect.Width, (int)rect.Height);
     }
+
+    private const int WmCommand = 0x0111;
+    private const int BmClick = 0x00F5;
+    private const int IdOk = 1;
+    private const uint GmemMoveable = 0x0002;
+    private const uint GmemZeroInit = 0x0040;
+    private const uint CfUnicodeText = 13;
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint processId);
+
+    [DllImport("kernel32.dll")]
+    private static extern uint GetCurrentThreadId();
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint source, uint target, bool attach);
+
+    [DllImport("user32.dll")]
+    private static extern bool IsWindow(IntPtr hWnd);
+
+    [DllImport("user32.dll")]
+    private static extern bool PostMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern bool OpenClipboard(IntPtr owner);
+
+    [DllImport("user32.dll")]
+    private static extern bool CloseClipboard();
+
+    [DllImport("user32.dll")]
+    private static extern bool EmptyClipboard();
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetClipboardData(uint format, IntPtr memory);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern IntPtr GlobalAlloc(uint flags, nuint bytes);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GlobalLock(IntPtr memory);
+
+    [DllImport("kernel32.dll")]
+    private static extern bool GlobalUnlock(IntPtr memory);
+
+    [DllImport("kernel32.dll")]
+    private static extern IntPtr GlobalFree(IntPtr memory);
 }
