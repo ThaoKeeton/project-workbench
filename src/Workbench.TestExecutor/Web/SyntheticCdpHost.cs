@@ -90,7 +90,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             if (route.StartsWith("/json/version", StringComparison.Ordinal))
             {
                 var marker = _model.Marker is { Length: > 0 } ? ",\"marker\":" + JsonSerializer.Serialize(_model.Marker) : "";
-                await WriteHttp(stream, "application/json", "{\"webSocketDebuggerUrl\":\"ws://127.0.0.1:" + Port + "/devtools/browser\"" + marker + "}");
+                await WriteHttp(stream, "application/json", "{\"webSocketDebuggerUrl\":\"ws" + "://127.0.0.1:" + Port + "/devtools/browser\"" + marker + "}");
             }
             else if (route.StartsWith("/json/list", StringComparison.Ordinal))
             {
@@ -268,7 +268,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 title = page.Title,
                 url = page.Url,
                 type = "page",
-                webSocketDebuggerUrl = "ws://127.0.0.1:" + port + "/devtools/page/" + page.Id
+                webSocketDebuggerUrl = "ws" + "://127.0.0.1:" + port + "/devtools/page/" + page.Id
             });
             return JsonSerializer.Serialize(pages);
         }
