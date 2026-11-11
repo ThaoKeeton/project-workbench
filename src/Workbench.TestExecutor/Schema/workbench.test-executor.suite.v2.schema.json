@@ -1,0 +1,183 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "workbench.test-executor.suite.v2.preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "id", "name", "cases"],
+  "properties": {
+    "schema": { "const": "workbench.test-executor.suite.v2.preview" },
+    "schemaVersion": { "const": 2 },
+    "id": { "$ref": "#/$defs/id" },
+    "name": { "$ref": "#/$defs/title" },
+    "stopOnFirstFailure": { "type": "boolean" },
+    "maskPasswordControls": { "type": "boolean" },
+    "application": { "$ref": "#/$defs/application" },
+    "masks": {
+      "type": "array",
+      "maxItems": 64,
+      "items": { "$ref": "#/$defs/mask" }
+    },
+    "cases": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 200,
+      "items": { "$ref": "#/$defs/case" }
+    },
+    "visual": { "$ref": "#/$defs/visual" }
+  },
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 64,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+    },
+    "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+    "note": { "type": "string", "maxLength": 500 },
+    "application": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "processName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80,
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$"
+        },
+        "windowTitle": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "debugPort": { "type": "integer", "minimum": 1, "maximum": 65535 },
+        "executable": { "type": "string", "minLength": 1, "maxLength": 260 },
+        "arguments": {
+          "type": "array",
+          "maxItems": 20,
+          "items": { "type": "string", "maxLength": 200 }
+        },
+        "env": {
+          "type": "object",
+          "maxProperties": 16,
+          "additionalProperties": { "type": "string", "maxLength": 200 }
+        },
+        "attach": { "type": "boolean" },
+        "url": { "type": "string", "minLength": 1, "maxLength": 200 }
+      }
+    },
+    "selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "automationId": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "selector": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "text": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "role": { "type": "string", "minLength": 1, "maxLength": 40 },
+        "title": { "type": "string", "minLength": 1, "maxLength": 120 },
+        "url": { "type": "string", "minLength": 1, "maxLength": 200 }
+      },
+      "anyOf": [
+        { "required": ["name"] },
+        { "required": ["automationId"] },
+        { "required": ["selector"] },
+        { "required": ["text"] },
+        { "required": ["role"] },
+        { "required": ["title"] },
+        { "required": ["url"] }
+      ]
+    },
+    "mask": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": { "enum": ["rectangle", "selector"] },
+        "x": { "type": "integer", "minimum": 0, "maximum": 20000 },
+        "y": { "type": "integer", "minimum": 0, "maximum": 20000 },
+        "width": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "name": { "type": "string", "minLength": 1, "maxLength": 200 },
+        "automationId": { "type": "string", "minLength": 1, "maxLength": 200 }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "kind": { "const": "rectangle" } },
+            "required": ["kind"]
+          },
+          "then": { "required": ["x", "y", "width", "height"] }
+        },
+        {
+          "if": {
+            "properties": { "kind": { "const": "selector" } },
+            "required": ["kind"]
+          },
+          "then": {
+            "anyOf": [
+              { "required": ["name"] },
+              { "required": ["automationId"] }
+            ]
+          }
+        }
+      ]
+    },
+    "step": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "type", "action"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "type": { "enum": ["web", "flaui", "ai"] },
+        "action": { "enum": ["click", "type", "set-value", "invoke", "expand", "wait-for", "read", "assert-text", "assert-visible", "assert-network", "screenshot", "switch-window", "open-file"] },
+        "target": { "$ref": "#/$defs/selector" },
+        "expected": { "$ref": "#/$defs/note" },
+        "input": { "$ref": "#/$defs/note" },
+        "timeoutSeconds": { "type": "integer", "minimum": 1, "maximum": 300 },
+        "allowFallback": { "type": "boolean" },
+        "sensitive": { "type": "boolean" }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": { "type": { "const": "flaui" } },
+            "required": ["type"]
+          },
+          "then": { "required": ["target"] }
+        }
+      ]
+    },
+    "case": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "name", "steps"],
+      "properties": {
+        "id": { "$ref": "#/$defs/id" },
+        "name": { "$ref": "#/$defs/title" },
+        "allowFallback": { "type": "boolean" },
+        "steps": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 50,
+          "items": { "$ref": "#/$defs/step" }
+        }
+      }
+    },
+    "rect": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "width", "height"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 0, "maximum": 20000 },
+        "y": { "type": "integer", "minimum": 0, "maximum": 20000 },
+        "width": { "type": "integer", "minimum": 1, "maximum": 20000 },
+        "height": { "type": "integer", "minimum": 1, "maximum": 20000 }
+      }
+    },
+    "visual": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "maxMismatchRatio": { "type": "number", "minimum": 0, "maximum": 1 },
+        "channelTolerance": { "type": "integer", "minimum": 0, "maximum": 255 },
+        "ignore": { "type": "array", "maxItems": 32, "items": { "$ref": "#/$defs/rect" } }
+      }
+    }
+  }
+}

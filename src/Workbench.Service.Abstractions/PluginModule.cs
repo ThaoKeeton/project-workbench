@@ -23,7 +23,25 @@ public interface IWorkbenchPluginModule
     Task<PluginModuleResponse> HandleAsync(PluginModuleRequest request, CancellationToken cancellationToken);
 }
 
-public sealed record PluginModuleStart(IReadOnlySet<string> GrantedPermissions);
+public sealed record PluginModuleStart(IReadOnlySet<string> GrantedPermissions)
+{
+    /// <summary>
+    /// Preview user root. Optional so existing modules keep compiling.
+    /// Local-only evidence may be stored under this directory.
+    /// </summary>
+    public string? PreviewUserRoot { get; init; }
+}
+
+/// <summary>
+/// Optional preview capability for modules that stream a run.
+/// Modules that do not implement it are unchanged. Contract 2.0.0-preview.1.
+/// </summary>
+public interface IWorkbenchRunEventSource
+{
+    bool TryOpenRun(string runId);
+
+    IAsyncEnumerable<string> ReadEventsAsync(string runId, CancellationToken cancellationToken);
+}
 
 public sealed record PluginModuleRequest(
     string Action,

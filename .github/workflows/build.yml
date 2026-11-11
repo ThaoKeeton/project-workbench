@@ -430,6 +430,24 @@ jobs:
             web/host/test-results/
           if-no-files-found: warn
           retention-days: 1
+  test-executor-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: FlaUI integration tests against the synthetic sample
+        run: dotnet test tests/Workbench.TestExecutor.WindowsTests/Workbench.TestExecutor.WindowsTests.csproj -c Release --nologo --logger "trx;LogFileName=test-executor-windows.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: test-executor-windows-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
   sonarcloud:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
     runs-on: ubuntu-latest

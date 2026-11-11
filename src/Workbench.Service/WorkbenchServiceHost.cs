@@ -10,7 +10,7 @@ using Workbench.Service.Abstractions;
 
 namespace Workbench.Service;
 
-public sealed class WorkbenchServiceHost : IAsyncDisposable
+public sealed partial class WorkbenchServiceHost : IAsyncDisposable
 {
     public const string ApiVersion = "2.0.0-preview.1";
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
@@ -54,7 +54,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
 
         var plugins = new PluginManager(new PluginManagerOptions { PluginsRoot = v1Root, UserRoot = userRoot, HostVersion = new Version(0, 4, 1) });
         await plugins.DiscoverAsync(cancellationToken);
-        var v2Packages = await PluginV2Catalog.LoadAsync(v2Root, cancellationToken);
+        var v2Packages = await PluginV2Catalog.LoadAsync(v2Root, cancellationToken, userRoot);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
         builder.Logging.ClearProviders();
@@ -207,6 +207,7 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             return await HandlePluginAsync(id, "cases.put", body, cancellationToken);
         });
         app.MapPost("/api/v2/plugins/{id}/export", (string id, CancellationToken cancellationToken) => HandlePluginAsync(id, "cases.export", null, cancellationToken));
+        MapTestExecutor(app);
         app.MapFallback(async context =>
         {
             if (context.Request.Path.StartsWithSegments("/api"))

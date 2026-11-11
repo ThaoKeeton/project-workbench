@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Workbench.TestExecutor.Plugin</RootNamespace>
+    <AssemblyName>Workbench.TestExecutor.Plugin</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0-preview.1</InformationalVersion>
+    <Description>Preview backend for the local test executor. The web host does not mount this package.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Workbench.TestExecutor.Tests" />
+    <ProjectReference Include="../../../src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
+    <ProjectReference Include="../../../src/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
+    <None Include="plugin.v2.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="ui/module.js" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+</Project>
