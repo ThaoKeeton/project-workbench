@@ -136,12 +136,25 @@ public sealed class FlaUiSession : IUiAutomationSession
         if (filename is null || !filename.Patterns.Value.IsSupported)
             return UiActionResult.Fail(ExecutorError.ControlNotFound, true, "filename-missing");
         filename.Patterns.Value.Pattern.SetValue(action.Text ?? "");
-        var open = dialog.FindFirstDescendant(cf => cf.ByName("打开"))
-            ?? dialog.FindFirstDescendant(cf => cf.ByName("Open"));
+        var open = dialog.FindAllDescendants(cf => cf.ByControlType(ControlType.Button))
+            .FirstOrDefault(button => IsOpenButton(button.Name));
         if (open is null) return UiActionResult.Fail(ExecutorError.ActionFailed, false, "open-button-missing");
         if (open.Patterns.Invoke.IsSupported) open.Patterns.Invoke.Pattern.Invoke();
         else open.Click();
-        return UiActionResult.Ok("file-selected");
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            if (desktop.FindFirstDescendant(cf => cf.ByClassName("#32770")) is null)
+                return UiActionResult.Ok("file-selected");
+            Thread.Sleep(100);
+        }
+        return UiActionResult.Fail(ExecutorError.ActionFailed, true, "dialog-open");
+    }
+
+    private static bool IsOpenButton(string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name)) return false;
+        var trimmed = name.Replace("&", "", StringComparison.Ordinal).Trim();
+        return trimmed.Equals("打开", StringComparison.Ordinal) || trimmed.Equals("Open", StringComparison.OrdinalIgnoreCase);
     }
 
     private AutomationElement? Find(ElementSelector? selector)

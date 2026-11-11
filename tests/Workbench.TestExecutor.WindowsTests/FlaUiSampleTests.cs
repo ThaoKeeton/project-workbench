@@ -20,17 +20,16 @@ public sealed class FlaUiSampleTests
             await File.WriteAllTextAsync(chosen, "synthetic");
             await using var session = await new FlaUiSessionFactory().OpenAsync(new ApplicationTarget("TestExecutor.SampleApp", "合成被测窗口"), CancellationToken.None);
             var opening = session.ExecuteAsync(new UiAction("click", new ElementSelector(null, "sample-browse"), null, null, false), CancellationToken.None);
-            var filled = false;
-            for (var attempt = 0; attempt < 20 && !filled; attempt++)
+            UiActionResult? filled = null;
+            for (var attempt = 0; attempt < 20 && filled?.Succeeded != true; attempt++)
             {
                 await Task.Delay(250);
-                var result = await session.ExecuteAsync(new UiAction("open-file", new ElementSelector("打开", "1148"), chosen, null, true), CancellationToken.None);
-                filled = result.Succeeded;
+                filled = await session.ExecuteAsync(new UiAction("open-file", new ElementSelector("打开", "1148"), chosen, null, true), CancellationToken.None);
             }
-            Assert.True(filled);
+            Assert.True(filled?.Succeeded == true, filled?.Log + " " + filled?.Actual);
             await opening;
-            var read = await session.ExecuteAsync(new UiAction("read", new ElementSelector("synthetic-dialog.txt", null), null, "synthetic-dialog.txt", false), CancellationToken.None);
-            Assert.Equal("synthetic-dialog.txt", read.Actual);
+            var read = await session.ExecuteAsync(new UiAction("read", new ElementSelector(null, "sample-value"), null, "synthetic-dialog.txt", false), CancellationToken.None);
+            Assert.True(read.Actual == "synthetic-dialog.txt", read.Log + " " + read.Actual);
             File.Delete(chosen);
         }
         finally
