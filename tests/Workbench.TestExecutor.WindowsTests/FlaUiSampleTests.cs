@@ -5,9 +5,22 @@ using Xunit;
 
 namespace Workbench.TestExecutor.WindowsTests;
 
+public sealed class InteractiveDesktopFactAttribute : FactAttribute
+{
+    public const string SkipReason =
+        "Needs an interactive desktop. GitHub-hosted Windows runners do not have one, so keyboard and ValuePattern input into the native #32770 file dialog is not reliable. This auxiliary step is skipped in hosted CI. On a real Windows 11 desktop, run scripts/verify-native-dialog.ps1.";
+
+    public InteractiveDesktopFactAttribute()
+    {
+        var hosted = string.Equals(Environment.GetEnvironmentVariable("GITHUB_ACTIONS"), "true", StringComparison.OrdinalIgnoreCase);
+        var forced = string.Equals(Environment.GetEnvironmentVariable("TEST_EXECUTOR_INTERACTIVE_DESKTOP"), "1", StringComparison.Ordinal);
+        if (hosted && !forced) Skip = SkipReason;
+    }
+}
+
 public sealed class FlaUiSampleTests
 {
-    [Fact(Timeout = 60000)]
+    [InteractiveDesktopFact(Timeout = 60000)]
     public async Task Native_file_dialog_can_be_filled_without_leaving_the_machine()
     {
         var exe = Path.Combine(AppContext.BaseDirectory, "TestExecutor.SampleApp.exe");
