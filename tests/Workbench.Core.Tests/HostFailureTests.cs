@@ -94,6 +94,16 @@ public sealed class HostFailureTests
         Assert.DoesNotContain(PrivateResponse, report);
         using var json = JsonDocument.Parse(report);
         Assert.Contains("HostOperationFailed", json.RootElement.GetProperty("error").GetString());
+        Assert.Equal(hostile ? typeof(HostileException).FullName : typeof(InvalidOperationException).FullName,
+            json.RootElement.GetProperty("exceptionType").GetString());
+    }
+
+    [Fact]
+    public async Task Timeout_is_a_stable_category_and_its_message_stays_out_of_the_code()
+    {
+        var action = await HostFailure.RunAsync(() => throw new TimeoutException(PrivateResponse));
+        Assert.Equal("HostOperationFailed (Timeout).", action);
+        Assert.DoesNotContain(PrivateResponse, action);
     }
 
     internal const string PrivateResponse = "synthetic-private-native-provider-response";

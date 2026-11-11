@@ -5,8 +5,14 @@
   </Folder>
   <Folder Name="/plugins/">
     <Project Path="plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" />
+    <Project Path="plugins/v2/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
+  </Folder>
+  <Folder Name="/engine/">
+    <Project Path="src/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Workbench.Service.Tests/Workbench.Service.Tests.csproj" />
+    <Project Path="tests/Workbench.TestExecutor.Tests/Workbench.TestExecutor.Tests.csproj" />
+    <Project Path="tests/fixtures/TestExecutor.SyntheticCdp/TestExecutor.SyntheticCdp.csproj" />
   </Folder>
 </Solution>

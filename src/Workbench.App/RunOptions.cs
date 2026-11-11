@@ -110,6 +110,7 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         stage,
         userRoot = UserRoot,
         error = HostFailure.Describe("HostOperationFailed", error),
+        exceptionType = error.GetType().FullName,
         nativeMessage = nativeMessage is null ? null : "NativeFailure",
         errorHResult = $"0x{unchecked((uint)error.HResult):X8}",
         startupStages = StartupStages,

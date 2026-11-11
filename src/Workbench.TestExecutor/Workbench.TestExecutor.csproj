@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Workbench.TestExecutor</RootNamespace>
+    <AssemblyName>Workbench.TestExecutor</AssemblyName>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0-preview.1</InformationalVersion>
+    <Description>Local test execution engine for the first-party preview plugin. No network on its own.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Workbench.TestExecutor.Tests" />
+    <InternalsVisibleTo Include="Workbench.TestExecutor.Windows" />
+    <InternalsVisibleTo Include="Workbench.TestExecutor.WindowsTests" />
+  </ItemGroup>
+  <ItemGroup>
+    <PackageReference Include="JsonSchema.Net" Version="9.6.0" />
+    <PackageReference Include="YamlDotNet" Version="16.3.0" />
+  </ItemGroup>
+  <ItemGroup>
+    <EmbeddedResource Include="Schema\workbench.test-executor.suite.v2.schema.json">
+      <LogicalName>Workbench.TestExecutor.suite.v2.schema.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Schema\workbench.test-executor.failure-report.v2.schema.json">
+      <LogicalName>Workbench.TestExecutor.failure-report.v2.schema.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Schema\workbench.test-executor.settings.v2.schema.json">
+      <LogicalName>Workbench.TestExecutor.settings.v2.schema.json</LogicalName>
+    </EmbeddedResource>
+    <EmbeddedResource Include="Samples\synthetic-suite.json">
+      <LogicalName>Workbench.TestExecutor.synthetic-suite.json</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+</Project>

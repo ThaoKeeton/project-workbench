@@ -77,6 +77,7 @@ public sealed class NativeProbeEvidenceTests
         Assert.Equal(2, saved.RootElement.GetProperty("observations").GetProperty("workerPublication").GetProperty("runs").GetInt32());
         Assert.Equal("user-request", saved.RootElement.GetProperty("observations").GetProperty("startAssertionReason").GetString());
         Assert.Equal("NativeProbeFailed (PluginFailure).", saved.RootElement.GetProperty("error").GetString());
+        Assert.Equal(typeof(HostileException).FullName, saved.RootElement.GetProperty("exceptionType").GetString());
         new RunOptions(true, disk.User, report).WriteFailure("initialize-or-native-smoke", original);
         // A later generic cleanup failure may replace the principal report,
         // but must not replace the first probe failure's independent evidence.

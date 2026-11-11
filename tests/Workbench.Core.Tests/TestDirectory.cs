@@ -79,10 +79,40 @@ internal sealed class TestDirectory : IDisposable
                     // Leave only these owned files/ancestors; do not hide unrelated IO failures.
                     retainedMappedFile = true;
                 }
+                catch (Exception error) when ((error is IOException or UnauthorizedAccessException) && IsOwnerLock(path))
+                {
+                    if (!TryDeleteReleasedLock(path)) throw;
+                }
             }
         }
         if (!retainedMappedFile) Directory.Delete(directory);
         return retainedMappedFile;
+    }
+
+    private static bool IsOwnerLock(string path) =>
+        Path.GetFileName(path).Equals("owner.lock", StringComparison.OrdinalIgnoreCase);
+
+    private static bool TryDeleteReleasedLock(string path)
+    {
+        for (var attempt = 0; attempt < 20; attempt++)
+        {
+            Thread.Sleep(50);
+            try
+            {
+                using (new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.None)) { }
+                File.Delete(path);
+                return true;
+            }
+            catch (FileNotFoundException)
+            {
+                return true;
+            }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+                // The owner has not released the exclusive handle yet.
+            }
+        }
+        return false;
     }
 
     private static bool IsMappedFixture(string path) => OperatingSystem.IsWindows()
