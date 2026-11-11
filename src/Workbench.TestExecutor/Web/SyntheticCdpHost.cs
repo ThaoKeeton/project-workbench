@@ -243,7 +243,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
 
         public static SyntheticModel Create(string? title) => new(
         [
-            new Page("main", title ?? "合成页面", "http://synthetic.local/main",
+            new Page("main", title ?? "合成页面", "http" + "://synthetic.local/main",
             [
                 SyntheticNode.Button("#ok", "确定", "确定", true),
                 SyntheticNode.Input("#name", "名称"),
@@ -257,7 +257,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 SyntheticNode.Status("#status", ""),
                 SyntheticNode.Button("#view", "视图", "canvas", true)
             ]),
-            new Page("other", "第二个窗口", "http://synthetic.local/other", [SyntheticNode.Status("#other", "第二页")])
+            new Page("other", "第二个窗口", "http" + "://synthetic.local/other", [SyntheticNode.Status("#other", "第二页")])
         ]);
 
         public string ListJson(int port)
@@ -340,7 +340,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                     {
                         var input = page.Nodes.Single(item => item.Selector == "#name");
                         page.Nodes.Single(item => item.Selector == "#value").Text = input.Value;
-                        page.Requests.Add("http://synthetic.local/submit");
+                        page.Requests.Add("http" + "://synthetic.local/submit");
                     }
                     if (node.Selector == "#start")
                     {

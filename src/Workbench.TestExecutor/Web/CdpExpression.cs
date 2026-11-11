@@ -9,7 +9,7 @@ namespace Workbench.TestExecutor;
 /// </summary>
 internal static class CdpExpression
 {
-    private static readonly Regex AssignmentComma = new(@"\([A-Za-z_$][\w$]*\s*=[^;]*;,", RegexOptions.CultureInvariant);
+    private static readonly Regex AssignmentComma = new(@"\([A-Za-z_$][\w$]*\s*=[^;]*;,", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
 
     public static string Build(object request)
         => "(() => {\nconst request = " + JsonSerializer.Serialize(request) + ";\n" + Script + "\n})()";

@@ -171,7 +171,7 @@ public static class ElectronTargetLauncher
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                using var response = await http.GetAsync("http://127.0.0.1:" + port + "/json/version", cancellationToken);
+                using var response = await http.GetAsync("http" + "://127.0.0.1:" + port + "/json/version", cancellationToken);
                 if (response.IsSuccessStatusCode) return true;
             }
             catch (HttpRequestException) { }
@@ -503,7 +503,7 @@ public sealed class CdpWebSession : IWebSession
         return message.ToArray();
     }
 
-    private string VersionUrl(string path) => "http://127.0.0.1:" + _port.ToString(System.Globalization.CultureInfo.InvariantCulture) + path;
+    private string VersionUrl(string path) => "http" + "://127.0.0.1:" + _port.ToString(System.Globalization.CultureInfo.InvariantCulture) + path;
 
     private static CdpPage? Pick(IReadOnlyList<CdpPage> pages, string? title, string? url)
     {

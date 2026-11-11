@@ -28,7 +28,7 @@ internal sealed class SampleForm : Form
         var browse = new Button { Name = "sample-browse", Text = "浏览", Location = new Point(160, 72), Width = 120 };
         browse.Click += (_, _) =>
         {
-            using var dialog = new OpenFileDialog { Title = "打开" };
+            using var dialog = new OpenFileDialog { Title = "打开", CheckFileExists = false, CheckPathExists = false };
             if (dialog.ShowDialog(this) == DialogResult.OK)
             {
                 var name = Path.GetFileName(dialog.FileName);

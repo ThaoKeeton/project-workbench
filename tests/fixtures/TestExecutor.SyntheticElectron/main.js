@@ -25,8 +25,14 @@ function createWindow() {
     }
   });
   window.setTitle("合成电子样品");
-  window.loadFile(path.join(__dirname, "index.html"));
+  window.loadFile(path.join(__dirname, "index.html")).catch((error) => {
+    console.error(error);
+    app.exit(1);
+  });
 }
 
-app.whenReady().then(createWindow);
+app.whenReady().then(createWindow).catch((error) => {
+  console.error(error);
+  app.exit(1);
+});
 app.on("window-all-closed", () => app.quit());
