@@ -100,7 +100,8 @@ public sealed class FlaUiSession : IUiAutomationSession
                 element.Patterns.Invoke.Pattern.Invoke();
                 return UiActionResult.Ok(element.Name);
             case "expand":
-                element.Patterns.ExpandCollapse.Pattern.Expand();
+                if (element.Patterns.ExpandCollapse.IsSupported) element.Patterns.ExpandCollapse.Pattern.Expand();
+                else element.Click();
                 return UiActionResult.Ok(element.Name);
             case "set-value":
                 element.Patterns.Value.Pattern.SetValue(action.Text ?? "");
@@ -149,7 +150,11 @@ public sealed class FlaUiSession : IUiAutomationSession
         var window = Window();
         AutomationElement? found = null;
         if (selector.AutomationId is { Length: > 0 })
-            found = window.FindFirstDescendant(cf => cf.ByAutomationId(selector.AutomationId));
+        {
+            var automationId = selector.AutomationId;
+            found = window.FindFirstDescendant(cf => cf.ByAutomationId(automationId))
+                ?? window.FindFirstDescendant(cf => cf.ByName(automationId));
+        }
         if (found is null && selector.Name is { Length: > 0 })
             found = window.FindFirstDescendant(cf => cf.ByName(selector.Name));
         return found;
@@ -162,7 +167,7 @@ public sealed class FlaUiSession : IUiAutomationSession
         _application ??= Application.Attach(_process);
         var window = _application.GetMainWindow(_automation, TimeSpan.FromSeconds(10));
         if (window is null) throw new ElementNotAvailableException("window");
-        if (_windowTitle is { Length: > 0 } && !string.Equals(window.Name, _windowTitle, StringComparison.Ordinal))
+        if (_windowTitle is { Length: > 0 } && window.Name?.Contains(_windowTitle, StringComparison.Ordinal) != true)
             throw new ElementNotAvailableException("window");
         _window = window;
         return window;

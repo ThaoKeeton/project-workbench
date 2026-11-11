@@ -32,7 +32,7 @@ public sealed class FlaUiSampleTests
             });
             var sink = new CollectingSink();
             await runner.RunAsync(Suite(), new RunRequest("win-run", new ExecutionPolicy(true, false, ExportMode.Local, null, null, "computer-use-preview"), reports), sink, CancellationToken.None);
-            Assert.Equal("passed", sink.Summary?.Status);
+            Assert.True(sink.Summary?.Status == "passed", string.Join(" | ", sink.Steps.Select(step => step.StepId + "=" + step.Status + "/" + step.ErrorType + "/" + step.Message)));
             Assert.DoesNotContain(sink.Steps, step => step.Status == "failed");
             await using var session = await new FlaUiSessionFactory().OpenAsync(new ApplicationTarget("TestExecutor.SampleApp", "合成被测窗口"), CancellationToken.None);
             var raw = await session.CaptureAsync(CancellationToken.None);

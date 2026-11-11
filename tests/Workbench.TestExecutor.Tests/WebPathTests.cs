@@ -63,24 +63,9 @@ public sealed class WebPathTests
     [Fact]
     public async Task Launcher_starts_the_synthetic_electron_stand_in_and_attaches_by_title()
     {
-        var dir = Path.Combine(AppContext.BaseDirectory, "synthetic-cdp");
-        var dll = Path.Combine(dir, "TestExecutor.SyntheticCdp.dll");
-        Assert.True(File.Exists(dll));
-        var apphost = Path.Combine(dir, OperatingSystem.IsWindows() ? "TestExecutor.SyntheticCdp.exe" : "TestExecutor.SyntheticCdp");
-        string executable;
-        IReadOnlyList<string> arguments;
-        if (File.Exists(apphost))
-        {
-            if (!OperatingSystem.IsWindows())
-                File.SetUnixFileMode(apphost, File.GetUnixFileMode(apphost) | UnixFileMode.UserExecute);
-            executable = apphost;
-            arguments = ["--window-title=自定义标题"];
-        }
-        else
-        {
-            executable = DotnetMuxer();
-            arguments = ["exec", dll, "--window-title=自定义标题"];
-        }
+        var dll = FindSyntheticDll();
+        var executable = DotnetMuxer();
+        IReadOnlyList<string> arguments = ["exec", dll, "--window-title=自定义标题"];
         var port = ElectronTargetLauncher.FreePort();
         var launched = await ElectronTargetLauncher.LaunchAsync(new ApplicationTarget(null, "自定义标题", port, executable, arguments, new Dictionary<string, string> { ["SYNTHETIC_MARKER"] = "synthetic" }), CancellationToken.None);
         await using (launched)
@@ -240,6 +225,26 @@ public sealed class WebPathTests
         Assert.All(handler.Bodies, body => Assert.DoesNotContain("zz-synthetic-credential-zz", body, StringComparison.Ordinal));
         var closed = await CdpWebSession.ConnectAsync(1, null, null, CancellationToken.None);
         Assert.Null(closed);
+    }
+
+    private static string FindSyntheticDll()
+    {
+        var staged = Path.Combine(AppContext.BaseDirectory, "synthetic-cdp", "TestExecutor.SyntheticCdp.dll");
+        if (File.Exists(staged)) return staged;
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var depth = 0; depth < 8 && dir is not null; depth++, dir = dir.Parent)
+        {
+            foreach (var relative in new[]
+            {
+                Path.Combine("tests", "fixtures", "TestExecutor.SyntheticCdp", "bin", "Release", "net10.0", "TestExecutor.SyntheticCdp.dll"),
+                Path.Combine("fixtures", "TestExecutor.SyntheticCdp", "bin", "Release", "net10.0", "TestExecutor.SyntheticCdp.dll")
+            })
+            {
+                var candidate = Path.Combine(dir.FullName, relative);
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        throw new FileNotFoundException("The synthetic CDP host was not built.", staged);
     }
 
     private static string DotnetMuxer()
