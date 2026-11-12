@@ -31,10 +31,10 @@ test("project switch updates the current project", async ({ page }) => {
   await expect(page.locator(".context-project")).toContainText("灯塔实验");
 });
 
-test("sample cases stay inside the test design plugin", async ({ page }) => {
+test("sample cases stay on their own local page", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await chooseTheme(page, "深色");
-  await page.getByRole("button", { name: "测试设计" }).click();
+  await page.goto("/plugins/test-cases");
   const step = page.getByRole("textbox", { name: "EX-001 步骤" });
   await expect(step).toHaveValue("启用本地插件");
   await step.fill("查看本地示例");
@@ -42,6 +42,41 @@ test("sample cases stay inside the test design plugin", async ({ page }) => {
   await expect(page.getByRole("status")).toHaveText("已保存到本机，未发送。");
   await page.reload();
   await expect(page.getByRole("textbox", { name: "EX-001 步骤" })).toHaveValue("查看本地示例");
+});
+
+test("launcher opens the synthetic test dashboard", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "测试设计" }).click();
+  await expect(page.getByRole("heading", { name: "测试设计" })).toBeVisible();
+  await expect(page.getByRole("note")).toContainText("不替代人工验收");
+  await expect(page.getByRole("cell", { name: "SYN-TC-001", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "未验收" }).first()).toBeVisible();
+});
+
+test("a local standup file becomes today's draft and ding send stays closed", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/plugin/upcam");
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const notes = `日期: ${today}\n\n事项: SYN-044\n标题: 本机导入\n负责人: 界面\n状态: 进行中\n发言: 这条来自本机文件。\n`;
+  await page.getByLabel("选择站会文件", { exact: true }).setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from(notes) });
+  await expect(page.getByRole("cell", { name: "SYN-044" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "界面" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("已从本机导入，未发送。");
+  await page.reload();
+  await expect(page.getByRole("cell", { name: "SYN-044" })).toBeVisible();
+
+  const sends: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/actions/send")) sends.push(request.url());
+  });
+  await page.goto("/plugin/ding");
+  await page.getByRole("button", { name: "载入合成样本" }).click();
+  await page.getByRole("button", { name: "按需分析" }).click();
+  await expect(page.getByText("登录页对照出现 3 次")).toBeVisible();
+  await expect(page.getByRole("button", { name: "发送已关闭" })).toBeDisabled();
+  await page.getByRole("button", { name: "发送已关闭" }).click({ force: true });
+  expect(sends).toEqual([]);
 });
 
 test("follow system tracks the color scheme", async ({ page }) => {
@@ -97,7 +132,26 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.goto("/plugin/upcam");
       await expect(page.getByRole("heading", { name: "站会日报" })).toBeVisible();
       await expect(page.getByText("自动发送已关闭")).toBeVisible();
+      await page.getByRole("button", { name: "载入合成样本" }).click();
+      await expect(page.getByRole("cell", { name: "SYN-014" })).toBeVisible();
+      await expect(page.getByRole("cell", { name: "界面" })).toBeVisible();
+      await expect(page.getByText("登录页今天完成对照，明日交给合成检查。")).toBeVisible();
+      await expect(page.getByRole("status")).toHaveText("已载入合成样本，未发送。");
+      await shot(page, `plugin-upcam-${theme}`);
       await shot(page, `plugin-${theme}`);
+      await page.goto("/plugin/ding");
+      await page.getByRole("button", { name: "载入合成样本" }).click();
+      await page.getByRole("button", { name: "按需分析" }).click();
+      await expect(page.getByText("登录页对照出现 3 次")).toBeVisible();
+      await expect(page.getByText("09 时有 5 条消息")).toBeVisible();
+      await expect(page.getByRole("button", { name: "发送已关闭" })).toBeDisabled();
+      await shot(page, `plugin-ding-${theme}`);
+      await page.goto("/plugin/test");
+      await expect(page.getByRole("heading", { name: "测试设计" })).toBeVisible();
+      await expect(page.getByRole("note")).toContainText("不替代人工验收");
+      await expect(page.getByRole("cell", { name: "SYN-TC-006", exact: true }).first()).toBeVisible();
+      await expect(page.getByRole("cell", { name: "未验收" }).first()).toBeVisible();
+      await shot(page, `plugin-test-${theme}`);
       await page.goto("/diagnostics");
       await expect(page.getByText("仅本机回环")).toBeVisible();
       await expect(page.getByText("自动发送：关闭")).toBeVisible();

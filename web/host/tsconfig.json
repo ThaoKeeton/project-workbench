@@ -19,5 +19,5 @@
       "react/jsx-runtime": ["node_modules/@types/react/jsx-runtime.d.ts"]
     }
   },
-  "include": ["src", "../../plugins/v2/Workbench.TestCases.V2/ui"]
+  "include": ["src", "../../plugins/v2/Workbench.TestCases.V2/ui", "../../plugins/v2/Workbench.UpcamStandup.V2/ui", "../../plugins/v2/Workbench.DingTalkInsights.V2/ui", "../../plugins/v2/Workbench.TestingDesign.V2/ui"]
 }

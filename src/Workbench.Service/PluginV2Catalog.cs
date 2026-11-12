@@ -120,7 +120,7 @@ internal static partial class PluginV2Catalog
                     Loaded = true,
                     DiagnosticCodes = [],
                     Permissions = permissions,
-                    UiPath = manifest.Id == "com.projectworkbench.test-cases.v2" ? SampleUiPath : null,
+                    UiPath = UiPathFor(manifest.Id),
                     Module = module,
                     GrantedPermissions = granted
                 };
@@ -188,6 +188,15 @@ internal static partial class PluginV2Catalog
         Loaded = false,
         DiagnosticCodes = [code],
         Permissions = []
+    };
+
+    private static string? UiPathFor(string id) => id switch
+    {
+        "com.projectworkbench.test-cases.v2" => SampleUiPath,
+        "com.projectworkbench.upcam-standup.v2" => "/plugin/upcam",
+        "com.projectworkbench.dingtalk-insights.v2" => "/plugin/ding",
+        "com.projectworkbench.testing-design.v2" => "/plugin/test",
+        _ => null
     };
 
     private static string SafeFolder(string directory)

@@ -416,9 +416,10 @@ jobs:
           npm ci --ignore-scripts
           npm rebuild esbuild
           ./node_modules/.bin/playwright install --with-deps chromium
-      - name: Typecheck, build, and run Linux Playwright tests
+      - name: Typecheck, unit-test, build, and run Linux Playwright tests
         working-directory: web/host
         run: |
+          npm run test:unit
           npm run build
           npm run test:e2e
       - uses: actions/upload-artifact@v7.0.2
@@ -546,7 +547,7 @@ jobs:
           # project directory, so a repo-relative path is invisible to the plugin project.
           web_lcov="$(pwd)/web/host/coverage/lcov.info"
           shell_lcov="$(pwd)/desktop/shell/coverage/lcov.info"
-          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,plugins/v2/Workbench.UpcamStandup.V2/ui,plugins/v2/Workbench.DingTalkInsights.V2/ui,plugins/v2/Workbench.TestingDesign.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
           dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
           dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
           npm ci --ignore-scripts --prefix web/host

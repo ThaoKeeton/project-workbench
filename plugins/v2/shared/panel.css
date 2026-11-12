@@ -1,0 +1,32 @@
+.plugin-banner {
+  margin: 16px 0;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.plugin-table { width: 100%; border-collapse: collapse; margin: 8px 0 20px; }
+.plugin-table th, .plugin-table td {
+  text-align: left;
+  padding: 8px 12px 8px 0;
+  border-bottom: 1px solid var(--border);
+  font-weight: 400;
+  vertical-align: top;
+}
+.plugin-table th { color: var(--text-muted); font-size: 12px; }
+.plugin-table caption { text-align: left; font-weight: 500; margin-bottom: 8px; }
+.file-btn { position: relative; display: inline-flex; align-items: center; cursor: pointer; }
+.file-btn input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+.digest button:disabled, .insights button:disabled {
+  color: var(--text-muted);
+  background: var(--surface-2);
+}
+.speech { margin: 8px 0; }
+.evidence { color: var(--text-secondary); }
+.evidence span { font-family: var(--font-mono); color: var(--text-muted); margin-right: 8px; }

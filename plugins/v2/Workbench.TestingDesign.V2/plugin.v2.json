@@ -1,0 +1,23 @@
+{
+  "contract": "workbench.plugin.v2",
+  "contractVersion": "2.0.0-preview.1",
+  "id": "com.projectworkbench.testing-design.v2",
+  "name": "测试设计",
+  "version": "0.1.0",
+  "description": "列出合成检查的用例和运行记录。不执行测试，不替代人工验收，不连接外部系统。",
+  "autoSend": false,
+  "backend": {
+    "entryAssembly": "Workbench.TestingDesign.V2.dll",
+    "entryType": "Workbench.TestingDesign.V2.TestingDesignModule"
+  },
+  "ui": {
+    "kind": "web-package",
+    "module": "./ui/TestingPanel.tsx",
+    "mount": "embedded"
+  },
+  "permissions": [
+    { "id": "project.read", "reason": "按当前项目放置合成看板副本", "sensitive": false },
+    { "id": "plugin.data.read", "reason": "读取本插件自己的合成看板", "sensitive": false },
+    { "id": "plugin.data.write", "reason": "把合成看板副本写入本插件自己的目录", "sensitive": false }
+  ]
+}

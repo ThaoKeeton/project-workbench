@@ -7,7 +7,7 @@ import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from
 import { Confirm } from "./market";
 import { Shell } from "./shell";
 import { applyTheme, readStoredSetting, type ThemeSetting } from "./theme";
-import { DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SettingsPage } from "./workspace";
+import { DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SampleCasesPage, SettingsPage } from "./workspace";
 
 export type Snapshot = {
   info: Info;
@@ -171,6 +171,7 @@ export function App() {
           <Route path="/plugin/:id/stopped" element={<PluginWorkspace client={client} crashed remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
           <Route path="/plugin/:id/empty/:scene" element={<PluginEmpty client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
           <Route path="/plugin/:id" element={<PluginWorkspace client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
+          <Route path="/plugins/test-cases" element={<SampleCasesPage client={client} />} />
         </Routes>
       ) : null}
       {location.pathname !== "/" ? palette : null}

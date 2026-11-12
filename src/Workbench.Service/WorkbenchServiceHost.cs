@@ -13,6 +13,7 @@ namespace Workbench.Service;
 public sealed class WorkbenchServiceHost : IAsyncDisposable
 {
     public const string ApiVersion = "2.0.0-preview.1";
+    private const int ActionBodyLimit = 262_144;
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
     private readonly WebApplication _app;
     private readonly PluginManager _plugins;
@@ -207,6 +208,22 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             return await HandlePluginAsync(id, "cases.put", body, cancellationToken);
         });
         app.MapPost("/api/v2/plugins/{id}/export", (string id, CancellationToken cancellationToken) => HandlePluginAsync(id, "cases.export", null, cancellationToken));
+        app.MapGet("/api/v2/plugins/{id}/actions/{action}", (string id, string action, CancellationToken cancellationToken) =>
+            IsPluginAction(action)
+                ? HandlePluginAsync(id, action, null, cancellationToken)
+                : Task.FromResult<IResult>(Results.Json(new { error = "NotFound" }, Json, statusCode: StatusCodes.Status404NotFound)));
+        app.MapPost("/api/v2/plugins/{id}/actions/{action}", async (string id, string action, HttpRequest request, CancellationToken cancellationToken) =>
+        {
+            if (!IsPluginAction(action))
+                return Results.Json(new { error = "NotFound" }, Json, statusCode: StatusCodes.Status404NotFound);
+            if (request.ContentLength is > ActionBodyLimit)
+                return Results.Json(new { error = "PayloadTooLarge" }, Json, statusCode: StatusCodes.Status413PayloadTooLarge);
+            using var reader = new StreamReader(request.Body);
+            var body = await reader.ReadToEndAsync(cancellationToken);
+            if (body.Length > ActionBodyLimit)
+                return Results.Json(new { error = "PayloadTooLarge" }, Json, statusCode: StatusCodes.Status413PayloadTooLarge);
+            return await HandlePluginAsync(id, action, body.Length == 0 ? null : body, cancellationToken);
+        });
         app.MapFallback(async context =>
         {
             if (context.Request.Path.StartsWithSegments("/api"))
@@ -361,6 +378,16 @@ public sealed class WorkbenchServiceHost : IAsyncDisposable
             _ => StatusCodes.Status400BadRequest
         };
         return Results.Json(new { error = error.ErrorCode }, Json, statusCode: status);
+    }
+
+    private static bool IsPluginAction(string? action)
+    {
+        if (action is not { Length: > 0 and <= 32 } || action[0] is < 'a' or > 'z') return false;
+        foreach (var character in action)
+        {
+            if (character is not ((>= 'a' and <= 'z') or (>= '0' and <= '9') or '-')) return false;
+        }
+        return true;
     }
 
     private static string Contain(string root, string relative)

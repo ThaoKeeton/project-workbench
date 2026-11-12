@@ -39,9 +39,9 @@ export const pinnedPlugins: Array<{ id: PluginId; name: string; icon: IconName; 
 ];
 
 export const todayItems = [
-  { time: "09:20", source: "钉钉 Insights", title: "站会纪要已生成，待你确认后才会发送" },
-  { time: "09:12", source: "UPCAM", title: "XH-128 登录页视觉走查仍在进行" },
-  { time: "昨天", source: "测试设计", title: "合成检查 36 / 36 通过，不替代人工验收" },
+  { time: "09:20", source: "钉钉 Insights", title: "合成导出可按需分析，发送保持关闭" },
+  { time: "09:12", source: "UPCAM", title: "SYN-014 登录页对照仍在进行" },
+  { time: "昨天", source: "测试设计", title: "合成检查 6 / 6 通过，不替代人工验收" },
 ];
 
 export const recentPlugins = [

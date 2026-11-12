@@ -16,7 +16,7 @@ export default defineConfig({
     host: "127.0.0.1",
     port: 4173,
     strictPort: true,
-    fs: { allow: [root, fileURLToPath(new URL("../../plugins/v2/Workbench.TestCases.V2/ui", import.meta.url))] },
+    fs: { allow: [root, fileURLToPath(new URL("../../plugins/v2", import.meta.url))] },
     proxy: {
       "/api": {
         target: "http://127.0.0.1:4317",
