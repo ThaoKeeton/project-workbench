@@ -92,6 +92,29 @@ describe("service supervisor", () => {
     expect(fs.existsSync(path.join(root, SERVICE_PID_FILE))).toBe(false);
   });
 
+  it("starts the packaged executable directly", async () => {
+    const root = tempDir();
+    const executable = path.join(root, "Workbench.Service.exe");
+    const fake = fakeService([`listening: http://127.0.0.1:5152`, `session-token: ${token}`]);
+    const running = await attachOrStart({
+      repoRoot: root,
+      projectPath: executable,
+      userRoot: root,
+      uiDist: path.join(root, "ui"),
+      attach: false,
+      dotnetPath: "dotnet",
+      serviceExecutable: executable,
+      spawnImpl: fake.spawn,
+      control: fake.control,
+    });
+    expect(running.baseUrl).toBe("http://127.0.0.1:5152");
+    expect(fake.args[0]?.[0]).toBe(executable);
+    expect(fake.args[0]).not.toContain("run");
+    expect(fake.args[0]).not.toContain("--project");
+    expect(fake.args[0]).not.toContain("--allow-lan");
+    await running.stop();
+  });
+
   it("stops a failed process without writing a session file", async () => {
     const root = tempDir();
     const stdout = new PassThrough();

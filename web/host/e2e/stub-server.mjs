@@ -1,9 +1,13 @@
 import { createHash } from "node:crypto";
 import { createServer } from "node:http";
+import { analyzeChat, dashboardDocument, dingImport, dingSample, emptyDigest, emptyInsights, insightState, sendDisabled, upcamImport, upcamSample } from "./preview-plugins.mjs";
 
 const token = "preview-session";
 const port = 4317;
 const sampleId = "com.projectworkbench.test-cases.v2";
+const upcamId = "com.projectworkbench.upcam-standup.v2";
+const dingId = "com.projectworkbench.dingtalk-insights.v2";
+const testingId = "com.projectworkbench.testing-design.v2";
 const magic = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11";
 const sockets = new Set();
 
@@ -30,6 +34,9 @@ function fresh() {
       { id: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", name: "灯塔实验", isArchived: false },
     ],
     cases: {},
+    digests: {},
+    chats: {},
+    insights: {},
     themeSetting: "system",
   };
 }
@@ -158,6 +165,65 @@ function readBody(request) {
   });
 }
 
+async function pluginAction(request, url) {
+  const project = state.activeProjectId;
+  if (request.method === "GET" && url.pathname === `/api/v2/plugins/${upcamId}/actions/draft`) {
+    return { status: 200, body: state.digests[project] ?? emptyDigest() };
+  }
+  if (request.method === "POST" && url.pathname === `/api/v2/plugins/${upcamId}/actions/sample`) {
+    const document = upcamSample();
+    state.digests[project] = document;
+    return { status: 200, body: document };
+  }
+  if (request.method === "POST" && url.pathname === `/api/v2/plugins/${upcamId}/actions/import`) {
+    const result = upcamImport(await jsonBody(request));
+    if (result.status === 200) state.digests[project] = result.body;
+    return result;
+  }
+  if (request.method === "GET" && url.pathname === `/api/v2/plugins/${dingId}/actions/state`) {
+    return { status: 200, body: state.insights[project] ?? emptyInsights() };
+  }
+  if (request.method === "POST" && url.pathname === `/api/v2/plugins/${dingId}/actions/sample`) {
+    const loaded = dingSample();
+    state.chats[project] = loaded;
+    const view = insightState(loaded.chat, loaded.source);
+    state.insights[project] = view;
+    return { status: 200, body: view };
+  }
+  if (request.method === "POST" && url.pathname === `/api/v2/plugins/${dingId}/actions/import`) {
+    const result = dingImport(await jsonBody(request));
+    if (result.status !== 200) return result;
+    state.chats[project] = result;
+    const view = insightState(result.chat, result.source);
+    state.insights[project] = view;
+    return { status: 200, body: view };
+  }
+  if (request.method === "POST" && url.pathname === `/api/v2/plugins/${dingId}/actions/analyze`) {
+    const stored = state.chats[project];
+    if (!stored) return { status: 409, body: { error: "NothingImported" } };
+    const view = analyzeChat(stored.chat, stored.source);
+    state.insights[project] = view;
+    return { status: 200, body: view };
+  }
+  if (request.method === "POST" && url.pathname === `/api/v2/plugins/${dingId}/actions/send`) {
+    return { status: 409, body: sendDisabled() };
+  }
+  if (request.method === "GET" && url.pathname === `/api/v2/plugins/${testingId}/actions/dashboard`) {
+    return { status: 200, body: dashboardDocument() };
+  }
+  return null;
+}
+
+async function jsonBody(request) {
+  const text = await readBody(request);
+  if (text.length > 262144) return { error: "PayloadTooLarge" };
+  try {
+    return text ? JSON.parse(text) : {};
+  } catch {
+    return null;
+  }
+}
+
 function validCases(body) {
   if (!body || body.schema !== "workbench.test-cases.v2.preview" || body.schemaVersion !== 2) return null;
   if (typeof body.suiteName !== "string" || body.suiteName.length === 0 || body.suiteName.length > 80) return null;
@@ -239,6 +305,8 @@ const server = createServer(async (request, response) => {
     response.end(csv);
     return;
   }
+  const pluginResult = await pluginAction(request, url);
+  if (pluginResult) return sendJson(response, pluginResult.status, pluginResult.body);
   sendJson(response, 404, { error: "NotFound" });
 });
 

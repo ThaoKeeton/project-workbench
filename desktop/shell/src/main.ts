@@ -7,6 +7,7 @@ import {
   WINDOW_DEFAULT_WIDTH,
   WINDOW_MIN_HEIGHT,
   WINDOW_MIN_WIDTH,
+  findPackagedService,
   findRepoRoot,
   navigationAllowed,
   pageBackground,
@@ -85,17 +86,19 @@ process.on("SIGHUP", () => {
 
 app.whenReady().then(async () => {
   try {
-    const repoRoot = findRepoRoot(__dirname);
-    const uiDist = resolveUiDist(flags.uiDist, repoRoot);
+    const packagedService = findPackagedService([path.dirname(process.execPath), __dirname], process.platform);
+    const repoRoot = packagedService ? path.dirname(packagedService) : findRepoRoot(__dirname);
+    const uiDist = resolveUiDist(flags.uiDist ?? (packagedService ? path.join(repoRoot, "ui") : undefined), repoRoot);
     running = await attachOrStart({
       repoRoot,
-      projectPath: flags.serviceProject ? path.resolve(flags.serviceProject) : path.join(repoRoot, "src", "Workbench.Service", "Workbench.Service.csproj"),
+      projectPath: packagedService ?? (flags.serviceProject ? path.resolve(flags.serviceProject) : path.join(repoRoot, "src", "Workbench.Service", "Workbench.Service.csproj")),
       userRoot,
       v1Plugins: flags.v1Plugins ? path.resolve(flags.v1Plugins) : undefined,
       v2Plugins: flags.v2Plugins ? path.resolve(flags.v2Plugins) : undefined,
       uiDist,
       attach: flags.attach,
-      dotnetPath: resolveDotnet(process.env, process.platform),
+      dotnetPath: packagedService ?? resolveDotnet(process.env, process.platform),
+      serviceExecutable: packagedService ?? undefined,
     });
     const window = openWindow(running);
     await withTimeout(window.loadURL(running.baseUrl), 30_000, "page-load-timeout");

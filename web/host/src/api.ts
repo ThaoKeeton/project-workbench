@@ -1,3 +1,7 @@
+import type { InsightState } from "../../../plugins/v2/Workbench.DingTalkInsights.V2/ui/DingPanel";
+import type { Dashboard } from "../../../plugins/v2/Workbench.TestingDesign.V2/ui/TestingPanel";
+import type { Digest, NoteFile } from "../../../plugins/v2/Workbench.UpcamStandup.V2/ui/UpcamPanel";
+
 export type Info = {
   product: string;
   apiVersion: string;
@@ -39,6 +43,8 @@ export type Diagnostics = {
   nativeWindow: { minimumWidth: number };
 };
 
+export type { Dashboard, Digest, InsightState, NoteFile };
+
 export type CaseRow = { id: string; action: string; expected: string };
 
 export type CaseDocument = {
@@ -49,6 +55,9 @@ export type CaseDocument = {
 };
 
 const sampleId = "com.projectworkbench.test-cases.v2";
+const upcamId = "com.projectworkbench.upcam-standup.v2";
+const dingId = "com.projectworkbench.dingtalk-insights.v2";
+const testingId = "com.projectworkbench.testing-design.v2";
 
 export class ApiClient {
   constructor(private readonly token: string) {}
@@ -95,6 +104,38 @@ export class ApiClient {
   async exportCases(): Promise<Blob> {
     const response = await this.send(`/api/v2/plugins/${sampleId}/export`, { method: "POST" });
     return response.blob();
+  }
+
+  upcamDraft(): Promise<Digest> {
+    return this.json(`/api/v2/plugins/${upcamId}/actions/draft`);
+  }
+
+  upcamImport(files: NoteFile[]): Promise<Digest> {
+    return this.json(`/api/v2/plugins/${upcamId}/actions/import`, { method: "POST", body: JSON.stringify({ files }) });
+  }
+
+  upcamSample(): Promise<Digest> {
+    return this.json(`/api/v2/plugins/${upcamId}/actions/sample`, { method: "POST", body: "{}" });
+  }
+
+  dingState(): Promise<InsightState> {
+    return this.json(`/api/v2/plugins/${dingId}/actions/state`);
+  }
+
+  dingImport(text: string): Promise<InsightState> {
+    return this.json(`/api/v2/plugins/${dingId}/actions/import`, { method: "POST", body: JSON.stringify({ text }) });
+  }
+
+  dingSample(): Promise<InsightState> {
+    return this.json(`/api/v2/plugins/${dingId}/actions/sample`, { method: "POST", body: "{}" });
+  }
+
+  dingAnalyze(): Promise<InsightState> {
+    return this.json(`/api/v2/plugins/${dingId}/actions/analyze`, { method: "POST", body: "{}" });
+  }
+
+  testingDashboard(): Promise<Dashboard> {
+    return this.json(`/api/v2/plugins/${testingId}/actions/dashboard`);
   }
 
   async openSession(): Promise<boolean> {

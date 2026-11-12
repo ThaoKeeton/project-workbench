@@ -12,7 +12,11 @@ describe("api client", () => {
       const body = init?.body ? JSON.parse(String(init.body)) : null;
       const headers = new Headers(init?.headers);
       expect(headers.get("Authorization")).toBe("Bearer preview-session");
-      if (init?.method === "POST" && String(_input).endsWith("/export")) return new Response("suite", { status: 200 });
+      if (String(_input).includes("/actions/")) {
+      expect(String(_input)).toContain("/api/v2/plugins/com.projectworkbench.");
+      return new Response(JSON.stringify({ ok: true, autoSend: false }), { status: 200 });
+    }
+    if (init?.method === "POST" && String(_input).endsWith("/export")) return new Response("suite", { status: 200 });
       if (init?.method === "POST" && String(_input).endsWith("/session")) return new Response(null, { status: 204 });
       if (init?.method === "PUT") return new Response(JSON.stringify(body ?? { setting: "dark" }), { status: 200 });
       if (String(_input).endsWith("/plugins")) return new Response(JSON.stringify({ plugins: [{ id: "sample" }] }), { status: 200 });
@@ -29,6 +33,14 @@ describe("api client", () => {
     await client.cases();
     await client.saveCases({ schema: "workbench.test-cases.v2.preview", schemaVersion: 2, suiteName: "本地", rows: [] });
     expect(await (await client.exportCases()).text()).toBe("suite");
+    await client.upcamDraft();
+    await client.upcamImport([{ name: "notes.txt", text: "日期" }]);
+    await client.upcamSample();
+    await client.dingState();
+    await client.dingImport("会话");
+    await client.dingSample();
+    await client.dingAnalyze();
+    await client.testingDashboard();
     expect(await client.openSession()).toBe(true);
     expect(await client.theme()).toBe("system");
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ setting: "light" }), { status: 200 })));

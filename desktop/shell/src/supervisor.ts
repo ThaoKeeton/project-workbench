@@ -9,6 +9,7 @@ import {
   readServicePid,
   readSessionDocument,
   redactDiagnostic,
+  directServiceArgs,
   serviceLaunchArgs,
   servicePidDocument,
   sessionDocument,
@@ -50,6 +51,7 @@ export interface ServiceStartOptions {
   uiDist?: string;
   attach: boolean;
   dotnetPath: string;
+  serviceExecutable?: string;
   fetchImpl?: typeof fetch;
   spawnImpl?: SpawnService;
   control?: ProcessControl;
@@ -170,16 +172,19 @@ export async function retireStaleService(options: Pick<ServiceStartOptions, "use
 }
 
 export async function startOwnedService(options: ServiceStartOptions): Promise<RunningService> {
-  const args = serviceLaunchArgs({
-    projectPath: options.projectPath,
+  const shared = {
     userRoot: options.userRoot,
     v1Plugins: options.v1Plugins,
     v2Plugins: options.v2Plugins,
     uiDist: options.uiDist,
-  });
+  };
+  const command = options.serviceExecutable ?? options.dotnetPath;
+  const args = options.serviceExecutable
+    ? directServiceArgs(shared)
+    : serviceLaunchArgs({ projectPath: options.projectPath, ...shared });
   const spawnImpl = options.spawnImpl ?? defaultSpawn;
   const control = options.control ?? hostProcessControl(process.platform);
-  const child = spawnImpl(options.dotnetPath, args, options.repoRoot);
+  const child = spawnImpl(command, args, options.repoRoot);
   const parser = new ServiceOutputParser();
   let stderr = "";
   let exited: number | null = null;

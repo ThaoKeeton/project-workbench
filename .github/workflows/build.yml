@@ -416,9 +416,10 @@ jobs:
           npm ci --ignore-scripts
           npm rebuild esbuild
           ./node_modules/.bin/playwright install --with-deps chromium
-      - name: Typecheck, build, and run Linux Playwright tests
+      - name: Typecheck, unit-test, build, and run Linux Playwright tests
         working-directory: web/host
         run: |
+          npm run test:unit
           npm run build
           npm run test:e2e
       - uses: actions/upload-artifact@v7.0.2
@@ -599,7 +600,7 @@ jobs:
           # project directory, so a repo-relative path is invisible to the plugin project.
           web_lcov="$(pwd)/web/host/coverage/lcov.info"
           shell_lcov="$(pwd)/desktop/shell/coverage/lcov.info"
-          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,tests/fixtures/**,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,plugins/v2/Workbench.UpcamStandup.V2/ui,plugins/v2/Workbench.DingTalkInsights.V2/ui,plugins/v2/Workbench.TestingDesign.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,tests/fixtures/**,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
           dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
           sudo apt-get update
           sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
@@ -647,3 +648,25 @@ jobs:
           echo "Top open issues:"
           curl -fsS -H "Authorization: Bearer ${SONAR_TOKEN}" "https://sonarcloud.io/api/issues/search?componentKeys=ThaoKeeton_project-workbench&pullRequest=${pr}&resolved=false&ps=10&s=SEVERITY&asc=false" | jq '[.issues[] | {severity, type, rule, component, line, message}]' || echo "Issue API was not readable."
           exit "$status"
+  preview-win-x64:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+      - name: Build the Windows x64 preview zip
+        shell: pwsh
+        run: ./scripts/package-v2-preview.ps1 -OutputDirectory ./artifacts/v2-preview
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: workbench-v2-preview-win-x64
+          path: artifacts/v2-preview/*.zip
+          if-no-files-found: error
+          retention-days: 14

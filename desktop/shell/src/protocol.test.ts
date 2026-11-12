@@ -10,6 +10,8 @@ import {
   ShellRejected,
   WINDOW_MIN_HEIGHT,
   WINDOW_MIN_WIDTH,
+  directServiceArgs,
+  findPackagedService,
   findRepoRoot,
   isAcceptableToken,
   isInsidePath,
@@ -166,6 +168,23 @@ describe("shell boundaries", () => {
     expect(resolveUiDist(undefined, root)).toBe(path.join(root, "web", "host", "dist"));
     expect(() => resolveUiDist(undefined, tempDir())).toThrowError("ui-dist-missing");
     expect(() => findRepoRoot(tempDir())).toThrowError("repo-root-missing");
+  });
+
+  it("launches a packaged service executable without dotnet run or lan", () => {
+    const root = tempDir();
+    const nested = path.join(root, "resources", "app", "dist");
+    const executable = path.join(root, "service", "Workbench.Service.exe");
+    fs.mkdirSync(path.dirname(executable), { recursive: true });
+    fs.writeFileSync(executable, "");
+    fs.mkdirSync(nested, { recursive: true });
+    expect(findPackagedService(["", nested, nested], "win32")).toBe(executable);
+    expect(findPackagedService([nested], "linux")).toBeNull();
+    expect(findPackagedService([tempDir()], "win32")).toBeNull();
+    const args = directServiceArgs({ userRoot: path.join(root, "preview"), uiDist: path.join(root, "service", "ui") });
+    expect(args[0]).toBe("--user-root");
+    expect(args).not.toContain("run");
+    expect(args).not.toContain("--allow-lan");
+    expect(() => directServiceArgs({ userRoot: "--allow-lan" })).toThrowError("allow-lan-rejected");
   });
 
   it("keeps navigation, colors, pid files, and diagnostics inside the preview rules", () => {

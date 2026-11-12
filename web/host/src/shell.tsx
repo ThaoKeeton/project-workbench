@@ -76,7 +76,7 @@ export function Shell({
       <div className="shell-body">
         <nav className="rail" aria-label="主导航">
           <RailLink to="/" label="首页" icon="home" end />
-          {pinnedPlugins.filter((plugin) => plugin.id !== "runner").map((plugin) => (
+          {pinnedPlugins.map((plugin) => (
             <button
               key={plugin.id}
               type="button"

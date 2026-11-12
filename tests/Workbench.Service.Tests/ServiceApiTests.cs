@@ -456,6 +456,74 @@ public sealed class ServiceApiTests
         }
     }
 
+    [Fact]
+    public async Task Business_plugins_keep_drafts_local_and_refuse_send()
+    {
+        var root = TempRoot();
+        var catalog = new ProjectWorkspaceCatalog(root);
+        var opened = await catalog.OpenAsync();
+        var created = await catalog.CreateAsync("示例项目", opened.Revision);
+        await using var running = await StartAsync(root);
+        var plugins = (await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins")).GetProperty("plugins");
+        Assert.Equal("/plugin/upcam", Plugin(plugins, "com.projectworkbench.upcam-standup.v2").GetProperty("uiPath").GetString());
+        Assert.Equal("/plugin/ding", Plugin(plugins, "com.projectworkbench.dingtalk-insights.v2").GetProperty("uiPath").GetString());
+        Assert.Equal("/plugin/test", Plugin(plugins, "com.projectworkbench.testing-design.v2").GetProperty("uiPath").GetString());
+        Assert.Equal("Ready", Plugin(plugins, "com.projectworkbench.upcam-standup.v2").GetProperty("state").GetString());
+        Assert.DoesNotContain(Plugin(plugins, "com.projectworkbench.dingtalk-insights.v2").GetProperty("permissions").EnumerateArray(), item => item.GetProperty("id").GetString() == "message.send");
+
+        var sample = await running.Client.PostAsync("/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/sample", TextJson("""{"webhookUrl":"https://example.invalid/hook"}"""));
+        Assert.Equal(HttpStatusCode.OK, sample.StatusCode);
+        var draft = await sample.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.False(draft.GetProperty("autoSend").GetBoolean());
+        Assert.False(draft.GetProperty("delivered").GetBoolean());
+        Assert.Equal("SYN-014", draft.GetProperty("items")[0].GetProperty("id").GetString());
+        Assert.Equal("界面", draft.GetProperty("items")[0].GetProperty("owner").GetString());
+        Assert.DoesNotContain("example.invalid", draft.GetRawText(), StringComparison.Ordinal);
+        var digestPath = Path.Combine(catalog.GetProjectRoot(opened.ActiveProjectId), "v2-plugins", "com.projectworkbench.upcam-standup.v2", "digest.v2.json");
+        Assert.True(File.Exists(digestPath));
+        Assert.DoesNotContain("example.invalid", await File.ReadAllTextAsync(digestPath), StringComparison.Ordinal);
+        Assert.DoesNotContain(root, draft.GetRawText(), StringComparison.Ordinal);
+
+        var projects = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/projects");
+        var switched = await running.Client.PostAsJsonAsync("/api/v2/projects/active", new { id = created.Project.Id, expectedRevision = projects.GetProperty("revision").GetString() });
+        Assert.Equal(HttpStatusCode.OK, switched.StatusCode);
+        var other = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/draft");
+        Assert.False(other.GetProperty("stored").GetBoolean());
+
+        var chat = await running.Client.PostAsync("/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/sample", new StringContent(""));
+        Assert.Equal(HttpStatusCode.OK, chat.StatusCode);
+        Assert.False((await chat.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("analyzed").GetBoolean());
+        var analyzed = await running.Client.PostAsync("/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/analyze", new StringContent(""));
+        var insights = await analyzed.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Contains("登录页对照出现 3 次", insights.GetRawText(), StringComparison.Ordinal);
+        Assert.False(insights.GetProperty("sendEnabled").GetBoolean());
+        var send = await running.Client.PostAsync("/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/send", TextJson("""{"webhookUrl":"https://example.invalid/hook"}"""));
+        Assert.Equal(HttpStatusCode.Conflict, send.StatusCode);
+        var refused = await send.Content.ReadFromJsonAsync<JsonElement>();
+        Assert.Equal("SendDisabled", refused.GetProperty("error").GetString());
+        Assert.False(refused.GetProperty("autoSend").GetBoolean());
+        Assert.DoesNotContain("example.invalid", refused.GetRawText(), StringComparison.Ordinal);
+
+        var board = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins/com.projectworkbench.testing-design.v2/actions/dashboard");
+        Assert.False(board.GetProperty("humanAcceptance").GetBoolean());
+        Assert.Equal("未验收", board.GetProperty("runs")[0].GetProperty("humanAcceptance").GetString());
+        Assert.Equal(6, board.GetProperty("summary").GetProperty("total").GetInt32());
+        var projectRoot = catalog.GetProjectRoot(created.Project.Id);
+        Assert.True(File.Exists(Path.Combine(projectRoot, "v2-plugins", "com.projectworkbench.testing-design.v2", "dashboard.v2.json")));
+        Assert.False(Directory.Exists(Path.Combine(projectRoot, ".workbench-project", "testing")));
+        Assert.Equal(1, JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, ".workspaces", "catalog.json"))).RootElement.GetProperty("schemaVersion").GetInt32());
+
+        var badAction = await running.Client.GetAsync("/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/Send");
+        Assert.Equal(HttpStatusCode.NotFound, badAction.StatusCode);
+        var oversized = await running.Client.PostAsync("/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/import", new StringContent(new string('x', 262145)));
+        Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversized.StatusCode);
+    }
+
+    private static JsonElement Plugin(JsonElement plugins, string id)
+        => plugins.EnumerateArray().Single(item => item.GetProperty("id").GetString() == id);
+
+    private static StringContent TextJson(string json) => new(json, Encoding.UTF8, "application/json");
+
     private static async Task<string> ReceiveAsync(ClientWebSocket socket)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));

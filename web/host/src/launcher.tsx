@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
-import { devices, pinnedPlugins, recentPlugins, todayItems, type DeviceId } from "./catalog";
+import { devices, pinnedPlugins, recentPlugins, todayItems, type DeviceId, type IconName } from "./catalog";
 import { Icon } from "./icons";
 import { Keycap } from "./shell";
 
@@ -50,7 +50,7 @@ export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void
   );
 }
 
-function PluginTile({ id, name, hint, icon }: { id: string; name: string; hint: string; icon: "clipboard" | "chat" | "flask" }) {
+function PluginTile({ id, name, hint, icon }: { id: string; name: string; hint: string; icon: IconName }) {
   const navigate = useNavigate();
   return (
     <button type="button" className="tile" onClick={() => { void navigate(`/plugin/${id}`); }}>

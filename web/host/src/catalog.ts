@@ -39,15 +39,16 @@ export const pinnedPlugins: Array<{ id: PluginId; name: string; icon: IconName; 
 ];
 
 export const todayItems = [
-  { time: "09:20", source: "钉钉 Insights", title: "站会纪要已生成，待你确认后才会发送" },
-  { time: "09:12", source: "UPCAM", title: "XH-128 登录页视觉走查仍在进行" },
-  { time: "昨天", source: "测试设计", title: "合成检查 36 / 36 通过，不替代人工验收" },
+  { time: "09:20", source: "钉钉 Insights", title: "合成导出可按需分析，发送保持关闭" },
+  { time: "09:12", source: "UPCAM", title: "SYN-014 登录页对照仍在进行" },
+  { time: "昨天", source: "测试设计", title: "合成检查 6 / 6 通过，不替代人工验收" },
 ];
 
 export const recentPlugins = [
   { id: "upcam" as const, name: "UPCAM 站会日报", hint: "采集站会记录并生成今日摘要", icon: "clipboard" as const },
   { id: "ding" as const, name: "钉钉 Insights", hint: "按需检查群聊洞察，不代发", icon: "chat" as const },
   { id: "test" as const, name: "测试设计", hint: "运行合成检查看板，仍需人工验收", icon: "flask" as const },
+  { id: "runner" as const, name: "自动化测试执行器", hint: "识别 3D 场景并沿路径切削", icon: "activity" as const },
 ];
 
 export const devices = [

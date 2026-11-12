@@ -235,8 +235,7 @@ export class ServiceOutputParser {
   }
 }
 
-export function serviceLaunchArgs(options: {
-  projectPath: string;
+export function directServiceArgs(options: {
   userRoot: string;
   v1Plugins?: string;
   v2Plugins?: string;
@@ -249,7 +248,40 @@ export function serviceLaunchArgs(options: {
   if (serviceArgs.includes("--allow-lan") || serviceArgs.some((arg) => arg.startsWith("--allow-lan="))) {
     throw new ShellRejected("allow-lan-rejected");
   }
-  return ["run", "--project", options.projectPath, "-c", "Release", "--no-launch-profile", "--", ...serviceArgs];
+  return serviceArgs;
+}
+
+export function serviceLaunchArgs(options: {
+  projectPath: string;
+  userRoot: string;
+  v1Plugins?: string;
+  v2Plugins?: string;
+  uiDist?: string;
+}): string[] {
+  return ["run", "--project", options.projectPath, "-c", "Release", "--no-launch-profile", "--", ...directServiceArgs(options)];
+}
+
+export function findPackagedService(
+  starts: readonly string[],
+  platform: NodeJS.Platform,
+  exists: (target: string) => boolean = fs.existsSync,
+): string | null {
+  const fileName = platform === "win32" ? "Workbench.Service.exe" : "Workbench.Service";
+  const seen = new Set<string>();
+  for (const start of starts) {
+    if (!start) continue;
+    let current = path.resolve(start);
+    for (let depth = 0; depth < 6; depth += 1) {
+      if (seen.has(current)) break;
+      seen.add(current);
+      const candidate = path.join(current, "service", fileName);
+      if (exists(candidate)) return candidate;
+      const parent = path.dirname(current);
+      if (parent === current) break;
+      current = parent;
+    }
+  }
+  return null;
 }
 
 export function resolveDotnet(env: NodeJS.ProcessEnv, platform: NodeJS.Platform): string {

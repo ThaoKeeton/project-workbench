@@ -15,6 +15,7 @@ public sealed class TestExecutorApiTests
         var plugins = (await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins")).GetProperty("plugins");
         var plugin = plugins.EnumerateArray().Single(item => item.GetProperty("id").GetString() == "com.projectworkbench.test-executor");
         Assert.Equal("Ready", plugin.GetProperty("state").GetString());
+        Assert.Equal("/plugin/runner", plugin.GetProperty("uiPath").GetString());
         Assert.Equal("v2-preview", plugin.GetProperty("contract").GetString());
         Assert.DoesNotContain(plugin.GetProperty("permissions").EnumerateArray(), item => item.GetProperty("sensitive").GetBoolean());
 

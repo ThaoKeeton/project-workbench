@@ -6,6 +6,9 @@
   <Folder Name="/plugins/">
     <Project Path="plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" />
     <Project Path="plugins/v2/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
+    <Project Path="plugins/v2/Workbench.UpcamStandup.V2/Workbench.UpcamStandup.V2.csproj" />
+    <Project Path="plugins/v2/Workbench.DingTalkInsights.V2/Workbench.DingTalkInsights.V2.csproj" />
+    <Project Path="plugins/v2/Workbench.TestingDesign.V2/Workbench.TestingDesign.V2.csproj" />
   </Folder>
   <Folder Name="/engine/">
     <Project Path="src/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
