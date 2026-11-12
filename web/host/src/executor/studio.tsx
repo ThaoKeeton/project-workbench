@@ -33,7 +33,7 @@ export function ExecutorStudio({ complete }: { complete?: ScriptCompleter }) {
   const [cap, setCap] = useState(0);
   const [spent, setSpent] = useState(0);
   const [modelCalls, setModelCalls] = useState(0);
-  const [notice, setNotice] = useState(authorMessages.replay);
+  const [notice, setNotice] = useState<string>(authorMessages.replay);
   const [prompt, setPrompt] = useState("");
   const [draft, setDraft] = useState<ExecutorCase | null>(null);
   const [repairOn, setRepairOn] = useState(false);

@@ -5,6 +5,7 @@ using Xunit;
 
 namespace Workbench.TestExecutor.Tests;
 
+[Collection("synthetic-electron")]
 public sealed class ScriptAuthorTests
 {
     private const string Goal = "切削工件后体积减小，邻件不变";
