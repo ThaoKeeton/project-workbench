@@ -556,7 +556,7 @@ jobs:
   sonarcloud:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -600,7 +600,11 @@ jobs:
           # project directory, so a repo-relative path is invisible to the plugin project.
           web_lcov="$(pwd)/web/host/coverage/lcov.info"
           shell_lcov="$(pwd)/desktop/shell/coverage/lcov.info"
-          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,plugins/v2/Workbench.UpcamStandup.V2/ui,plugins/v2/Workbench.DingTalkInsights.V2/ui,plugins/v2/Workbench.TestingDesign.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,tests/fixtures/**,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
+          # Core is referenced by the preview service, so the scanner will measure it.
+          # Run the suite before analysis begins. Its OpenCover report is imported at
+          # the end, and the test projects themselves are not added to the scan.
+          dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,plugins/v2/Workbench.UpcamStandup.V2/ui,plugins/v2/Workbench.DingTalkInsights.V2/ui,plugins/v2/Workbench.TestingDesign.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,tests/fixtures/**,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="$(pwd)/artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
           dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
           sudo apt-get update
           sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
@@ -610,6 +614,7 @@ jobs:
           node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/esbuild/install.js
           npm run build --prefix tests/fixtures/TestExecutor.SyntheticElectron
           export EXECUTOR_ELECTRON=1
+          # Preview service, plugins, and the executor. Lands next to the Core OpenCover report.
           xvfb-run -a dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
           npm ci --ignore-scripts --prefix web/host
           npm rebuild esbuild --prefix web/host
@@ -620,22 +625,40 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
 
-          def absolutize(report_path: str, root_path: str) -> None:
-              report = Path(report_path)
-              root = Path(root_path).resolve()
-              lines = []
-              for line in report.read_text().splitlines():
-                  if line.startswith("SF:"):
-                      source = Path(line[3:])
-                      if not source.is_absolute():
-                          source = root / source
-                      line = "SF:" + source.resolve().as_posix()
-                  lines.append(line)
-              report.write_text("\n".join(lines) + "\n")
+          repo = Path(".").resolve()
 
-          absolutize("web/host/coverage/lcov.info", "web/host")
-          absolutize("desktop/shell/coverage/lcov.info", "desktop/shell")
+          def rewrite(report_path: str, package_root: str) -> None:
+              report = Path(report_path)
+              root = Path(package_root).resolve()
+              out = []
+              record = []
+              for line in report.read_text().splitlines():
+                  if line == "end_of_record":
+                      source = next(item[3:] for item in record if item.startswith("SF:"))
+                      path = Path(source)
+                      if not path.is_absolute():
+                          path = (root / path).resolve()
+                      else:
+                          path = path.resolve()
+                      body = [item for item in record if not item.startswith("SF:")]
+                      absolute = path.as_posix()
+                      relative = path.relative_to(repo).as_posix()
+                      # Absolute matches files indexed from a project directory.
+                      # Repo-relative matches plugin panels that live outside web/host.
+                      for name in dict.fromkeys((absolute, relative)):
+                          out.extend(["SF:" + name, *body, "end_of_record"])
+                      record = []
+                      continue
+                  record.append(line)
+              report.write_text("\n".join(out) + "\n")
+
+          rewrite("web/host/coverage/lcov.info", "web/host")
+          rewrite("desktop/shell/coverage/lcov.info", "desktop/shell")
           PY
+          echo "OpenCover reports:"
+          find artifacts/coverage -name coverage.opencover.xml -print
+          echo "LCOV sources:"
+          grep '^SF:' web/host/coverage/lcov.info desktop/shell/coverage/lcov.info
           set +e
           dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
           status=$?

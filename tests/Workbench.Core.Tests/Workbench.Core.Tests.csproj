@@ -39,6 +39,10 @@
     <Compile Include="../../plugins/Workbench.Testing/NativeTestingFiles.cs" Link="Testing/NativeTestingFiles.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeEventSelection.cs" Link="Testing/NativeEventSelection.cs" />
     <Compile Include="../../plugins/Workbench.Testing/NativeEvidenceCache.cs" Link="Testing/NativeEvidenceCache.cs" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
     <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.0.0" />
     <PackageReference Include="xunit" Version="2.9.3" />

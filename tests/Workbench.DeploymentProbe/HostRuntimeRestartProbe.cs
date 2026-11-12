@@ -10,7 +10,15 @@ internal static class HostRuntimeRestartProbe
         var id = args[2];
         var guarded = args[3].Contains("-guarded-", StringComparison.Ordinal);
         var phase = args[3].Split('-')[^1];
-        await using var runtime = new HostRuntime(new() { PluginsRoot = args[0], UserRoot = args[1] });
+        // The synthetic monitor writes a few settings files while it stops. A busy
+        // Windows runner can take longer than the shipping 5s budget, and this probe
+        // is checking restart behavior, not that deadline.
+        await using var runtime = new HostRuntime(new()
+        {
+            PluginsRoot = args[0],
+            UserRoot = args[1],
+            StopTimeout = TimeSpan.FromSeconds(20)
+        });
         await runtime.InitializeAsync();
         var manager = runtime.Manager;
         var settings = manager.GetSettings(id);

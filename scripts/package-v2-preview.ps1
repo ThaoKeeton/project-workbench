@@ -90,12 +90,17 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "Electron binary download failed." }
     & $npm run build
     if ($LASTEXITCODE -ne 0) { throw "shell build failed." }
-    $electronExe = (& $node -p "require('electron')").Trim()
 }
 finally { Pop-Location }
-if (-not (Test-Path -LiteralPath $electronExe)) { throw "Electron executable was not found." }
-$electronDist = Split-Path -Parent $electronExe
-& robocopy $electronDist $layout /E /NFL /NDL /NJH /NJS /nc /ns /np
+$electronPathFile = Join-Path $shell "node_modules/electron/path.txt"
+if (-not (Test-Path -LiteralPath $electronPathFile)) { throw "Electron path.txt was not written." }
+$electronNameInDist = (Get-Content -Raw -LiteralPath $electronPathFile).Trim()
+$electronDist = (Resolve-Path -LiteralPath (Join-Path $shell "node_modules/electron/dist")).Path.TrimEnd('\', '/')
+$electronExe = Join-Path $electronDist $electronNameInDist
+if (-not (Test-Path -LiteralPath $electronExe)) { throw "Electron executable was not found: $electronExe" }
+Write-Host "Electron runtime: $electronExe"
+$layoutRoot = $layout.TrimEnd('\', '/')
+& robocopy.exe $electronDist $layoutRoot /E /NFL /NDL /NJH /NJS /NC /NS /NP
 if ($LASTEXITCODE -ge 8) { throw "Copying the Electron runtime failed ($LASTEXITCODE)." }
 $global:LASTEXITCODE = 0
 $defaultAsar = Join-Path $layout "resources/default_app.asar"

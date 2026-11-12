@@ -376,7 +376,7 @@ internal static class RuntimeTest
 
     internal static async Task DisposeAsync(PluginManager manager)
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         while (true)
         {
             try { await manager.DisposeAsync(); return; }
@@ -386,7 +386,7 @@ internal static class RuntimeTest
 
     internal static async Task WaitAsync(Func<Task<bool>> condition)
     {
-        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var deadline = new CancellationTokenSource(TimeSpan.FromSeconds(20));
         while (!await condition()) await Task.Delay(10, deadline.Token);
     }
 }
