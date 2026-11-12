@@ -82,6 +82,51 @@ public sealed class ElectronSampleTests
     }
 
     [Fact]
+    public async Task Electron_sample_records_a_case_and_replays_it()
+    {
+        var electron = FindElectron();
+        if (electron is not null)
+        {
+            if (!OperatingSystem.IsWindows())
+                File.SetUnixFileMode(electron, File.GetUnixFileMode(electron) | UnixFileMode.UserExecute);
+            var launched = await ElectronTargetLauncher.LaunchAsync(new ApplicationTarget(null, "合成电子样品", null, electron, [FixtureDirectory()], new Dictionary<string, string> { ["ELECTRON_DISABLE_SANDBOX"] = "1" }, Url: "index.html"), CancellationToken.None);
+            await using var owned = launched;
+            await RecordAndReplayAsync(launched.Port);
+            return;
+        }
+        if (Environment.GetEnvironmentVariable("EXECUTOR_ELECTRON") == "1")
+            throw new InvalidOperationException("The synthetic Electron binary was not installed.");
+        await using var host = SyntheticCdpHost.StartOn(0, "合成电子样品", null);
+        await RecordAndReplayAsync(host.Port);
+    }
+
+    private static async Task RecordAndReplayAsync(int port)
+    {
+        var session = await CdpWebSession.ConnectAsync(port, "合成电子样品", null, CancellationToken.None);
+        Assert.NotNull(session);
+        await using var connected = session!;
+        var snapshot = await connected.SnapshotAsync(4096, CancellationToken.None);
+        Assert.Contains("#start", snapshot, StringComparison.Ordinal);
+        Assert.DoesNotContain("data:image", snapshot, StringComparison.Ordinal);
+        await connected.StartRecordingAsync(CancellationToken.None);
+        var click = new TestStep("tap", StepKind.Web, "click", new ElementSelector(null, null, "#start", "开始"), "已开始", null, 15, false, false);
+        var tapped = await connected.PerformAsync(click, CancellationToken.None);
+        Assert.True(tapped.Ok, tapped.Actual);
+        var recorded = CdpStepRecorder.ToSteps(await connected.ReadRecordingAsync(CancellationToken.None));
+        Assert.Contains(recorded, step => step.Action == "click" && step.Target?.Selector == "#start");
+        var steps = recorded.Append(new TestStep("status", StepKind.Web, "assert-text", new ElementSelector(null, null, "#status"), "已开始", null, 15, false, false)).ToArray();
+        var suite = new TestSuite("recorded", "录制回放", false, true, new ApplicationTarget(null, "合成电子样品", port, Attach: true), [], [new TestCase("CASE-REC", "录制", false, steps)]);
+        var root = Fixtures.Temp();
+        var reports = Path.Combine(root, "reports");
+        var sink = new ListSink();
+        await Fixtures.Runner(new ScriptedFactory(), new FakeComputerUseProvider(), new RecordingExporter(), new RecordingDeadline(), root, reports)
+            .RunAsync(suite, new RunRequest("record-replay", Fixtures.Policy(), reports), sink, CancellationToken.None);
+        Assert.Contains(sink.Steps, step => step.StepId == "rec-1" && step.Status == "passed");
+        Assert.Contains(sink.Steps, step => step.StepId == "status" && step.Status == "passed");
+        Directory.Delete(root, true);
+    }
+
+    [Fact]
     public async Task Electron_sample_runs_the_cdp_suite()
     {
         var electron = FindElectron();

@@ -91,7 +91,9 @@ describe("launcher pages", () => {
     expect(screen.getByRole("heading", { name: "尚未配置模型密钥" })).toBeTruthy();
     cleanup();
     render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
-    await user.click(screen.getByRole("button", { name: "打开测试设计" }));
+    expect(screen.getByRole("heading", { name: "自动化测试执行器" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "回放" }));
+    expect(await screen.findByText("全部通过")).toBeTruthy();
     cleanup();
     URL.createObjectURL = () => "blob:preview";
     URL.revokeObjectURL = () => undefined;

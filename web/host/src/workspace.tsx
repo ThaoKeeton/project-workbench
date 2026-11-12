@@ -4,8 +4,9 @@ import type { ApiClient } from "./api";
 import { pinnedPlugins, type PluginId } from "./catalog";
 import { Icon } from "./icons";
 import { TestCasesPanel } from "../../../plugins/v2/Workbench.TestCases.V2/ui/TestCasesPanel";
+import { ExecutorStudio } from "./executor/studio";
 
-const tabs: PluginId[] = ["upcam", "ding", "test"];
+const tabs: PluginId[] = ["upcam", "ding", "test", "runner"];
 
 export function PluginWorkspace({
   client,
@@ -167,16 +168,7 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
       />
     );
   }
-  return (
-    <EmptyBlock
-      title="还没有可运行的套件"
-      body="自动化测试执行器从「测试设计」读取已保存的套件。现在还没有可用套件。"
-      heading="下一步"
-      rows={[["1.", "在「测试设计」中导入或编写用例"], ["2.", "保存套件后回到这里"], ["3.", "选择目标程序与设备再开始运行"]]}
-      primary="打开测试设计"
-      onPrimary={() => void navigate("/plugin/test")}
-    />
-  );
+  return <ExecutorStudio />;
 }
 
 export function EmptyBlock({

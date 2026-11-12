@@ -1,0 +1,65 @@
+.executor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 280px;
+  gap: 24px;
+  min-width: 0;
+  padding: 32px 40px 48px;
+  color: var(--text-primary);
+}
+.executor-head, .executor-actions, .executor-body, .case-editor ol li, .replay-steps li {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.executor-head { grid-column: 1 / -1; justify-content: space-between; align-items: flex-start; }
+.executor h1 { margin: 0; font-size: 28px; font-weight: 500; }
+.executor p, .executor h2 { margin: 0; }
+.executor-body { min-width: 0; align-items: flex-start; }
+.case-list, .case-editor ol, .replay-steps, .run-history { margin: 0; padding: 0; list-style: none; }
+.case-list { width: 220px; display: grid; gap: 8px; }
+.case-list button, .executor .btn, .executor .btn-accent {
+  border: 1px solid var(--border);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  border-radius: var(--radius-sm);
+  min-height: 36px;
+  padding: 0 12px;
+}
+.case-list button.is-on, .executor .btn-accent { background: var(--accent); color: var(--accent-on); border-color: transparent; }
+.case-editor { flex: 1; display: grid; gap: 16px; min-width: 0; }
+.case-editor ol { display: grid; gap: 8px; }
+.case-editor li { display: grid; grid-template-columns: 140px 1fr 1fr 80px; gap: 8px; }
+.case-editor label, .repair label { display: grid; gap: 4px; color: var(--text-secondary); font-size: 12px; }
+.repair label.repair-toggle { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 14px; }
+.case-editor input, .case-editor select, .repair input {
+  min-height: 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-1);
+  color: var(--text-primary);
+  padding: 0 8px;
+}
+.replay-steps li, .run-history li {
+  justify-content: space-between;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+}
+.repair {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-2);
+}
+.repair pre {
+  white-space: pre-wrap;
+  margin: 0;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+}
+@media (max-width: 1100px) {
+  .executor { grid-template-columns: 1fr; }
+  .case-editor li { grid-template-columns: 1fr 1fr; }
+}
