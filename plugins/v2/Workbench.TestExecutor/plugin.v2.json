@@ -1,0 +1,24 @@
+{
+  "contract": "workbench.plugin.v2",
+  "contractVersion": "2.0.0-preview.1",
+  "id": "com.projectworkbench.test-executor",
+  "name": "自动化测试执行器",
+  "version": "0.1.0",
+  "description": "按版本化用例在本机执行 FlaUI 步骤，并在显式开启且非仅本机时才把遮罩后的截图交给 computer-use。不自动发送。",
+  "autoSend": false,
+  "backend": {
+    "entryAssembly": "Workbench.TestExecutor.Plugin.dll",
+    "entryType": "Workbench.TestExecutor.Plugin.TestExecutorModule"
+  },
+  "ui": {
+    "kind": "web-package",
+    "module": "./ui/module.js",
+    "mount": "embedded"
+  },
+  "permissions": [
+    { "id": "project.read", "reason": "按当前项目隔离套件与运行记录", "sensitive": false },
+    { "id": "plugin.data.read", "reason": "读取本插件目录里的套件和设置", "sensitive": false },
+    { "id": "plugin.data.write", "reason": "把运行记录和遮罩后的截图写在本插件目录", "sensitive": false },
+    { "id": "local.file.export", "reason": "在本插件目录写入失败报告的 JSON 和 Markdown", "sensitive": false }
+  ]
+}

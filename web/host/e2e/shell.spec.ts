@@ -93,6 +93,19 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await shot(page, `import-${theme}`);
     });
 
+    test("executor authoring records and replays the synthetic sample", async ({ page }) => {
+      await page.goto("/plugin/runner");
+      await expect(page.getByRole("heading", { name: "自动化测试执行器" })).toBeVisible();
+      await expect(page.getByRole("checkbox", { name: "AI 修复" })).not.toBeChecked();
+      await page.getByRole("button", { name: "从样品录制" }).click();
+      await page.getByRole("button", { name: "回放" }).click();
+      await expect(page.getByText("全部通过")).toBeVisible();
+      await expect(page.getByText("正常回放不调用模型")).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `executor-${theme}`);
+    });
+
     test("plugin, diagnostics, settings, pairing, offline, and crash", async ({ page }) => {
       await page.goto("/plugin/upcam");
       await expect(page.getByRole("heading", { name: "站会日报" })).toBeVisible();

@@ -55,6 +55,7 @@ internal static class HostFailure
     internal static string Describe(string code, Exception error) => $"{code} ({error switch
     {
         OperationCanceledException => "Canceled",
+        TimeoutException => "Timeout",
         JsonException => "InvalidData",
         IOException or UnauthorizedAccessException => "Storage",
         _ => "PluginFailure"

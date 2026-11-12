@@ -59,6 +59,7 @@ internal static class NativeManagementProbe
         record("Failed initialization revoked task/secret/page contributions while native management navigation stayed usable");
         foreach (var mode in new[] { "hold-stop", "hold-callback", "hold-task" })
         {
+            record($"Starting pending-close verification for {mode}");
             await VerifyPendingCloseAsync(options, mode);
             record($"Actual native close/retry retained the lease and one runtime/Stop across {mode}, then released only after known completion");
         }

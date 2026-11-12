@@ -1,0 +1,59 @@
+{
+  "schema": "workbench.test-executor.suite.v2.preview",
+  "schemaVersion": 2,
+  "id": "synthetic-electron",
+  "name": "合成电子样品",
+  "stopOnFirstFailure": false,
+  "popupSelector": ".ant-modal",
+  "application": {
+    "windowTitle": "合成电子样品",
+    "executable": "electron",
+    "arguments": ["."]
+  },
+  "visual": { "maxMismatchRatio": 0.02, "channelTolerance": 12 },
+  "cases": [
+    {
+      "id": "CASE-UI",
+      "name": "点击后校验",
+      "allowFallback": false,
+      "steps": [
+        { "id": "wait-start", "type": "web", "action": "wait-for", "target": { "text": "开始" }, "allowFallback": false },
+        { "id": "start", "type": "web", "action": "click", "target": { "text": "开始" }, "expected": "已开始", "allowFallback": false },
+        { "id": "status", "type": "web", "action": "assert-text", "target": { "selector": "#status" }, "expected": "已开始", "allowFallback": false },
+        { "id": "shot-ui", "type": "web", "action": "screenshot", "allowFallback": false }
+      ]
+    },
+    {
+      "id": "CASE-SCENE",
+      "name": "三维视图",
+      "allowFallback": false,
+      "steps": [
+        {
+          "id": "read-camera",
+          "type": "scene3d",
+          "action": "assert-scene",
+          "target": { "selector": "#view", "object": "cube" },
+          "expected": "camera.y=4±0.2;mesh.cube.size=2±0.05;camera.azimuth=0±0.05",
+          "allowFallback": false
+        },
+        {
+          "id": "orbit",
+          "type": "scene3d",
+          "action": "orbit",
+          "target": { "selector": "#view", "object": "cube" },
+          "expected": "camera.azimuth=0.8±0.4",
+          "allowFallback": false
+        },
+        { "id": "shot-scene", "type": "scene3d", "action": "screenshot", "target": { "selector": "#view" }, "allowFallback": false }
+      ]
+    },
+    {
+      "id": "CASE-POPUP",
+      "name": "弹窗即失败",
+      "allowFallback": false,
+      "steps": [
+        { "id": "open-modal", "type": "web", "action": "click", "target": { "text": "弹出" }, "allowFallback": false }
+      ]
+    }
+  ]
+}

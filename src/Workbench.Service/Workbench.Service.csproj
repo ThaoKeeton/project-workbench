@@ -15,6 +15,7 @@
     <ProjectReference Include="../Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
     <ProjectReference Include="../Workbench.Core/Workbench.Core.csproj" />
     <ProjectReference Include="../../plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.TestExecutor/Workbench.TestExecutor.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
   <Target Name="StagePreviewPlugin" AfterTargets="Build">
     <PropertyGroup>
@@ -23,5 +24,16 @@
     </PropertyGroup>
     <MakeDir Directories="$(_Stage)" />
     <Copy SourceFiles="$(_SampleOut)Workbench.TestCases.V2.dll;$(_SampleOut)Workbench.TestCases.V2.deps.json;$(MSBuildThisFileDirectory)../../plugins/v2/Workbench.TestCases.V2/plugin.v2.json" DestinationFolder="$(_Stage)" SkipUnchangedFiles="true" />
+  </Target>
+  <Target Name="StageTestExecutorPlugin" AfterTargets="Build">
+    <PropertyGroup>
+      <_ExecutorOut>$(MSBuildThisFileDirectory)../../plugins/v2/Workbench.TestExecutor/bin/$(Configuration)/net10.0/</_ExecutorOut>
+      <_ExecutorStage>$(OutputPath)preview-plugins/com.projectworkbench.test-executor/</_ExecutorStage>
+    </PropertyGroup>
+    <ItemGroup>
+      <_ExecutorFiles Include="$(_ExecutorOut)*.dll;$(_ExecutorOut)*.json" />
+    </ItemGroup>
+    <MakeDir Directories="$(_ExecutorStage)" />
+    <Copy SourceFiles="@(_ExecutorFiles)" DestinationFolder="$(_ExecutorStage)" SkipUnchangedFiles="true" />
   </Target>
 </Project>

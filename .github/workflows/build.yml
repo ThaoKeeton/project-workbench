@@ -430,6 +430,57 @@ jobs:
             web/host/test-results/
           if-no-files-found: warn
           retention-days: 1
+  test-executor-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: FlaUI checks, skipping the native file dialog on hosted runners
+        shell: pwsh
+        run: |
+          Write-Host "SKIP native #32770 file dialog: GitHub-hosted Windows runners have no interactive desktop. Keyboard and ValuePattern input into that dialog is not reliable, and this path is auxiliary. The test is skipped in hosted CI. Verify it on a real Windows 11 desktop with scripts/verify-native-dialog.ps1. It has not been accepted on a real machine yet."
+          dotnet test tests/Workbench.TestExecutor.WindowsTests/Workbench.TestExecutor.WindowsTests.csproj -c Release --nologo --verbosity normal --logger "trx;LogFileName=test-executor-windows.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: test-executor-windows-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  test-executor-electron:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+      - name: Install a display and the synthetic Electron sample
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
+            || sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2
+          npm ci --ignore-scripts --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/electron/install.js
+      - name: Run the Electron CDP suite
+        env:
+          EXECUTOR_ELECTRON: "1"
+        run: xvfb-run -a dotnet test tests/Workbench.TestExecutor.Tests/Workbench.TestExecutor.Tests.csproj -c Release --nologo --filter FullyQualifiedName~Electron_sample --logger "trx;LogFileName=test-executor-electron.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: test-executor-electron-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
   shell-electron-linux:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
     runs-on: ubuntu-latest
@@ -502,7 +553,7 @@ jobs:
   sonarcloud:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7.0.1
         with:
@@ -546,8 +597,16 @@ jobs:
           # project directory, so a repo-relative path is invisible to the plugin project.
           web_lcov="$(pwd)/web/host/coverage/lcov.info"
           shell_lcov="$(pwd)/desktop/shell/coverage/lcov.info"
-          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,tests/fixtures/**,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
           dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
+            || sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2
+          npm ci --ignore-scripts --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/electron/install.js
+          Xvfb :99 -screen 0 1280x1024x24 >/tmp/xvfb-sonar.log 2>&1 &
+          export DISPLAY=:99
+          export EXECUTOR_ELECTRON=1
           dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
           npm ci --ignore-scripts --prefix web/host
           npm rebuild esbuild --prefix web/host

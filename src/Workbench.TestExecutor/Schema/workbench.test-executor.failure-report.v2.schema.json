@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "workbench.test-executor.failure-report.v2.preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion", "caseId", "stepId", "expected", "actual", "engine", "errorType", "timeoutSeconds", "attempts", "needsHumanReview", "log", "fingerprint"],
+  "properties": {
+    "schema": { "const": "workbench.test-executor.failure-report.v2.preview" },
+    "schemaVersion": { "const": 2 },
+    "caseId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "stepId": { "type": "string", "minLength": 1, "maxLength": 64 },
+    "expected": { "type": "string", "maxLength": 500 },
+    "actual": { "type": "string", "maxLength": 500 },
+    "engine": { "enum": ["web", "flaui", "ai", "scene3d"] },
+    "errorType": { "type": "string", "minLength": 1, "maxLength": 40 },
+    "timeoutSeconds": { "type": "integer", "minimum": 0, "maximum": 300 },
+    "attempts": { "type": "integer", "minimum": 0, "maximum": 4 },
+    "needsHumanReview": { "type": "boolean" },
+    "log": {
+      "type": "array",
+      "maxItems": 200,
+      "items": { "type": "string", "maxLength": 500 }
+    },
+    "maskedScreenshotFile": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]{0,160}\\.png$"
+    },
+    "fingerprint": { "type": "string", "minLength": 5, "maxLength": 180 }
+  }
+}
