@@ -47,6 +47,10 @@ public sealed partial class SuiteRunner
                 {
                     result = new WebResult(false, false, ExecutorError.Timeout, false, null);
                 }
+                catch (ExecutorDataException cdpError) when (!cancellationToken.IsCancellationRequested)
+                {
+                    result = new WebResult(false, false, cdpError.Code, false, null);
+                }
             }
             var after = await CaptureSurfaceAsync(suite, session, web, log, cancellationToken);
             if (after is not null) masked = after;

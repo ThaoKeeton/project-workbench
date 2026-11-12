@@ -211,7 +211,7 @@ public sealed class CdpWebSession : IWebSession
 
     private CdpWebSession(int port) => _port = port;
 
-    public bool IsConnected => _socket?.State == WebSocketState.Open;
+    public bool IsConnected => _port > 0;
 
     public static async Task<CdpWebSession?> ConnectAsync(int port, string? title, string? url, CancellationToken cancellationToken, string? popupSelector = null)
     {
@@ -422,14 +422,26 @@ public sealed class CdpWebSession : IWebSession
         {
             await CallAsync("Page.enable", new { }, cancellationToken);
             await CallAsync("Page.addScriptToEvaluateOnNewDocument", new { source = SceneHook.Source }, cancellationToken);
-            if (!reload) return;
-            // The current document is already complete. Mark it so the wait below
-            // cannot return before the reload replaces the page.
-            await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
-            await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
-            await WaitForHookAsync(cancellationToken);
+            if (reload)
+            {
+                // The current document is already complete. Mark it so the wait below
+                // cannot return before the reload replaces the page.
+                await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
+                await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
+                await WaitForHookAsync(cancellationToken);
+            }
         }
         catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+        }
+        // A reload often drops the debugger socket. Reattach so the next step still has a page.
+        if (_socket is { State: WebSocketState.Open }) return;
+        try
+        {
+            await ActivateAsync(_title, _url, cancellationToken);
+        }
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
         {
             if (cancellationToken.IsCancellationRequested) throw;
         }
