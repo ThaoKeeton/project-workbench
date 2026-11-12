@@ -24,27 +24,99 @@
       ]
     },
     {
+      "id": "CASE-CUT",
+      "name": "拖拽切削",
+      "allowFallback": false,
+      "steps": [
+        { "id": "snap-cut", "type": "scene3d", "action": "snapshot", "target": { "selector": "#view" }, "allowFallback": false },
+        {
+          "id": "before-cut",
+          "type": "scene3d",
+          "action": "assert-scene",
+          "target": { "selector": "#view", "object": "stock" },
+          "expected": "mesh.stock.volume=8±0.2;mesh.sphere.vertexCount=117",
+          "allowFallback": false
+        },
+        {
+          "id": "cut-drag",
+          "type": "scene3d",
+          "action": "drag",
+          "target": { "selector": "#view", "object": "stock" },
+          "input": "world-path:0,2,0;0.4,2,0",
+          "expected": "mesh.stock.volume=4±0.3;mesh.sphere.vertexCount=117",
+          "allowFallback": false
+        },
+        {
+          "id": "cut-diff",
+          "type": "scene3d",
+          "action": "diff",
+          "target": { "selector": "#view" },
+          "expected": "counts.deformed=1±0;counts.moved=0±0",
+          "allowFallback": false
+        }
+      ]
+    },
+    {
       "id": "CASE-SCENE",
       "name": "三维视图",
       "allowFallback": false,
       "steps": [
         {
+          "id": "probe",
+          "type": "scene3d",
+          "action": "probe",
+          "expected": "\"recommended\":\"devtools\"",
+          "allowFallback": false
+        },
+        {
+          "id": "snapshot",
+          "type": "scene3d",
+          "action": "snapshot",
+          "target": { "selector": "#view" },
+          "allowFallback": false
+        },
+        {
           "id": "read-camera",
           "type": "scene3d",
           "action": "assert-scene",
           "target": { "selector": "#view", "object": "cube" },
-          "expected": "camera.y=4±0.2;mesh.cube.size=2±0.05;camera.azimuth=0±0.05",
+          "expected": "camera.y=4±0.2;mesh.cube.size=2±0.05;camera.azimuth=0±0.05;mesh.cube.vertexCount=24;mesh.cube.faceCount=12;mesh.cube.volume=8±0.05",
+          "allowFallback": false
+        },
+        {
+          "id": "click-cube",
+          "type": "scene3d",
+          "action": "click",
+          "target": { "selector": "#view", "object": "cube" },
+          "allowFallback": false
+        },
+        {
+          "id": "drag-cube",
+          "type": "scene3d",
+          "action": "drag",
+          "target": { "selector": "#view", "object": "cube" },
+          "input": "80,0",
+          "expected": "mesh.cube.position.x=0.8±0.4",
+          "allowFallback": false
+        },
+        {
+          "id": "diff-cube",
+          "type": "scene3d",
+          "action": "diff",
+          "target": { "selector": "#view", "path": "Scene/cube" },
+          "expected": "counts.moved=1±0",
           "allowFallback": false
         },
         {
           "id": "orbit",
           "type": "scene3d",
           "action": "orbit",
-          "target": { "selector": "#view", "object": "cube" },
+          "target": { "selector": "#view" },
+          "input": "world:0,3.2,0",
           "expected": "camera.azimuth=0.8±0.4",
           "allowFallback": false
         },
-        { "id": "shot-scene", "type": "scene3d", "action": "screenshot", "target": { "selector": "#view" }, "allowFallback": false }
+        { "id": "shot-scene", "type": "scene3d", "action": "compare-pixels", "target": { "selector": "#view" }, "allowFallback": false }
       ]
     },
     {

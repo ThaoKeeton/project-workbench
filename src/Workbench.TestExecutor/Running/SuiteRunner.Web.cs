@@ -47,6 +47,11 @@ public sealed partial class SuiteRunner
                 {
                     result = new WebResult(false, false, ExecutorError.Timeout, false, null);
                 }
+                catch (Exception cdpError) when (!cancellationToken.IsCancellationRequested && cdpError is ExecutorDataException or HttpRequestException)
+                {
+                    var code = cdpError is ExecutorDataException data ? data.Code : ExecutorError.DebugPortMissing;
+                    result = new WebResult(false, false, code, false, null);
+                }
             }
             var after = await CaptureSurfaceAsync(suite, session, web, log, cancellationToken);
             if (after is not null) masked = after;
@@ -85,7 +90,10 @@ public sealed partial class SuiteRunner
     private async Task<TestStep?> RepairOnceAsync(TestCase testCase, TestStep step, IWebSession web, RunRequest request, List<string> log, CancellationToken cancellationToken)
     {
         if (!request.Policy.CanRepair) return null;
-        var snapshot = await web.SnapshotAsync(4096, cancellationToken);
+        var dom = await web.SnapshotAsync(4096, cancellationToken);
+        var scene = await web.SceneTextAsync(cancellationToken);
+        var snapshot = scene.Length == 0 ? dom : "SCENE:\n" + scene + "\nDOM:\n" + dom;
+        if (snapshot.Contains("data:image", StringComparison.Ordinal)) return null;
         var tokens = Math.Max(1, snapshot.Length / 4 + 50);
         var cost = tokens / 1000m * request.Policy.CostPerThousandTokens;
         if (!_deps.Budget.TryCharge(request.RunId, tokens, cost, request.Policy))
@@ -117,7 +125,12 @@ public sealed partial class SuiteRunner
         var baseline = ContainedPath.Combine(request.BaselineDirectory, step.Id + ".png");
         if (!File.Exists(baseline)) return new ShotComparison(false, ExecutorError.BaselineMissing, masked);
         var visual = suite.Visual ?? VisualSettings.Default;
-        var ratio = VisualDiff.MismatchRatio(masked.Png, await File.ReadAllBytesAsync(baseline, cancellationToken), visual.ChannelTolerance, visual.Ignore);
+        var baselineBytes = await File.ReadAllBytesAsync(baseline, cancellationToken);
+        var ratio = VisualDiff.MismatchRatio(masked.Png, baselineBytes, visual.ChannelTolerance, visual.Ignore);
+        var diffPng = VisualDiff.DiffImage(masked.Png, baselineBytes, visual.ChannelTolerance, visual.Ignore);
+        var diffName = step.Id + ".diff.png";
+        await File.WriteAllBytesAsync(ContainedPath.Combine(request.ReportDirectory, diffName), diffPng, cancellationToken);
+        log.Add("local-diff=" + diffName);
         log.Add("visual-mismatch=" + ratio.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         return ratio <= visual.MaxMismatchRatio
             ? new ShotComparison(true, "", masked)

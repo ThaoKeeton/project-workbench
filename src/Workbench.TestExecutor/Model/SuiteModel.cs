@@ -23,9 +23,14 @@ public sealed record ElementSelector(
     string? Role = null,
     string? Title = null,
     string? Url = null,
-    string? ObjectName = null)
+    string? ObjectName = null,
+    string? Uuid = null,
+    string? Path = null)
 {
     public string Display =>
+        Uuid is { Length: > 0 } ? "uuid=" + Uuid :
+        Path is { Length: > 0 } ? "path=" + Path :
+        ObjectName is { Length: > 0 } ? "object=" + ObjectName :
         Selector is { Length: > 0 } ? "selector=" + Selector :
         Text is { Length: > 0 } ? "text=" + Text :
         Role is { Length: > 0 } ? "role=" + Role + (Name is { Length: > 0 } ? "/" + Name : "") :
@@ -37,6 +42,8 @@ public sealed record ElementSelector(
     public bool HasUiTarget => Name is { Length: > 0 } || AutomationId is { Length: > 0 };
 
     public bool HasDomLocator => Selector is { Length: > 0 } || Text is { Length: > 0 } || Role is { Length: > 0 };
+
+    public bool HasSceneLocator => ObjectName is { Length: > 0 } || Uuid is { Length: > 0 } || Path is { Length: > 0 };
 }
 
 public sealed record ApplicationTarget(

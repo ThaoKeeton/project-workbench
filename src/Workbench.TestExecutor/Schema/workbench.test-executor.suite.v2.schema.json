@@ -73,7 +73,9 @@
         "role": { "type": "string", "minLength": 1, "maxLength": 40 },
         "title": { "type": "string", "minLength": 1, "maxLength": 120 },
         "url": { "type": "string", "minLength": 1, "maxLength": 200 },
-        "object": { "type": "string", "minLength": 1, "maxLength": 80 }
+        "object": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "uuid": { "type": "string", "minLength": 1, "maxLength": 80 },
+        "path": { "type": "string", "minLength": 1, "maxLength": 200 }
       },
       "anyOf": [
         { "required": ["name"] },
@@ -83,7 +85,9 @@
         { "required": ["role"] },
         { "required": ["title"] },
         { "required": ["url"] },
-        { "required": ["object"] }
+        { "required": ["object"] },
+        { "required": ["uuid"] },
+        { "required": ["path"] }
       ]
     },
     "mask": {
@@ -128,7 +132,7 @@
       "properties": {
         "id": { "$ref": "#/$defs/id" },
         "type": { "enum": ["web", "flaui", "ai", "scene3d"] },
-        "action": { "enum": ["click", "type", "set-value", "invoke", "expand", "wait-for", "read", "assert-text", "assert-visible", "assert-network", "screenshot", "switch-window", "open-file", "read-scene", "project", "drag", "orbit", "assert-scene"] },
+        "action": { "enum": ["click", "type", "set-value", "invoke", "expand", "wait-for", "read", "assert-text", "assert-visible", "assert-network", "screenshot", "switch-window", "open-file", "read-scene", "project", "drag", "orbit", "assert-scene", "probe", "snapshot", "diff", "wheel", "compare-pixels"] },
         "target": { "$ref": "#/$defs/selector" },
         "expected": { "$ref": "#/$defs/note" },
         "input": { "$ref": "#/$defs/note" },

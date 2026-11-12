@@ -238,6 +238,9 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
         private bool _dragging;
         private double _lastX;
         private double _azimuth;
+        private double _cubeX;
+        private bool _cut;
+        private string _dragMode = "camera";
 
         private SyntheticModel(List<Page> pages) => _pages = pages;
 
@@ -294,6 +297,8 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             if (method != "Runtime.evaluate")
                 return "{\"id\":" + id + ",\"result\":{}}";
             var expression = root.GetProperty("params").GetProperty("expression").GetString() ?? "";
+            if (expression.Contains("__WB_RELOAD_MARKER", StringComparison.Ordinal))
+                return "{\"id\":" + id + ",\"result\":{\"result\":{\"type\":\"object\",\"value\":{\"marker\":false,\"hook\":\"object\",\"ready\":\"complete\"}}}}";
             var embedded = EmbeddedRequest(expression);
             if (embedded is null) return "{\"id\":" + id + ",\"result\":{\"result\":{\"type\":\"object\",\"value\":{\"found\":false}}}}";
             var value = Execute(pageId, embedded.Value);
@@ -335,10 +340,25 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                     : "{\"found\":false}";
             if (op == "read-body")
                 return "{\"found\":true,\"ok\":true,\"actual\":" + JsonSerializer.Serialize(Body(page)) + "}";
-            if (op is "read-scene" or "assert-scene")
+            if (op == "ready") return "{\"found\":true,\"ok\":true}";
+            if (op == "probe")
+                return "{\"found\":true,\"ok\":true,\"actual\":" + JsonSerializer.Serialize(ProbeJson()) + "}";
+            if (op == "canvas-rect")
+                return "{\"found\":true,\"ok\":true,\"left\":0,\"top\":0,\"width\":32,\"height\":32}";
+            if (op is "read-scene" or "assert-scene" or "snapshot" or "diff")
                 return "{\"found\":true,\"ok\":true,\"actual\":" + JsonSerializer.Serialize(SceneJson()) + "}";
             if (op == "project")
-                return "{\"found\":true,\"ok\":true,\"x\":160,\"y\":120,\"actual\":\"160,120\"}";
+            {
+                var name = Text(request, "objectName");
+                var value = Text(request, "value");
+                if (name == "hidden")
+                    return "{\"found\":true,\"ok\":false,\"hit\":false,\"actual\":\"occluded-by:sphere\"}";
+                _dragMode = name == "stock" ? "cut" : name.Length > 0 ? "mesh" : "camera";
+                var points = value.StartsWith("world-path:", StringComparison.Ordinal)
+                    ? "[{\"ndcX\":-0.2,\"ndcY\":0.2},{\"ndcX\":0,\"ndcY\":0.2},{\"ndcX\":0.2,\"ndcY\":0.2}]"
+                    : "[{\"ndcX\":0,\"ndcY\":0}]";
+                return "{\"found\":true,\"ok\":true,\"hit\":true,\"x\":160,\"y\":120,\"ndcX\":0,\"ndcY\":0,\"points\":" + points + ",\"left\":0,\"top\":0,\"width\":320,\"height\":240,\"dpr\":1,\"zoom\":1,\"offsetLeft\":0,\"offsetTop\":0,\"deviceBox\":false,\"actual\":\"projected\"}";
+            }
             if (Text(request, "selector") == "#slow") Thread.Sleep(400);
             if (Text(request, "selector") == "#slower") Thread.Sleep(2500);
             if (op is "network" or "assert-network")
@@ -400,7 +420,10 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             }
             else if (type == "mouseMoved" && _dragging)
             {
-                _azimuth += (x - _lastX) * 0.01;
+                var delta = (x - _lastX) * 0.01;
+                if (_dragMode == "cut") _cut = true;
+                else if (_dragMode == "mesh") _cubeX += delta;
+                else _azimuth += delta;
                 _lastX = x;
             }
             else if (type == "mouseReleased")
@@ -422,20 +445,55 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             return string.Join('\n', parts);
         }
 
+        private static string ProbeJson()
+        {
+            var globals = new { THREE = false, scene = false, workbenchHook = false };
+            var signals = new
+            {
+                devtoolsScenes = 1,
+                devtoolsRenderers = 1,
+                windowScene = false,
+                windowCamera = false,
+                windowRenderer = false,
+                r3fCanvases = 0,
+                webglContexts = 1,
+                drawCalls = 0,
+                vertices = 0,
+                bufferBytes = 0,
+                frames = 0,
+                globals
+            };
+            return JsonSerializer.Serialize(new { signals, diagnostics = new[] { "synthetic page" } });
+        }
+
         private string SceneJson()
         {
             var camera = new { x = Math.Sin(_azimuth) * 9, y = 4d, z = Math.Cos(_azimuth) * 9, fov = 50d, azimuth = _azimuth };
-            var cube = new
+            var cube = Mesh("cube", "cube-1", "Scene/cube", _cubeX, 0, -1, 1, -1, 1, -1, 1, 24, 12, 8, "box2");
+            var sphere = Mesh("sphere", "sphere-1", "Scene/sphere", 3, 0, 2.2, 3.8, -0.8, 0.8, -0.8, 0.8, 117, 168, 1.97, "sphere");
+            var cone = Mesh("cone", "cone-1", "Scene/cone", -3, 0, -3.7, -2.3, -0.7, 0.7, -0.7, 0.7, 24, 12, 8, "cone");
+            var stock = Mesh("stock", "stock-1", "Scene/stock", 0, 2, -1, 1, -1, _cut ? 0 : 1, -1, 1, _cut ? 12 : 24, _cut ? 6 : 12, _cut ? 4 : 8, _cut ? "cut" : "stock");
+            return JsonSerializer.Serialize(new { mount = "devtools", camera, nodes = new object[] { cube, sphere, cone, stock }, diagnostics = Array.Empty<string>() });
+        }
+
+        private static object Mesh(string name, string uuid, string path, double x, double y, double minX, double maxX, double minY, double maxY, double minZ, double maxZ, int vertices, int faces, double volume, string hash)
+            => new
             {
-                name = "cube",
-                min = new { x = -1d, y = -1d, z = -1d },
-                max = new { x = 1d, y = 1d, z = 1d },
+                name,
+                uuid,
+                type = "Mesh",
+                path,
+                visible = 1,
+                position = new { x, y, z = 0d },
+                rotation = new { x = 0d, y = 0d, z = 0d },
+                min = new { x = minX, y = minY, z = minZ },
+                max = new { x = maxX, y = maxY, z = maxZ },
+                vertexCount = vertices,
+                faceCount = faces,
+                volume,
+                hash,
                 vertices = new[] { new { x = -1d, y = -1d, z = 1d } }
             };
-            var sphere = new { name = "sphere", min = new { x = 2.2, y = -0.8, z = -0.8 }, max = new { x = 3.8, y = 0.8, z = 0.8 }, vertices = Array.Empty<object>() };
-            var cone = new { name = "cone", min = new { x = -3.7, y = -0.7, z = -0.7 }, max = new { x = -2.3, y = 0.7, z = 0.7 }, vertices = Array.Empty<object>() };
-            return JsonSerializer.Serialize(new { camera, meshes = new object[] { cube, sphere, cone } });
-        }
 
         private void Remember(string op, string selector, string text, string value)
         {

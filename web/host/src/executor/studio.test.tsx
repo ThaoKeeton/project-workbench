@@ -14,6 +14,15 @@ describe("executor studio", () => {
     expect((screen.getByRole("checkbox", { name: "AI 修复" }) as HTMLInputElement).checked).toBe(false);
     await user.click(screen.getByRole("button", { name: "从样品录制" }));
     expect(screen.getByRole("button", { name: "录制 · 合成电子样品" })).toBeTruthy();
+    const objectName = screen.getByLabelText("rec-probe-4 对象");
+    await user.clear(objectName);
+    await user.type(objectName, "tooth");
+    expect((objectName as HTMLInputElement).value).toBe("tooth");
+    await user.selectOptions(screen.getByLabelText("rec-probe-4 动作"), "snapshot");
+    await user.clear(screen.getByLabelText("rec-probe-4 选择器"));
+    await user.type(screen.getByLabelText("rec-probe-4 选择器"), "#view");
+    await user.clear(screen.getByLabelText("rec-probe-4 容差"));
+    await user.type(screen.getByLabelText("rec-probe-4 容差"), "0.1");
     await user.click(screen.getByRole("button", { name: "回放" }));
     expect(await screen.findByText("全部通过")).toBeTruthy();
     expect(screen.getByText("正常回放不调用模型")).toBeTruthy();
@@ -41,6 +50,7 @@ describe("executor script", () => {
   it("keeps screenshots out of the recorded script and diffs pixels locally", () => {
     const steps = recordFromDom(sampleDom);
     expect(steps.some((item) => item.action === "click" && item.selector === "#start")).toBe(true);
+    expect(steps.some((item) => item.action === "drag-path" && item.text === "stock" && item.expected === "4")).toBe(true);
     expect(JSON.stringify(steps)).not.toContain("data:image");
     const result = replay({ ...seedCases()[0], steps }, sampleDom);
     expect(result.passed).toBe(true);
@@ -48,5 +58,12 @@ describe("executor script", () => {
     expect(mismatch(new Uint8Array([1, 2]), new Uint8Array([1, 9]), 0)).toBeGreaterThan(0);
     expect(repairPrompt(sampleDom, steps[1])).toContain("DOM:");
     expect(repairPrompt(sampleDom, steps[1])).not.toContain("data:image");
+    const sceneStep = steps.find((item) => item.action === "probe-scene");
+    expect(sceneStep).toBeTruthy();
+    const prompt = repairPrompt(sampleDom, sceneStep!);
+    expect(prompt).toContain("SCENE:");
+    expect(prompt).toContain("hash=box2");
+    expect(prompt).not.toContain("data:image");
+    expect(result.steps.find((item) => item.id.startsWith("rec-pixels"))?.evidence.startsWith("local:")).toBe(true);
   });
 });

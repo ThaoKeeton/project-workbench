@@ -2,12 +2,51 @@ export type StepAction =
   | "attach"
   | "click"
   | "click-scene"
+  | "drag-scene"
+  | "drag-path"
+  | "wheel-scene"
+  | "probe-scene"
+  | "snapshot"
+  | "diff-scene"
+  | "assert-mesh"
+  | "compare-pixels"
   | "type"
   | "wait-for"
   | "assert-text"
   | "assert-attr"
   | "assert-number"
   | "screenshot";
+
+export const actionLabels: Record<StepAction, string> = {
+  attach: "附加",
+  click: "点击",
+  "click-scene": "投影点击",
+  "drag-scene": "投影拖拽",
+  "drag-path": "路径切削",
+  "wheel-scene": "滚轮",
+  "probe-scene": "探测场景",
+  snapshot: "场景快照",
+  "diff-scene": "场景差异",
+  "assert-mesh": "网格断言",
+  "compare-pixels": "画布像素",
+  type: "输入",
+  "wait-for": "等待",
+  "assert-text": "文本断言",
+  "assert-attr": "属性断言",
+  "assert-number": "数值断言",
+  screenshot: "截图",
+};
+
+const sceneActions = new Set<StepAction>(["click-scene", "drag-scene", "drag-path", "wheel-scene", "probe-scene", "snapshot", "diff-scene", "assert-mesh", "compare-pixels"]);
+
+export function isSceneAction(action: StepAction): boolean {
+  return sceneActions.has(action);
+}
+
+export const sceneSnapshotText = [
+  "library=three mount=devtools",
+  "Scene/cube type=Mesh uuid=cube-1 visible=1 pos=(0, 0, 0) rot=(0, 0, 0) verts=24 faces=12 vol=8 hash=box2",
+].join("\n");
 
 export type ExecutorStep = {
   id: string;
@@ -90,8 +129,17 @@ export function recordFromDom(dom: string): ExecutorStep[] {
       recorded.push(step(`rec-status-${index + 1}`, "assert-text", selector || "#status", "", "已开始", ""));
     }
     if (line.startsWith("[canvas]") && objectName.length > 0) {
-      recorded.push(step(`rec-scene-${index + 1}`, "click-scene", selector || "#view", objectName, "camera.y=4±0.2", "0.2"));
-      recorded.push(step(`rec-number-${index + 1}`, "assert-number", selector || "#view", "camera.y", "4", "0.2"));
+      const view = selector || "#view";
+      recorded.push(step(`rec-probe-${index + 1}`, "probe-scene", view, objectName, "devtools", ""));
+      recorded.push(step(`rec-cut-${index + 1}`, "drag-path", view, "stock", "4", "0.3"));
+      recorded.push(step(`rec-keep-${index + 1}`, "assert-mesh", view, "sphere.vertexCount", "117", "0"));
+      recorded.push(step(`rec-snap-${index + 1}`, "snapshot", view, objectName, "", ""));
+      recorded.push(step(`rec-click-scene-${index + 1}`, "click-scene", view, objectName, "", ""));
+      recorded.push(step(`rec-drag-${index + 1}`, "drag-scene", view, objectName, "0.8", "0.4"));
+      recorded.push(step(`rec-mesh-${index + 1}`, "assert-mesh", view, "position.x", "0.8", "0.4"));
+      recorded.push(step(`rec-diff-${index + 1}`, "diff-scene", view, objectName, "moved", ""));
+      recorded.push(step(`rec-pixels-${index + 1}`, "compare-pixels", view, "", "", "0"));
+      recorded.push(step(`rec-number-${index + 1}`, "assert-number", view, "camera.y", "4", "0.2"));
     }
   });
   recorded.push(step("rec-shot", "screenshot", "#view", "", "", "0"));
@@ -99,21 +147,67 @@ export function recordFromDom(dom: string): ExecutorStep[] {
 }
 
 export function repairPrompt(dom: string, failed: ExecutorStep): string {
-  return ["只使用下面的文本结构修复失败步骤。不要附带截图。", "DOM:", dom, `失败步骤 ${failed.id} ${failed.action} ${failed.selector} 期望 ${failed.expected}`].join("\n");
+  const scene = isSceneAction(failed.action) ? `SCENE:\n${sceneSnapshotText}\n` : "";
+  return [`${scene}只使用下面的文字结构修复失败步骤。不要附带截图。`, "DOM:", dom, `失败步骤 ${failed.id} ${failed.action} ${failed.selector} 期望 ${failed.expected}`].join("\n");
+}
+
+type SceneState = { y: number; size: number; x: number; snapped: boolean; stock: number };
+
+function sceneOutcome(item: ExecutorStep, scene: SceneState): { ok: boolean; detail: string; evidence: string } | null {
+  if (item.action === "probe-scene") {
+    return { ok: item.expected.length === 0 || item.expected === "devtools", detail: "recommended=devtools", evidence: "local:scene-text" };
+  }
+  if (item.action === "snapshot") {
+    scene.snapped = true;
+    return { ok: true, detail: sceneSnapshotText, evidence: "local:scene-text" };
+  }
+  if (item.action === "click-scene" || item.action === "wheel-scene") {
+    return { ok: true, detail: `object=${item.text}`, evidence: "" };
+  }
+  if (item.action === "drag-scene") {
+    scene.x = 0.8;
+    return { ok: true, detail: "ok", evidence: "" };
+  }
+  if (item.action === "drag-path") {
+    scene.stock = 4;
+    return { ok: true, detail: "cut volume=4", evidence: "local:scene-text" };
+  }
+  if (item.action === "assert-mesh") {
+    const actual = item.text === "position.x" ? scene.x : item.text === "stock.volume" ? scene.stock : item.text === "sphere.vertexCount" ? 117 : scene.y;
+    return numberOutcome(item, actual);
+  }
+  if (item.action === "diff-scene") {
+    const ok = scene.snapped && scene.x !== 0 && (item.expected.length === 0 || item.expected === "moved");
+    return { ok, detail: "moved 1", evidence: "local:scene-text" };
+  }
+  if (item.action === "compare-pixels") return pixelOutcome(item);
+  return null;
+}
+
+function numberOutcome(item: ExecutorStep, actual: number): { ok: boolean; detail: string; evidence: string } {
+  const tolerance = Number(item.tolerance || "0");
+  const expected = Number(item.expected);
+  return { ok: Math.abs(actual - expected) <= tolerance, detail: String(actual), evidence: "" };
+}
+
+function pixelOutcome(item: ExecutorStep): { ok: boolean; detail: string; evidence: string } {
+  const frame = new Uint8Array([9, 8, 7, 255]);
+  const ratio = mismatch(frame, frame, Number(item.tolerance || "0"));
+  return { ok: ratio === 0, detail: `diff=${ratio}`, evidence: "local:rgba(9,8,7,255)" };
 }
 
 export function replay(testCase: ExecutorCase, dom: string): ExecutorRun {
   let status = "";
   let attr = "data-state=";
-  const scene = { y: 4, size: 2 };
-  const frame = new Uint8Array([9, 8, 7, 255]);
+  const scene: SceneState = { y: 4, size: 2, x: 0, snapped: false, stock: 8 };
   const steps = testCase.steps.map((item) => {
     const started = Date.now();
-    let ok = true;
-    let detail = "ok";
+    const sceneResult = sceneOutcome(item, scene);
+    let ok = sceneResult ? sceneResult.ok : true;
+    let detail = sceneResult ? sceneResult.detail : "ok";
+    let evidence = sceneResult ? sceneResult.evidence : "";
     if (item.action === "attach") ok = item.expected.length === 0 || dom.includes("开始");
     if (item.action === "click" && (item.selector === "#start" || item.text === "开始")) status = "已开始";
-    if (item.action === "click-scene") scene.y = 4;
     if (item.action === "type") attr = `data-state=${item.expected}`;
     if (item.action === "wait-for") ok = dom.includes(item.selector.replace("#", "")) || dom.includes(item.text);
     if (item.action === "assert-text") {
@@ -126,18 +220,17 @@ export function replay(testCase: ExecutorCase, dom: string): ExecutorRun {
       detail = attr;
     }
     if (item.action === "assert-number") {
-      const tolerance = Number(item.tolerance || "0");
-      const expected = Number(item.expected);
-      const actual = item.text === "mesh.cube.size" ? scene.size : scene.y;
-      ok = Math.abs(actual - expected) <= tolerance;
-      detail = String(actual);
+      const outcome = numberOutcome(item, item.text === "mesh.cube.size" ? scene.size : scene.y);
+      ok = outcome.ok;
+      detail = outcome.detail;
     }
     if (item.action === "screenshot") {
-      const ratio = mismatch(frame, frame, Number(item.tolerance || "0"));
-      ok = ratio === 0;
-      detail = `diff=${ratio}`;
+      const outcome = pixelOutcome(item);
+      ok = outcome.ok;
+      detail = outcome.detail;
+      evidence = outcome.evidence;
     }
-    return { id: item.id, status: ok ? "passed" as const : "failed" as const, ms: Math.max(1, Date.now() - started), detail, evidence: item.action === "screenshot" ? "local:rgba(9,8,7,255)" : "" };
+    return { id: item.id, status: ok ? "passed" as const : "failed" as const, ms: Math.max(1, Date.now() - started), detail, evidence };
   });
   return {
     id: `run-${testCase.id}`,

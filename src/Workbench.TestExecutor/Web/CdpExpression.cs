@@ -12,7 +12,7 @@ internal static class CdpExpression
     private static readonly Regex AssignmentComma = new(@"\([A-Za-z_$][\w$]*\s*=[^;]*;,", RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
 
     public static string Build(object request)
-        => "(() => {\nconst request = " + JsonSerializer.Serialize(request) + ";\n" + Script + "\n})()";
+        => "(() => {\nconst request = " + JsonSerializer.Serialize(request) + ";\n" + ScenePage.Source + "\n" + Script + "\n})()";
 
     public static bool UsesAssignmentComma(string expression) => AssignmentComma.IsMatch(expression);
 
@@ -68,18 +68,6 @@ internal static class CdpExpression
           return {found:true, ok:true};
         }
         if (request.op === 'record-export') return {found:true, events: window.__workbenchRecording || []};
-        const scene = window.__workbenchScene;
-        if (request.op === 'project') {
-          if (!scene || typeof scene.project !== 'function') return {found:false};
-          const point = scene.project(request.objectName || '');
-          if (!point) return {found:false};
-          return {found:true, ok:true, x:point.x, y:point.y, actual: point.x + ',' + point.y};
-        }
-        if (request.op === 'read-scene') {
-          if (!scene || typeof scene.read !== 'function') return {found:false};
-          const data = scene.read();
-          return {found:true, ok:true, actual: JSON.stringify(data)};
-        }
         const find = () => {
           if (request.selector) return document.querySelector(request.selector);
           if (request.role) return nodes().find(el => roleOf(el) === request.role && (!request.name || nameOf(el).includes(request.name))) || null;
