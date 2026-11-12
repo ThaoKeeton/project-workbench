@@ -47,9 +47,10 @@ public sealed partial class SuiteRunner
                 {
                     result = new WebResult(false, false, ExecutorError.Timeout, false, null);
                 }
-                catch (ExecutorDataException cdpError) when (!cancellationToken.IsCancellationRequested)
+                catch (Exception cdpError) when (!cancellationToken.IsCancellationRequested && cdpError is ExecutorDataException or HttpRequestException)
                 {
-                    result = new WebResult(false, false, cdpError.Code, false, null);
+                    var code = cdpError is ExecutorDataException data ? data.Code : ExecutorError.DebugPortMissing;
+                    result = new WebResult(false, false, code, false, null);
                 }
             }
             var after = await CaptureSurfaceAsync(suite, session, web, log, cancellationToken);

@@ -281,7 +281,7 @@ public sealed class CdpWebSession : IWebSession
         {
             return await ScreenshotAsync(cancellationToken);
         }
-        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
         {
             if (cancellationToken.IsCancellationRequested) throw;
             return null;
