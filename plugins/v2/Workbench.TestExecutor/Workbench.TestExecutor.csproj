@@ -14,7 +14,7 @@
     <InternalsVisibleTo Include="Workbench.TestExecutor.Tests" />
     <ProjectReference Include="../../../src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
     <ProjectReference Include="../../../src/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
-    <None Include="plugin.v2.json" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="ui/module.js" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="plugin.v2.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <None Include="ui/module.js" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
   </ItemGroup>
 </Project>

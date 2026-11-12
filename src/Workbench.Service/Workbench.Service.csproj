@@ -9,6 +9,7 @@
     <Description>Local loopback preview service. Does not replace the WinUI host.</Description>
     <IsPackable>false</IsPackable>
     <Nullable>enable</Nullable>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Workbench.Service.Tests" />

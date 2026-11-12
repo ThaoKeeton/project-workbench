@@ -12,7 +12,7 @@
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../../../src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
-    <None Include="plugin.v2.json" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="plugin.v2.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
     <EmbeddedResource Include="Samples\today.txt" LogicalName="standup-sample.txt" />
   </ItemGroup>
 </Project>
