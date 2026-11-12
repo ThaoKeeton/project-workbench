@@ -35,7 +35,7 @@ export const pinnedPlugins: Array<{ id: PluginId; name: string; icon: IconName; 
   { id: "upcam", name: "UPCAM 站会日报", icon: "clipboard", hint: "整理今日站会并生成草稿" },
   { id: "ding", name: "钉钉 Insights", icon: "chat", hint: "看本周沟通热点与会议节奏" },
   { id: "test", name: "测试设计", icon: "flask", hint: "用例仓库与失败分流" },
-  { id: "runner", name: "自动化测试执行器", icon: "activity", hint: "从已保存的套件开始运行" },
+  { id: "runner", name: "自动化测试执行器", icon: "activity", hint: "用文字结构编写可回放脚本" },
 ];
 
 export const todayItems = [
