@@ -39,15 +39,15 @@ export const pinnedPlugins: Array<{ id: PluginId; name: string; icon: IconName; 
 ];
 
 export const todayItems = [
-  { time: "09:20", source: "UPCAM", title: "XH-128 登录页视觉走查进入终检" },
-  { time: "09:41", source: "钉钉 Insights", title: "本周站会日报已写入草稿" },
-  { time: "10:05", source: "测试设计", title: "17 条失败待分流，集中在支付回调" },
+  { time: "09:20", source: "钉钉 Insights", title: "站会纪要已生成，待你确认后才会发送" },
+  { time: "09:12", source: "UPCAM", title: "XH-128 登录页视觉走查仍在进行" },
+  { time: "昨天", source: "测试设计", title: "合成检查 36 / 36 通过，不替代人工验收" },
 ];
 
 export const recentPlugins = [
-  { id: "upcam" as const, name: "UPCAM 站会日报", hint: "整理今日站会并生成草稿", icon: "clipboard" as const },
-  { id: "ding" as const, name: "钉钉 Insights", hint: "看本周沟通热点与会议节奏", icon: "chat" as const },
-  { id: "test" as const, name: "测试设计", hint: "用例仓库与失败分流", icon: "flask" as const },
+  { id: "upcam" as const, name: "UPCAM 站会日报", hint: "采集站会记录并生成今日摘要", icon: "clipboard" as const },
+  { id: "ding" as const, name: "钉钉 Insights", hint: "按需检查群聊洞察，不代发", icon: "chat" as const },
+  { id: "test" as const, name: "测试设计", hint: "运行合成检查看板，仍需人工验收", icon: "flask" as const },
 ];
 
 export const devices = [
@@ -148,11 +148,6 @@ export const marketItems: MarketItem[] = [
 ];
 
 export const categories = ["全部", "效率", "协作", "测试", "工具"] as const;
-
-export function formatLauncherDate(date: Date): string {
-  const weekday = "日一二三四五六"[date.getDay()];
-  return `${date.getMonth() + 1} 月 ${date.getDate()} 日 星期${weekday}`;
-}
 
 export function deviceLabel(id: DeviceId): string {
   const device = devices.find((item) => item.id === id);

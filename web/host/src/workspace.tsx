@@ -5,7 +5,7 @@ import { pinnedPlugins, type PluginId } from "./catalog";
 import { Icon } from "./icons";
 import { TestCasesPanel } from "../../../plugins/v2/Workbench.TestCases.V2/ui/TestCasesPanel";
 
-const tabs: PluginId[] = ["upcam", "ding", "test", "runner"];
+const tabs: PluginId[] = ["upcam", "ding", "test"];
 
 export function PluginWorkspace({
   client,

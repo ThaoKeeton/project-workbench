@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api";
-import { formatLauncherDate } from "./catalog";
 import { HomePage } from "./launcher";
 import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
 import { DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SettingsPage } from "./workspace";
@@ -17,11 +16,11 @@ const client = {
 } as unknown as ApiClient;
 
 describe("launcher pages", () => {
-  it("formats the launcher date and opens a recent plugin", async () => {
-    expect(formatLauncherDate(new Date(2026, 10, 11))).toBe("11 月 11 日 星期三");
+  it("opens a recent plugin from the launcher", async () => {
     const user = userEvent.setup();
-    render(<MemoryRouter><HomePage onOpenPalette={vi.fn()} date={new Date(2026, 10, 11)} /></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "早上好，文前" })).toBeTruthy();
+    render(<MemoryRouter><HomePage onOpenPalette={vi.fn()} /></MemoryRouter>);
+    expect(screen.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeTruthy();
+    expect(screen.getByText("合成检查 36 / 36 通过，不替代人工验收")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /UPCAM 站会日报/ }));
   });
 

@@ -34,12 +34,14 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   border-right: 0;
   border-top: 0;
 }
-.project-name, .device-trigger, .remote-pill, .window-controls button {
+.wordmark, .device-trigger, .remote-pill, .window-controls button, .top-context {
   display: inline-flex;
   align-items: center;
   gap: 8px;
 }
-.project-name { color: var(--text-primary); font-size: 13px; font-weight: 500; }
+.wordmark, .context-project, .context-dot { color: var(--text-secondary); font-size: 13px; font-weight: 500; }
+.context-dot { color: var(--text-muted); font-weight: 400; }
+.shortcut { margin-left: auto; color: var(--text-muted); font-family: var(--font-mono); font-size: 12px; }
 .top-grow { flex: 1; }
 .device { position: relative; }
 .device-trigger, .window-controls button, .rail-btn, .pair, .text-btn {
@@ -47,7 +49,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   background: transparent;
   color: var(--text-secondary);
 }
-.device-trigger { font-size: 13px; padding: 4px 8px; }
+.top-context .device-trigger { color: var(--text-primary); font-size: 13px; font-weight: 500; padding: 4px 8px; }
+.command-bar > span:first-of-type { flex: 1; text-align: left; }
 .remote-pill {
   height: 24px;
   padding: 0 9px;
