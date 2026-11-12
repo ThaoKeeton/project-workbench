@@ -434,7 +434,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             return string.Join('\n', parts);
         }
 
-        private string ProbeJson()
+        private static string ProbeJson()
         {
             var globals = new { THREE = false, scene = false, workbenchHook = false };
             var signals = new

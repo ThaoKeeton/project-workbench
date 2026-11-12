@@ -139,7 +139,60 @@ public sealed class SceneRecognitionTests
         Assert.Equal(0, computer.ObserveCalls);
         Assert.Contains("\"tokens\":0", await File.ReadAllTextAsync(Path.Combine(reports, "ai-usage.json")), StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(reports, "CASE-1-pixels.png")));
+        var text = await connected.SceneTextAsync(CancellationToken.None);
+        Assert.Contains("cube", text, StringComparison.Ordinal);
+        Assert.DoesNotContain("data:image", text, StringComparison.Ordinal);
+        var early = await connected.PerformAsync(new TestStep("early", StepKind.Scene3d, "diff", new ElementSelector(null, null, "#view"), null, null, 15, false, false), CancellationToken.None);
+        Assert.False(early.Ok);
+        Assert.Equal("no-earlier-snapshot", early.Actual);
+        var wheeled = await connected.PerformAsync(new TestStep("roll", StepKind.Scene3d, "wheel", new ElementSelector(null, null, "#view", null, null, null, null, "cube"), null, "0,-40", 15, false, false), CancellationToken.None);
+        Assert.True(wheeled.Ok, wheeled.Actual);
         Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Probe_command_writes_a_local_report_and_rejects_a_bad_port()
+    {
+        var bad = RunProbe(["--port", "0"]);
+        Assert.Equal(2, bad);
+        await using var host = SyntheticCdpHost.StartOn(0, "合成页面", null);
+        var root = Fixtures.Temp();
+        var output = Path.Combine(root, "scene-probe.json");
+        var code = RunProbe(["--port", host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "--out", output, "--title", "合成页面"]);
+        Assert.Equal(0, code);
+        var report = await File.ReadAllTextAsync(output);
+        Assert.Contains("\"recommended\":\"devtools\"", report, StringComparison.Ordinal);
+        Assert.DoesNotContain("data:image", report, StringComparison.Ordinal);
+        Directory.Delete(root, true);
+    }
+
+    private static int RunProbe(string[] args)
+    {
+        var start = new System.Diagnostics.ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true
+        };
+        start.ArgumentList.Add(ProbeDll());
+        foreach (var arg in args) start.ArgumentList.Add(arg);
+        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
+        process.WaitForExit();
+        return process.ExitCode;
+    }
+
+    private static string ProbeDll()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        for (var depth = 0; depth < 8 && dir is not null; depth++, dir = dir.Parent)
+        {
+            foreach (var configuration in new[] { "Release", "Debug" })
+            {
+                var candidate = Path.Combine(dir.FullName, "tools", "Workbench.SceneProbe", "bin", configuration, "net10.0", "Workbench.SceneProbe.dll");
+                if (File.Exists(candidate)) return candidate;
+            }
+        }
+        throw new FileNotFoundException("Scene probe tool was not built.");
     }
 
     private static bool BuildBundle()

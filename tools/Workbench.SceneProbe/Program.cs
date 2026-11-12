@@ -35,7 +35,7 @@ if (port is < 1 or > 65535) return 2;
 var session = await CdpWebSession.ConnectAsync(port, title, null, CancellationToken.None);
 if (session is null)
 {
-    Console.Error.WriteLine("debug-port-unreachable");
+    await Console.Error.WriteLineAsync("debug-port-unreachable");
     return 1;
 }
 await using (session)
@@ -44,6 +44,6 @@ await using (session)
     var report = await session.ProbeAsync(CancellationToken.None);
     var full = Path.GetFullPath(output);
     await File.WriteAllTextAsync(full, report);
-    Console.WriteLine(full);
+    await Console.Out.WriteLineAsync(full);
 }
 return 0;

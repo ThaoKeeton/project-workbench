@@ -470,7 +470,7 @@ public sealed class CdpWebSession : IWebSession
         {
             var report = await ProbeAsync(cancellationToken);
             var matched = step.Expected is not { Length: > 0 } || report.Contains(step.Expected, StringComparison.Ordinal);
-            return new WebResult(true, matched, matched ? report : report, false, null);
+            return new WebResult(true, matched, report, false, null);
         }
         if (step.Action is "compare-pixels" or "screenshot")
         {
