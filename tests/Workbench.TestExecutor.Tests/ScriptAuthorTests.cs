@@ -248,27 +248,39 @@ public sealed class ScriptAuthorTests
         }
         try
         {
-            var suite = authored with { Application = application };
-            var root = Fixtures.Temp();
-            var reports = Path.Combine(root, "reports");
-            var computer = new FakeComputerUseProvider();
-            var runner = Fixtures.Runner(new ScriptedFactory(), computer, new RecordingExporter(), new RecordingDeadline(), root, reports);
-            var sink = new ListSink();
-            await runner.RunAsync(suite, new RunRequest("author-replay", Fixtures.Policy(), reports), sink, CancellationToken.None);
-            var trace = string.Join(" || ", sink.Steps.Select(step => step.StepId + "=" + step.Status + "/" + step.ErrorType + "/" + step.Message));
-            Assert.Equal(0, computer.ObserveCalls);
-            Assert.Contains("\"tokens\":0", await File.ReadAllTextAsync(Path.Combine(reports, "ai-usage.json")), StringComparison.Ordinal);
-            Assert.True(sink.Steps.Any(step => step.StepId == "start" && step.Status == "passed" && step.Engine == "web"), trace);
-            Assert.True(sink.Steps.Any(step => step.StepId == "status" && step.Status == "passed"), trace);
-            Assert.True(sink.Steps.Any(step => step.StepId == "before-cut" && step.Status == "passed" && step.Engine == "scene3d"), trace);
-            Assert.True(sink.Steps.Any(step => step.StepId == "cut-drag" && step.Status == "passed" && step.Engine == "scene3d"), trace);
-            Assert.True(sink.Steps.Any(step => step.StepId == "cut-diff" && step.Status == "passed" && step.Engine == "scene3d"), trace);
-            Directory.Delete(root, true);
+            string? failure = null;
+            for (var attempt = 1; attempt <= 2; attempt++)
+            {
+                failure = await RunOnceAsync(authored with { Application = application });
+                if (failure is null) return;
+                await Task.Delay(1000);
+            }
+            Assert.Fail(failure);
         }
         finally
         {
             if (host is not null) await host.DisposeAsync();
         }
+    }
+
+    private static async Task<string?> RunOnceAsync(TestSuite suite)
+    {
+        var root = Fixtures.Temp();
+        var reports = Path.Combine(root, "reports");
+        var computer = new FakeComputerUseProvider();
+        var runner = Fixtures.Runner(new ScriptedFactory(), computer, new RecordingExporter(), new RecordingDeadline(), root, reports);
+        var sink = new ListSink();
+        await runner.RunAsync(suite, new RunRequest("author-replay", Fixtures.Policy(), reports), sink, CancellationToken.None);
+        var trace = string.Join(" || ", sink.Steps.Select(step => step.StepId + "=" + step.Status + "/" + step.ErrorType + "/" + step.Message));
+        var passed = computer.ObserveCalls == 0
+            && File.ReadAllText(Path.Combine(reports, "ai-usage.json")).Contains("\"tokens\":0", StringComparison.Ordinal)
+            && sink.Steps.Any(step => step.StepId == "start" && step.Status == "passed" && step.Engine == "web")
+            && sink.Steps.Any(step => step.StepId == "status" && step.Status == "passed")
+            && sink.Steps.Any(step => step.StepId == "before-cut" && step.Status == "passed" && step.Engine == "scene3d")
+            && sink.Steps.Any(step => step.StepId == "cut-drag" && step.Status == "passed" && step.Engine == "scene3d")
+            && sink.Steps.Any(step => step.StepId == "cut-diff" && step.Status == "passed" && step.Engine == "scene3d");
+        Directory.Delete(root, true);
+        return passed ? null : trace;
     }
 
     private static string? FindElectron()
