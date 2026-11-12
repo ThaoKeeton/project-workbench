@@ -3,7 +3,10 @@ import { NavLink, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "./api";
 import { pinnedPlugins, type PluginId } from "./catalog";
 import { Icon } from "./icons";
+import { DingPanel } from "../../../plugins/v2/Workbench.DingTalkInsights.V2/ui/DingPanel";
 import { TestCasesPanel } from "../../../plugins/v2/Workbench.TestCases.V2/ui/TestCasesPanel";
+import { TestingPanel } from "../../../plugins/v2/Workbench.TestingDesign.V2/ui/TestingPanel";
+import { UpcamPanel } from "../../../plugins/v2/Workbench.UpcamStandup.V2/ui/UpcamPanel";
 
 const tabs: PluginId[] = ["upcam", "ding", "test"];
 
@@ -37,77 +40,42 @@ export function PluginWorkspace({
       {remoteName ? <p className="remote-banner"><i />正在操作 {remoteName} · 延迟 12 ms</p> : null}
       <div className="canvas">
         {crashed ? <CrashState name={plugin.name} /> : null}
-        {!crashed && plugin.id === "upcam" ? <UpcamCanvas /> : null}
-        {!crashed && plugin.id === "ding" ? <DingCanvas /> : null}
-        {!crashed && plugin.id === "test" ? <CasesCanvas client={client} /> : null}
+        {!crashed && plugin.id === "upcam" ? <UpcamCanvas client={client} /> : null}
+        {!crashed && plugin.id === "ding" ? <DingCanvas client={client} /> : null}
+        {!crashed && plugin.id === "test" ? <TestingCanvas client={client} /> : null}
         {!crashed && plugin.id === "runner" ? <RunnerCanvas empty={empty} /> : null}
       </div>
     </div>
   );
 }
 
-function UpcamCanvas() {
-  const rows = [
-    ["XH-128", "登录页视觉走查", "林晓秋", "进行中"],
-    ["XH-141", "导出确认流程", "周予安", "待评审"],
-    ["XH-155", "设备配对提示文案", "陈启明", "已完成"],
-    ["XH-162", "站会摘要模板微调", "林晓秋", "进行中"],
-    ["XH-170", "远程导出确认拷贝", "周予安", "待对方确认"],
-  ];
-  return (
-    <article className="doc">
-      <header className="doc-head">
-        <div>
-          <h1>站会日报</h1>
-          <p>2026年11月11日星期三 · 星河协作 · 自动发送已关闭</p>
-        </div>
-        <div className="row-actions">
-          <button type="button" className="btn">刷新采集</button>
-          <button type="button" className="btn-accent">生成摘要</button>
-        </div>
-      </header>
-      <h2>摘要</h2>
-      <p>今日站会确认登录页视觉走查进入终检；导出流程仍需对方本机确认。自动发送保持关闭，摘要仅写入本机草稿。</p>
-      <h2>今日事项</h2>
-      <ul className="matters">
-        {rows.map(([code, title, person, state]) => (
-          <li key={code}>
-            <span>{code}</span>
-            <span>{title}</span>
-            <span>{person}</span>
-            <span className={`state state-${state}`}>{state}</span>
-          </li>
-        ))}
-      </ul>
-      <h2>发言摘录</h2>
-      <p><strong>林晓秋</strong><br />登录页今天走完最后一轮对照，明日交给测试设计做一次合成检查。</p>
-      <p><strong>周予安</strong><br />导出仍要对方本机确认，自动发送保持关闭。</p>
-      <p><strong>陈启明</strong><br />配对提示文案已写完，可以进摘要。</p>
-    </article>
-  );
+function UpcamCanvas({ client }: { client: ApiClient }) {
+  const load = useCallback(() => client.upcamDraft(), [client]);
+  const importNotes = useCallback((files: Parameters<ApiClient["upcamImport"]>[0]) => client.upcamImport(files), [client]);
+  const loadSample = useCallback(() => client.upcamSample(), [client]);
+  return <UpcamPanel load={load} importNotes={importNotes} loadSample={loadSample} />;
 }
 
-function DingCanvas() {
-  return (
-    <article className="doc">
-      <h1>钉钉 Insights</h1>
-      <p className="sub">本周沟通热点与会议节奏。只读取已授权的本机摘录，不发送消息。</p>
-      <ul className="plain">
-        <li>站会日报连续三天提到登录页终检</li>
-        <li>支付回调失败仍集中在测试设计</li>
-        <li>没有待外发的群消息</li>
-      </ul>
-    </article>
-  );
+function DingCanvas({ client }: { client: ApiClient }) {
+  const load = useCallback(() => client.dingState(), [client]);
+  const importChat = useCallback((text: string) => client.dingImport(text), [client]);
+  const loadSample = useCallback(() => client.dingSample(), [client]);
+  const analyze = useCallback(() => client.dingAnalyze(), [client]);
+  return <DingPanel load={load} importChat={importChat} loadSample={loadSample} analyze={analyze} />;
 }
 
-function CasesCanvas({ client }: { client: ApiClient }) {
+function TestingCanvas({ client }: { client: ApiClient }) {
+  const load = useCallback(() => client.testingDashboard(), [client]);
+  return <TestingPanel load={load} />;
+}
+
+export function SampleCasesPage({ client }: { client: ApiClient }) {
   const load = useCallback(() => client.cases(), [client]);
   const save = useCallback((document: Parameters<ApiClient["saveCases"]>[0]) => client.saveCases(document), [client]);
   const exportCsv = useCallback(() => client.exportCases(), [client]);
   return (
     <article className="doc">
-      <h1>测试设计</h1>
+      <h1>测试用例 · 示例</h1>
       <p className="sub">预置示例留在本机。不执行测试，也不发送。</p>
       <TestCasesPanel
         load={load}
@@ -298,13 +266,13 @@ export function DiagnosticsPage({ minimumWidth }: { minimumWidth: number }) {
       </header>
       <ul className="status-rows">
         <li><span>本机服务</span><strong>仅本机回环 · 已连接</strong></li>
-        <li><span>插件沙箱</span><strong>示例插件就绪</strong></li>
+        <li><span>插件沙箱</span><strong>站会、洞察与测试设计均在本机</strong></li>
         <li><span>局域网</span><strong>合成演示，预览不开放局域网</strong></li>
         <li><span>自动发送</span><strong>自动发送：关闭 · 最小宽度 {minimumWidth.toLocaleString("zh-CN")}</strong></li>
       </ul>
       <h2>最近日志</h2>
       <ul className="log-rows">
-        <li><span>11:18:02</span><span>沙箱 upcam 就绪</span></li>
+        <li><span>11:18:02</span><span>站会草稿只写入本机</span></li>
         <li><span>11:17:44</span><span>LAN 发现 书房工作站</span></li>
         <li><span>11:16:09</span><span>市场签名校验通过，4 个更新可用</span></li>
         <li><span>11:12:51</span><span>本地导入示例包已隐藏进度</span></li>

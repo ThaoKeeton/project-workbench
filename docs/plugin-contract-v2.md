@@ -90,3 +90,13 @@ v2 包使用单独的 `plugin.v2.json`。不要把它放到现有 WinUI 宿主�
 - 没有网络、webhook 或发送。
 
 v1 的 `plugins/Workbench.TestCases.Sample` 继续给现有 WinUI 宿主使用。
+
+另外三个预览插件使用同一份清单规则，不增加字段：
+
+| 插件 | id | 数据文件 |
+| --- | --- | --- |
+| UPCAM 站会日报 | `com.projectworkbench.upcam-standup.v2` | `digest.v2.json`，schema `workbench.upcam.digest.v2.preview` |
+| 钉钉 Insights | `com.projectworkbench.dingtalk-insights.v2` | `chat.v2.json` 与 `insights.v2.json` |
+| 测试设计 | `com.projectworkbench.testing-design.v2` | `dashboard.v2.json`，schema `workbench.testing.dashboard.v2.preview` |
+
+站会记录和聊天导出都由页面读取本机文件后把正文交给回环服务，服务不浏览任意路径。样本里的负责人是角色，不是人名。`autoSend` 仍必须是 `false`。钉钉的 `send` 动作固定返回 `SendDisabled`。测试看板的每条运行都写着人工验收「未验收」。

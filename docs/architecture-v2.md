@@ -15,7 +15,10 @@ Electron 薄壳（窗口最小宽度 1,100）
         ├─ 项目目录：复用 ProjectWorkspaceCatalog（schema 1）
         ├─ v1 插件：复用 PluginManager.DiscoverAsync，只读状态，不启用、不加载
         └─ v2 插件：权限清单 + C# 后端模块 + 嵌在宿主里的网页
-                └─ 本预览只迁了「测试用例 · 示例」
+                ├─ 测试用例 · 示例
+                ├─ UPCAM 站会日报（本机文件，只写草稿）
+                ├─ 钉钉 Insights（合成导出，按需分析，发送关闭）
+                └─ 测试设计（合成检查看板，不替代人工验收）
 ```
 
 桌面壳是 Electron，不再是 WinUI 3 / WebView2。现有 `Workbench.App` 仍是 WinUI 3 宿主，预览不替换它。Electron 只打开窗口并拉起已经存在的 `Workbench.Service`：页面仍是 `web/host` 的 React 界面，接口仍是 `http://127.0.0.1:<端口>/api/v2`。窗口默认 1180×800，宽度低于 1,100 或高度低于 640 时 Electron 会拒绝继续缩小。这和原来外壳恢复里「宽度至少 1,100」的语义一致。网页按 S1 启动器排布：左侧图标轨、顶栏项目名和设备切换、居中的首页。1,100 像素宽时图标轨仍在，不改成另一套导航。
@@ -69,6 +72,9 @@ npx electron . --smoke --user-root "$root" --ui-dist "$(pwd)/../../web/host/dist
 | --- | --- | --- |
 | 项目目录 | `<预览根>/.workspaces/catalog.json` | 现有 schema 1，不扩展字段 |
 | 示例用例 | `<项目根>/v2-plugins/<插件 id>/cases.v2.json` | `workbench.test-cases.v2.preview` / 2 |
+| 站会草稿 | `<项目根>/v2-plugins/com.projectworkbench.upcam-standup.v2/digest.v2.json` | `workbench.upcam.digest.v2.preview` / 2 |
+| 聊天导出与洞察 | `<项目根>/v2-plugins/com.projectworkbench.dingtalk-insights.v2/` | `workbench.dingtalk.chat.v2.preview` 与 `workbench.dingtalk.insights.v2.preview` / 2 |
+| 合成看板 | `<项目根>/v2-plugins/com.projectworkbench.testing-design.v2/dashboard.v2.json` | `workbench.testing.dashboard.v2.preview` / 2 |
 | 会话 | `<预览根>/v2-session.json` | `workbench.v2-session.preview` / 2 |
 
 调用方必须带 `Authorization: Bearer <会话令牌>`，或者先 `POST /api/v2/session` 换一个 `HttpOnly`、`SameSite=Strict`、路径 `/api` 的 cookie。错误体只有 `error` 代码，不返回异常文本、路径或 HRESULT。
@@ -85,6 +91,15 @@ npx electron . --smoke --user-root "$root" --ui-dist "$(pwd)/../../web/host/dist
 | GET | `/api/v2/events` | WebSocket。先发 `ready`，项目切换后发 `project-changed` |
 | GET/PUT | `/api/v2/plugins/com.projectworkbench.test-cases.v2/cases` | 示例用例 |
 | POST | `/api/v2/plugins/com.projectworkbench.test-cases.v2/export` | 本地 CSV，不发送 |
+| GET | `/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/draft` | 今日站会草稿；没有草稿时为空 |
+| POST | `/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/import` | 导入本机站会记录，只写草稿 |
+| POST | `/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/sample` | 载入合成站会样本 |
+| GET | `/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/state` | 洞察状态；未分析时没有洞察 |
+| POST | `/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/import` | 导入聊天导出，不分析 |
+| POST | `/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/sample` | 载入合成聊天导出 |
+| POST | `/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/analyze` | 按需生成带原文证据的洞察 |
+| POST | `/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/send` | 始终 `SendDisabled`，不打开网络 |
+| GET | `/api/v2/plugins/com.projectworkbench.testing-design.v2/actions/dashboard` | 合成检查看板，人工验收保持未验收 |
 | GET/PUT | `/api/v2/ui/theme` | 界面主题 `system` / `light` / `dark`。文件是 `v2-preview/ui-theme.json`，`schemaVersion` 为 2 |
 
 不兼容的变更要提高 `preview` 版本，并继续留在 `/api/v2` 之外的新路径上，直到有意发布稳定的 v2。不要把新字段写进 schema 1 的目录、上下文或测试存储。
@@ -96,6 +111,7 @@ npx electron . --smoke --user-root "$root" --ui-dist "$(pwd)/../../web/host/dist
 - 清单文件是 `plugin.v2.json`，和 v1 的 `plugin.json` 分开。v2 包不要放进现有宿主的 `Plugins/` 发现目录。
 - 包由三部分组成：权限清单、实现 `IWorkbenchPluginModule` 的 C# 后端、嵌在主窗口里的网页模块。
 - 本预览迁的是仓库里的测试用例示例，新 id 是 `com.projectworkbench.test-cases.v2`。原来的 `com.projectworkbench.test-cases` WinUI 插件保持不动。
+- 站会日报、钉钉洞察和测试设计使用同一份 `plugin.v2.json` 契约，id 分别是 `com.projectworkbench.upcam-standup.v2`、`com.projectworkbench.dingtalk-insights.v2` 和 `com.projectworkbench.testing-design.v2`。清单没有新字段，所以契约版本仍是 `2.0.0-preview.1`。上面的动作路径是增量接口。schema 1 的目录、上下文和测试存储都不写新字段。
 - 预置三行仍是 EX-001、EX-002、EX-003。数据写在 v2 目录，不写 `.workbench-project/testing`。
 - `autoSend` 必须是 `false`。`message.send` 以及任何未列入允许集的权限都会让模块保持未加载。标记 `sensitive: true` 的权限在本预览里也不授予；以后凡是发送，都要在本机单独确认。
 
@@ -130,8 +146,8 @@ Electron 壳把窗口底色设成当前系统主题对应的页面底色。标�
 
 1. 已在本预览：本机服务、网页壳、Electron 薄壳、一个示例插件、服务测试、Linux Playwright，以及 Linux 上的 Electron 冒烟。Windows 11 上的窗口、DPI 和标题栏仍要人工看。
 2. 项目上下文、主题和插件设置的只读/保存，仍走现有存储，不改 schema 1。
-3. 迁工作摘要示例。命令保持本地，不覆盖已有草稿。
-4. 测试设计插件先迁只读页面和本地用例。远程 Figma 与模型创作继续保持手动，不在 v2 里默认打开。
+3. 站会日报已在本预览：从本机文件或文件夹整理今日事项和发言摘要，草稿只写在插件自己的 v2 目录。不连接 Teambition，不调用模型。
+4. 测试设计已在本预览提供合成检查看板，列出预置用例和运行，并标明不替代人工验收。它不执行测试。远程 Figma 与模型创作继续保持手动，不在 v2 里默认打开。钉钉洞察只分析导入的合成或本机导出，发送动作保持关闭。
 5. 凭据页只显示是否已保存。值不进入网页，也不进入日志。
 6. 完成上面的局域网基线之后，才允许有人显式打开局域网。发送仍要本机确认。
 
@@ -147,4 +163,5 @@ GitHub 托管的 Linux 任务可以编译 Electron 壳、跑它的单元测试�
 - 用户数据只出现在 `%LOCALAPPDATA%/ProjectWorkbench-v2-preview`，正式的 `%LOCALAPPDATA%/ProjectWorkbench` 没有新文件。
 - 关闭由壳拉起的窗口后，本机服务退出；用 `--attach` 打开的窗口关闭后，原来的服务还在。
 - `--allow-lan` 让壳直接退出，服务仍然只听 `127.0.0.1`。
-- 市场、设备、诊断、设置仍是宿主页面。UPCAM 和钉钉仍只是界面上的合成入口，没有接到这条服务。
+- 市场、设备、诊断、设置仍是宿主页面。三个业务插件只使用合成样本或用户在本机选择的文件，不连接 Teambition、钉钉或 webhook。
+- Windows 的文件和文件夹选择器、系统标题栏颜色，以及草稿确实落在 `%LOCALAPPDATA%/ProjectWorkbench-v2-preview` 而不是正式的 `%LOCALAPPDATA%/ProjectWorkbench`，仍要在 Windows 11 上由人看一次。

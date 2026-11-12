@@ -15,13 +15,9 @@
     <ProjectReference Include="../Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
     <ProjectReference Include="../Workbench.Core/Workbench.Core.csproj" />
     <ProjectReference Include="../../plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.UpcamStandup.V2/Workbench.UpcamStandup.V2.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.DingTalkInsights.V2/Workbench.DingTalkInsights.V2.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.TestingDesign.V2/Workbench.TestingDesign.V2.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
-  <Target Name="StagePreviewPlugin" AfterTargets="Build">
-    <PropertyGroup>
-      <_SampleOut>$(MSBuildThisFileDirectory)../../plugins/v2/Workbench.TestCases.V2/bin/$(Configuration)/net10.0/</_SampleOut>
-      <_Stage>$(OutputPath)preview-plugins/com.projectworkbench.test-cases.v2/</_Stage>
-    </PropertyGroup>
-    <MakeDir Directories="$(_Stage)" />
-    <Copy SourceFiles="$(_SampleOut)Workbench.TestCases.V2.dll;$(_SampleOut)Workbench.TestCases.V2.deps.json;$(MSBuildThisFileDirectory)../../plugins/v2/Workbench.TestCases.V2/plugin.v2.json" DestinationFolder="$(_Stage)" SkipUnchangedFiles="true" />
-  </Target>
+  <Import Project="StagePreviewPlugins.targets" />
 </Project>

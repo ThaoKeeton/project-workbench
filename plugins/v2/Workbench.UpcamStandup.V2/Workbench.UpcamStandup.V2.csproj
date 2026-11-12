@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Workbench.UpcamStandup.V2</RootNamespace>
+    <AssemblyName>Workbench.UpcamStandup.V2</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0-preview.1</InformationalVersion>
+    <Description>Local standup digest preview. No network and no sending.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
+    <None Include="plugin.v2.json" CopyToOutputDirectory="PreserveNewest" />
+    <EmbeddedResource Include="Samples\today.txt" LogicalName="standup-sample.txt" />
+  </ItemGroup>
+</Project>
