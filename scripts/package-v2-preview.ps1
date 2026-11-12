@@ -92,6 +92,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw "shell build failed." }
 }
 finally { Pop-Location }
+# Electron 45 ships no npm install script. install.js downloads the binary and writes path.txt.
+& $node (Join-Path $shell "node_modules/electron/install.js")
+if ($LASTEXITCODE -ne 0) { throw "Electron binary download failed." }
 $electronPathFile = Join-Path $shell "node_modules/electron/path.txt"
 if (-not (Test-Path -LiteralPath $electronPathFile)) { throw "Electron path.txt was not written." }
 $electronNameInDist = (Get-Content -Raw -LiteralPath $electronPathFile).Trim()

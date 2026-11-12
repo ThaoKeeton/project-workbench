@@ -615,7 +615,10 @@ jobs:
           npm run build --prefix tests/fixtures/TestExecutor.SyntheticElectron
           export EXECUTOR_ELECTRON=1
           # Preview service, plugins, and the executor. Lands next to the Core OpenCover report.
-          xvfb-run -a dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
+          # The full Electron sample is collected separately: coverage instrumentation
+          # makes that page miss its first probe when the service tests run beside it.
+          xvfb-run -a dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --filter "FullyQualifiedName!~Electron_sample_runs_the_cdp_suite" --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
+          xvfb-run -a dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --filter "FullyQualifiedName~Electron_sample_runs_the_cdp_suite"
           npm ci --ignore-scripts --prefix web/host
           npm rebuild esbuild --prefix web/host
           npm run test:unit --prefix web/host
