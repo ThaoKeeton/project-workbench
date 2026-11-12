@@ -39,16 +39,18 @@ $cases = @(
 
 $containers = foreach ($case in $cases) {
     $full = Join-Path $repo $case.File
-    $argumentText = ($case.Args | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ' '
+    # Switches must stay unquoted or PowerShell binds them as strings.
+    $argumentText = $case.Args -join ' '
     $command = "& '$($full -replace "'", "''")' $argumentText"
+    $label = ("$($case.File) $argumentText").Trim()
     New-PesterContainer -ScriptBlock {
-        param($File, $Command)
-        Describe $File {
+        param($Label, $Command)
+        Describe $Label {
             It 'runs the existing check' {
                 Invoke-Expression $Command
             }
         }
-    } -Data @{ File = $case.File; Command = $command }
+    } -Data @{ Label = $label; Command = $command }
 }
 
 $lcov = Join-Path $repo 'artifacts/coverage/powershell.lcov'
