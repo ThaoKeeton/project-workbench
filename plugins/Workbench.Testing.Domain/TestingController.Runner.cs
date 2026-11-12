@@ -32,7 +32,7 @@ public sealed partial class TestingController
                     if(!result.Passed) { lock(_sync) attempt.ObservedFailure=true; }
                     if(!ServiceOpen) break;
                     if(result.Passed && result.ErrorCode is not null) throw DomainErrors.Error("AdapterFailed");
-                    var receipt=await _testing.AddRunEvidenceAsync(attempt.Current.Plan.Id,new("image/bmp",result.PassiveFrame,true)).ConfigureAwait(false);
+                    var receipt=await _testing.AddRunEvidenceAsync(attempt.Current.Plan.Id,new("image/bmp",result.PassiveFrame,true),CancellationToken.None).ConfigureAwait(false);
                     await JournalAsync(attempt,_=>new(TestRunEventKind.StepFinished,item.Id,step.Id,result.Passed ? TestStepOutcome.Passed : TestStepOutcome.Failed,
                         result.Passed ? null : DomainErrors.Safe(result.ErrorCode ?? "AdapterFailed"),[receipt.Id]) { NativePlainTextState=result.NativePlainTextState }).ConfigureAwait(false);
                     if(!result.Passed) break;

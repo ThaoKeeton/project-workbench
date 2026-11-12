@@ -150,7 +150,7 @@ public sealed class OwnedPilotController
     }
     private static async Task<T> ReadCoreAsync<T>(Task admission, Func<Task<T>> operation) { await admission.ConfigureAwait(false); return await operation().ConfigureAwait(false); }
 
-    public Task CancelAndDrainAsync() => DrainWithSealAsync(SealAdmission(), default);
+    public Task CancelAndDrainAsync() => DrainWithSealAsync(SealAdmission(), CancellationToken.None);
     public Task PrepareLeaveAsync(CancellationToken cancellationToken = default)
     {
         lock (_sync)

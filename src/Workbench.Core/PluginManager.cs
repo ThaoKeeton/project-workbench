@@ -521,7 +521,8 @@ public sealed partial class PluginManager : IAsyncDisposable
             PublishContributions();
             // Plugin delegates and cancellation callbacks may have a synchronous prefix.
             // Keep it off the caller/dispatcher, and retain this single Task until it really ends.
-            var stop = entry.StopTask = Task.Run(() => StopOwnedWorkAsync(entry));
+            // Caller cancellation only stops the wait. The owned stop itself still runs to completion.
+            var stop = entry.StopTask = Task.Run(() => StopOwnedWorkAsync(entry), CancellationToken.None);
             _ = CleanupAfterStopAsync(entry, stop);
         }
         try { await entry.StopTask.WaitAsync(_options.StopTimeout, cancellationToken); }

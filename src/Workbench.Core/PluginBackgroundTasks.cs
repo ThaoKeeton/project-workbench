@@ -132,7 +132,7 @@ internal sealed class PluginBackgroundTasks(
                 task.ErrorCode = null;
                 task.StartedAt = DateTimeOffset.UtcNow;
                 task.FinishedAt = null;
-                task.Work = Task.Run(() => RunObservedAsync(task));
+                task.Work = Task.Run(() => RunObservedAsync(task), task.Cancellation.Token);
             }
             return new(true, "Background task started.");
         }

@@ -24,24 +24,39 @@ public sealed class CaseDraftSession
     public void CaptureName(string name)=>Capture(content=>content.Name==name ? content : content with { Name=name });
     public void CaptureCaseMetadata(string caseId,string title,string prerequisites)=>Capture(content=>
     {
-        var found=false;
-        var cases=content.Cases.Select(c=>
+        var matched=false;
+        var cases=content.Cases.ToArray();
+        for(var i=0;i<cases.Length;i++)
         {
-            if(c.Id!=caseId) return c;
-            found=true;return c.Title==title && c.Prerequisites==prerequisites ? c : c with { Title=title,Prerequisites=prerequisites };
-        }).ToArray();
-        if(!found) throw DomainErrors.Error("InvalidId");
+            if(cases[i].Id!=caseId) continue;
+            matched=true;
+            if(cases[i].Title==title && cases[i].Prerequisites==prerequisites) continue;
+            cases[i]=cases[i] with { Title=title,Prerequisites=prerequisites };
+        }
+        if(!matched) throw DomainErrors.Error("InvalidId");
         return cases.SequenceEqual(content.Cases) ? content : content with { Cases=Array.AsReadOnly(cases) };
     });
     public void CaptureStepText(string caseId,string stepId,string instruction,string expected)=>Capture(content=>
     {
-        var found=false;
-        var cases=content.Cases.Select(c=> c.Id!=caseId ? c : c with { Steps=ModelCopy.List(c.Steps.Select(s=>
+        var matchedCase=false;
+        var cases=content.Cases.ToArray();
+        for(var i=0;i<cases.Length;i++)
         {
-            if(s.Id!=stepId) return s;
-            found=true;return s.Instruction==instruction && s.Expected==expected ? s : s with { Instruction=instruction,Expected=expected,Action=null };
-        })) }).ToArray();
-        if(!found) throw DomainErrors.Error("InvalidId");
+            if(cases[i].Id!=caseId) continue;
+            matchedCase=true;
+            var matchedStep=false;
+            var steps=cases[i].Steps.ToArray();
+            for(var j=0;j<steps.Length;j++)
+            {
+                if(steps[j].Id!=stepId) continue;
+                matchedStep=true;
+                if(steps[j].Instruction==instruction && steps[j].Expected==expected) continue;
+                steps[j]=steps[j] with { Instruction=instruction,Expected=expected,Action=null };
+            }
+            if(!matchedStep) throw DomainErrors.Error("InvalidId");
+            cases[i]=cases[i] with { Steps=ModelCopy.List(steps) };
+        }
+        if(!matchedCase) throw DomainErrors.Error("InvalidId");
         var current=content.Cases.Single(c=>c.Id==caseId).Steps.Single(s=>s.Id==stepId);
         return current.Instruction==instruction && current.Expected==expected ? content : content with { Cases=Array.AsReadOnly(cases) };
     });

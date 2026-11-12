@@ -56,7 +56,7 @@ public sealed partial class TestingController
         await JoinObservedAsync(pending).ConfigureAwait(false);
         await CancelAttemptAsync(false,false).ConfigureAwait(false); // A previously admitted queue/start may only now have published its attempt.
         CaseDraftSession? draft;lock(_sync) draft=_draft;
-        if(draft is not null) await JoinObservedAsync([draft.FlushAsync()]).ConfigureAwait(false);
+        if(draft is not null) await JoinObservedAsync([draft.FlushAsync(CancellationToken.None)]).ConfigureAwait(false);
         lock(_sync) { if(_attempt is not null) _attempt.Released=true; }
         Publish();cancellationToken.ThrowIfCancellationRequested();
     }

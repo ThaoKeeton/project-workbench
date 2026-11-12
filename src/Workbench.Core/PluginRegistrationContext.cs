@@ -84,7 +84,7 @@ internal sealed class PluginRegistrationContext : IPluginTestingContext, IDispos
                 catch (Exception error) { failure = ProjectFailure.Code(error, "ProjectPreparationFailed"); }
                 await Task.WhenAll(_project.DrainAsync(), _testing.DrainAsync()).ConfigureAwait(false);
                 return new ProjectPreparationResult(failure is null, false, failure);
-            });
+            }, cancellationToken);
         }
     }
 
