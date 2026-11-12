@@ -39,12 +39,16 @@ $cases = @(
 
 $containers = foreach ($case in $cases) {
     $full = Join-Path $repo $case.File
+    $argumentText = ($case.Args | ForEach-Object { "'" + ($_ -replace "'", "''") + "'" }) -join ' '
+    $command = "& '$($full -replace "'", "''")' $argumentText"
     New-PesterContainer -ScriptBlock {
-        param($File, $ScriptArgs)
-        if ($null -eq $ScriptArgs) { $ScriptArgs = @() }
-        elseif ($ScriptArgs -isnot [System.Array]) { $ScriptArgs = @($ScriptArgs) }
-        & $File @ScriptArgs
-    } -Data @{ File = $full; ScriptArgs = [string[]]$case.Args }
+        param($File, $Command)
+        Describe $File {
+            It 'runs the existing check' {
+                Invoke-Expression $Command
+            }
+        }
+    } -Data @{ File = $case.File; Command = $command }
 }
 
 $lcov = Join-Path $repo 'artifacts/coverage/powershell.lcov'
@@ -115,3 +119,4 @@ foreach ($file in $hits.Keys) {
     }
 }
 Write-Host "PowerShell coverage: $coveredLines/$totalLines lines in $($hits.Keys.Count) files -> $OutputPath"
+if ($coveredLines -lt 1) { throw "PowerShell coverage recorded no executed lines." }
