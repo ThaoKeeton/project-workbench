@@ -431,7 +431,7 @@ public sealed class CdpWebSession : IWebSession
                 await WaitForHookAsync(cancellationToken);
             }
         }
-        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
         {
             if (cancellationToken.IsCancellationRequested) throw;
         }
