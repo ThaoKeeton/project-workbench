@@ -472,7 +472,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             var cube = Mesh("cube", "cube-1", "Scene/cube", _cubeX, 0, -1, 1, -1, 1, -1, 1, 24, 12, 8, "box2");
             var sphere = Mesh("sphere", "sphere-1", "Scene/sphere", 3, 0, 2.2, 3.8, -0.8, 0.8, -0.8, 0.8, 117, 168, 1.97, "sphere");
             var cone = Mesh("cone", "cone-1", "Scene/cone", -3, 0, -3.7, -2.3, -0.7, 0.7, -0.7, 0.7, 24, 12, 8, "cone");
-            var stock = Mesh("stock", "stock-1", "Scene/stock", 0, 2, -1, 1, _cut ? -1 : -1, _cut ? 0 : 1, -1, 1, _cut ? 12 : 24, _cut ? 6 : 12, _cut ? 4 : 8, _cut ? "cut" : "stock");
+            var stock = Mesh("stock", "stock-1", "Scene/stock", 0, 2, -1, 1, -1, _cut ? 0 : 1, -1, 1, _cut ? 12 : 24, _cut ? 6 : 12, _cut ? 4 : 8, _cut ? "cut" : "stock");
             return JsonSerializer.Serialize(new { mount = "devtools", camera, nodes = new object[] { cube, sphere, cone, stock }, diagnostics = Array.Empty<string>() });
         }
 
