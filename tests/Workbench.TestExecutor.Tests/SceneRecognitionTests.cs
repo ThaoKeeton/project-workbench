@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Workbench.TestExecutor;
 using Xunit;
 
@@ -164,6 +165,22 @@ public sealed class SceneRecognitionTests
         Assert.Contains("\"recommended\":\"devtools\"", report, StringComparison.Ordinal);
         Assert.DoesNotContain("data:image", report, StringComparison.Ordinal);
         Directory.Delete(root, true);
+    }
+
+    [Fact]
+    public async Task Unreadable_scene_documents_and_bad_probe_arguments_stay_safe()
+    {
+        Assert.Equal("nope", SceneSnapshot.Normalize("nope"));
+        Assert.Equal("[]", SceneSnapshot.Normalize("[]"));
+        Assert.Equal("", SceneSnapshot.TextOf("nope"));
+        Assert.Equal("", SceneSnapshot.TextOf("{}"));
+        Assert.Contains("\"recommended\":\"none\"", SceneProbeReport.FromSignals("nope"), StringComparison.Ordinal);
+        Assert.Contains("\"schemaVersion\":1", SceneDiff.Compare("nope", "{\"meshes\":[{\"name\":\"only\"}]}", 0.01), StringComparison.Ordinal);
+        using var partial = JsonDocument.Parse("{\"ndcX\":0,\"width\":10}");
+        Assert.False(SceneProjection.TryRead(partial.RootElement, out _, out _, out _));
+        Assert.Equal(2, await SceneProbeCli.RunAsync(["--port", "nope"]));
+        Assert.Equal(2, await SceneProbeCli.RunAsync(["--port", "70000"]));
+        Assert.Equal(2, await SceneProbeCli.RunAsync(["--out"]));
     }
 
     private static bool BuildBundle()

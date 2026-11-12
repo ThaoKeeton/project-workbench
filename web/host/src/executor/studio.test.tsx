@@ -14,6 +14,15 @@ describe("executor studio", () => {
     expect((screen.getByRole("checkbox", { name: "AI 修复" }) as HTMLInputElement).checked).toBe(false);
     await user.click(screen.getByRole("button", { name: "从样品录制" }));
     expect(screen.getByRole("button", { name: "录制 · 合成电子样品" })).toBeTruthy();
+    const objectName = screen.getByLabelText("rec-probe-4 对象");
+    await user.clear(objectName);
+    await user.type(objectName, "tooth");
+    expect((objectName as HTMLInputElement).value).toBe("tooth");
+    await user.selectOptions(screen.getByLabelText("rec-probe-4 动作"), "snapshot");
+    await user.clear(screen.getByLabelText("rec-probe-4 选择器"));
+    await user.type(screen.getByLabelText("rec-probe-4 选择器"), "#view");
+    await user.clear(screen.getByLabelText("rec-probe-4 容差"));
+    await user.type(screen.getByLabelText("rec-probe-4 容差"), "0.1");
     await user.click(screen.getByRole("button", { name: "回放" }));
     expect(await screen.findByText("全部通过")).toBeTruthy();
     expect(screen.getByText("正常回放不调用模型")).toBeTruthy();
