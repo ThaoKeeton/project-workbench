@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <SonarQubeTestProject>true</SonarQubeTestProject>
     <OutputType>Exe</OutputType>
     <RootNamespace>TestExecutor.SyntheticCdp</RootNamespace>
     <AssemblyName>TestExecutor.SyntheticCdp</AssemblyName>

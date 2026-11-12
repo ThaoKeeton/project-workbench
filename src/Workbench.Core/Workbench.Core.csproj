@@ -1,4 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <ProjectGuid>{7C2E1A44-5B18-4E2A-9C31-6F0A8D2B11E4}</ProjectGuid>
+  </PropertyGroup>
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
     <InternalsVisibleTo Include="Workbench.Core.Tests" />

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <SonarQubeTestProject>true</SonarQubeTestProject>
     <OutputType>Exe</OutputType>
     <RuntimeIdentifier>$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
     <SelfContained>true</SelfContained>

@@ -1,5 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
+    <SonarQubeTestProject>true</SonarQubeTestProject>
     <EnableDynamicLoading>true</EnableDynamicLoading>
     <NoWarn>$(NoWarn);CA2255</NoWarn>
   </PropertyGroup>
