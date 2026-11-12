@@ -9,9 +9,8 @@ const page: PageProbe = {
   commandBar: true,
   today: true,
   recentTiles: true,
-  homeHeading: true,
-  headingCodes: "26089,19978,22909,65292,25991,21069",
-  greetCodes: "49",
+  wordmark: true,
+  projectContext: true,
   builtins: true,
   product: "ProjectWorkbench",
   apiVersion: API_VERSION,
@@ -30,8 +29,8 @@ describe("electron smoke report", () => {
     expect(smokeFailures(report)).toEqual([]);
     expect(smokeFailures({ ...report, windowMinWidth: 1099 })).toEqual(["window-floor"]);
     expect(smokeFailures({ ...report, autoSend: true, lanEnabled: true, catalogSchemaVersion: 2 })).toEqual(["auto-send", "lan", "catalog-schema"]);
-    expect(previewProbeScript()).toContain(".greet h1");
-    expect(previewProbeScript()).toContain("26089,19978,22909,65292,25991,21069");
+    expect(previewProbeScript()).toContain(".wordmark");
+    expect(previewProbeScript()).toContain(".context-project");
     expect(previewProbeScript()).toContain("nav.rail");
     expect(previewProbeScript()).toContain("sessionStorage.getItem");
     expect(previewProbeScript()).not.toContain("session-token");

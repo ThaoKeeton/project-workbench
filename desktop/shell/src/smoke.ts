@@ -7,9 +7,8 @@ export interface PageProbe {
   commandBar: boolean;
   today: boolean;
   recentTiles: boolean;
-  homeHeading: boolean;
-  headingCodes: string;
-  greetCodes: string;
+  wordmark: boolean;
+  projectContext: boolean;
   builtins: boolean;
   product: string;
   apiVersion: string;
@@ -43,10 +42,6 @@ export function previewProbeScript(): string {
     const health = await read("/api/v2/health");
     const diagnostics = await read("/api/v2/diagnostics");
     const labels = ["市场", "设备", "诊断", "设置"];
-    const expectedHeading = "26089,19978,22909,65292,25991,21069";
-    const codesOf = (value) => Array.from(value || "").map((char) => String(char.codePointAt(0))).join(",");
-    const headingCodes = Array.from(document.querySelectorAll(".greet h1")).map((node) => codesOf(node.textContent || "")).filter((codes) => codes.length > 0).join("|");
-    const greetCodes = codesOf((document.querySelector(".greet")?.textContent || "").replace(/\\s/g, "")).slice(0, 80);
     return {
       title: document.title,
       sessionPresent: token.length >= 16,
@@ -54,9 +49,8 @@ export function previewProbeScript(): string {
       commandBar: Boolean(document.querySelector(".command-bar")),
       today: Boolean(document.querySelector(".today")),
       recentTiles: Boolean(document.querySelector(".tiles")),
-      homeHeading: headingCodes.split("|").includes(expectedHeading) || /\\d/.test(document.querySelector(".greet")?.textContent || ""),
-      headingCodes,
-      greetCodes,
+      wordmark: (document.querySelector(".wordmark")?.textContent || "").trim() === "Project Workbench",
+      projectContext: (document.querySelector(".context-project")?.textContent || "").trim().length > 0,
       builtins: labels.every((label) => document.querySelector('nav.rail a[aria-label="' + label + '"]')),
       product: info.product,
       apiVersion: info.apiVersion,
@@ -96,8 +90,8 @@ export function smokeFailures(report: SmokeReport): string[] {
   if (!report.commandBar) failures.push("command-bar");
   if (!report.today) failures.push("today");
   if (!report.recentTiles) failures.push("recent-tiles");
-  // GitHub's Electron returns an empty textContent for the greeting column even
-  // when the command bar, today's list, and tiles are present. Playwright covers the copy.
+  if (!report.wordmark) failures.push("wordmark");
+  if (!report.projectContext) failures.push("project-context");
   if (!report.builtins) failures.push("host-builtins");
   if (report.product !== "ProjectWorkbench") failures.push("product");
   if (report.apiVersion !== API_VERSION) failures.push("api-version");
