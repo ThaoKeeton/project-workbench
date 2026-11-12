@@ -93,19 +93,30 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await shot(page, `import-${theme}`);
     });
 
-    test("executor authoring records and replays the synthetic sample", async ({ page }) => {
+    test("executor authoring prepares a text prompt and keeps manual steps advanced", async ({ page }) => {
       await page.goto("/plugin/runner");
       await expect(page.getByRole("heading", { name: "自动化测试执行器" })).toBeVisible();
+      await expect(page.getByRole("checkbox", { name: "允许调用模型" })).not.toBeChecked();
       await expect(page.getByRole("checkbox", { name: "AI 修复" })).not.toBeChecked();
-      await page.getByRole("button", { name: "从样品录制" }).click();
-      await expect(page.getByLabel("rec-cut-4 动作")).toHaveValue("drag-path");
-      await expect(page.getByLabel("rec-keep-4 对象")).toHaveValue("sphere.vertexCount");
-      await page.getByRole("button", { name: "回放" }).click();
-      await expect(page.getByText("全部通过")).toBeVisible();
-      await expect(page.getByText("正常回放不调用模型")).toBeVisible();
+      await expect(page.getByRole("button", { name: "从样品录制" })).toHaveCount(0);
+      await expect(page.getByLabel("当前页面文字结构")).toContainText("uuid=stock-1");
+      await page.getByLabel("测试目标").fill("切削工件后体积减小，邻件不变");
+      await page.getByRole("button", { name: "生成脚本" }).click();
+      await expect(page.getByText("模型调用已关闭。已准备文本提示，未发送。")).toBeVisible();
+      await expect(page.getByText("不要添加测试钩子")).toBeVisible();
+      await expect(page.getByText("不要要求修改目标应用")).toBeVisible();
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBeLessThanOrEqual(1);
       await shot(page, `executor-${theme}`);
+      await page.getByRole("button", { name: "高级：手动步骤" }).click();
+      await page.getByRole("button", { name: "从样品录制" }).click();
+      await expect(page.getByLabel("rec-cut-4 动作")).toHaveValue("drag-path");
+      await expect(page.getByLabel("rec-keep-4 对象")).toHaveValue("sphere.vertexCount");
+      const editorOverflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(editorOverflow).toBeLessThanOrEqual(1);
+      await page.getByRole("button", { name: "回放" }).click();
+      await expect(page.getByText("全部通过")).toBeVisible();
+      await expect(page.getByText("正常回放不调用模型")).toBeVisible();
     });
 
     test("plugin, diagnostics, settings, pairing, offline, and crash", async ({ page }) => {
