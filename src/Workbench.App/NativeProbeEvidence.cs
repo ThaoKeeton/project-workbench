@@ -129,7 +129,9 @@ internal sealed class NativeProbeEvidence(string? phase, IReadOnlyList<string> c
                     {
                         schemaVersion = 1, processId = Environment.ProcessId, phase = _phase, checkpoint = _checkpoint,
                         completedChecks = completedChecks.ToArray(), observations = Observations,
-                        error = HostFailure.Describe("NativeProbeFailed", error), errorHResult = error.HResult
+                        error = HostFailure.Describe("NativeProbeFailed", error),
+                        exceptionType = error.GetType().FullName,
+                        errorHResult = error.HResult
                     }, options));
                 }
             }
