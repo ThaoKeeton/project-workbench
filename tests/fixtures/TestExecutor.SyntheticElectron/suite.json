@@ -24,6 +24,39 @@
       ]
     },
     {
+      "id": "CASE-CUT",
+      "name": "拖拽切削",
+      "allowFallback": false,
+      "steps": [
+        { "id": "snap-cut", "type": "scene3d", "action": "snapshot", "target": { "selector": "#view" }, "allowFallback": false },
+        {
+          "id": "before-cut",
+          "type": "scene3d",
+          "action": "assert-scene",
+          "target": { "selector": "#view", "object": "stock" },
+          "expected": "mesh.stock.volume=8±0.2;mesh.sphere.vertexCount=117",
+          "allowFallback": false
+        },
+        {
+          "id": "cut-drag",
+          "type": "scene3d",
+          "action": "drag",
+          "target": { "selector": "#view", "object": "stock" },
+          "input": "world-path:0,2,0;0.4,2,0",
+          "expected": "mesh.stock.volume=4±0.3;mesh.sphere.vertexCount=117",
+          "allowFallback": false
+        },
+        {
+          "id": "cut-diff",
+          "type": "scene3d",
+          "action": "diff",
+          "target": { "selector": "#view" },
+          "expected": "counts.deformed=1±0;counts.moved=0±0",
+          "allowFallback": false
+        }
+      ]
+    },
+    {
       "id": "CASE-SCENE",
       "name": "三维视图",
       "allowFallback": false,

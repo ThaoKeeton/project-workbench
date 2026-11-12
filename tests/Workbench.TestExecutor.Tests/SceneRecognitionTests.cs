@@ -20,6 +20,28 @@ public sealed class SceneRecognitionTests
         var wheel = ScenePointer.Wheel(4, 5, 0, -120);
         Assert.Equal("mouseWheel", wheel[0].Type);
         Assert.Equal(-120, wheel[0].DeltaY);
+        var path = ScenePointer.Along([(0, 0), (10, 0), (10, 4)]);
+        Assert.Equal("mousePressed", path[0].Type);
+        Assert.Equal("mouseMoved", path[1].Type);
+        Assert.Equal(10, path[2].X);
+        Assert.Equal("mouseReleased", path[^1].Type);
+        var nudge = ScenePointer.Along([(3, 4)]);
+        Assert.Equal(4, nudge[1].X);
+        using var blocked = JsonDocument.Parse("{\"hit\":false,\"actual\":\"occluded-by:sphere\"}");
+        Assert.True(SceneProjection.IsOccluded(blocked.RootElement, out var why));
+        Assert.Equal("occluded-by:sphere", why);
+        using var clear = JsonDocument.Parse("{\"hit\":true,\"points\":[{\"ndcX\":0,\"ndcY\":0},{\"ndcX\":0.5,\"ndcY\":0}],\"left\":0,\"top\":0,\"width\":100,\"height\":50}");
+        Assert.False(SceneProjection.IsOccluded(clear.RootElement, out _));
+        Assert.True(SceneProjection.TryReadPoints(clear.RootElement, out var points));
+        Assert.Equal((50d, 25d), points[0]);
+        Assert.Equal((75d, 25d), points[1]);
+        using var incomplete = JsonDocument.Parse("{\"left\":0,\"top\":0,\"width\":10,\"height\":10}");
+        Assert.False(SceneProjection.TryReadPoints(incomplete.RootElement, out _));
+        var changed = PngImage.Create(2, 2, [9, 8, 7, 255, 9, 8, 7, 255, 9, 8, 7, 255, 1, 2, 3, 255]);
+        var same = PngImage.Create(2, 2, [9, 8, 7, 255, 9, 8, 7, 255, 9, 8, 7, 255, 9, 8, 7, 255]);
+        var diff = PngImage.Decode(VisualDiff.DiffImage(changed.Encode(), same.Encode(), 0, []));
+        Assert.Equal(new Rgba8(255, 0, 0, 255), diff[1, 1]);
+        Assert.Equal(new Rgba8(9, 8, 7, 255), diff[0, 0]);
     }
 
     [Fact]
@@ -33,6 +55,8 @@ public sealed class SceneRecognitionTests
         var normalized = SceneSnapshot.Normalize(Before);
         Assert.Contains("\"schema\":\"workbench.test-executor.scene-snapshot.v1\"", normalized, StringComparison.Ordinal);
         Assert.Contains("\"schemaVersion\":1", normalized, StringComparison.Ordinal);
+        Assert.Contains("\"actionDiff\"", SceneSnapshot.AttachDiff(normalized, "{\"schemaVersion\":1,\"counts\":{\"deformed\":1}}"), StringComparison.Ordinal);
+        Assert.Equal("nope", SceneSnapshot.AttachDiff("nope", "{}"));
         Assert.Contains("library=three", SceneSnapshot.TextOf(normalized), StringComparison.Ordinal);
         Assert.True(SceneAssert.Matches(normalized, "mesh.cube.position.x=0±0.01;mesh.cube.rotation.y=0;mesh.cube.vertexCount=24;mesh.cube.faceCount=12;mesh.cube.volume=8±0.01;mesh.cube.hash=box2;mesh.cube.visible=1", 0, out _));
         const string After = """
@@ -140,6 +164,10 @@ public sealed class SceneRecognitionTests
         Assert.Equal(0, computer.ObserveCalls);
         Assert.Contains("\"tokens\":0", await File.ReadAllTextAsync(Path.Combine(reports, "ai-usage.json")), StringComparison.Ordinal);
         Assert.True(File.Exists(Path.Combine(reports, "CASE-1-pixels.png")));
+        Assert.True(File.Exists(Path.Combine(reports, "pixels.diff.png")));
+        var evidence = await File.ReadAllTextAsync(Path.Combine(reports, "CASE-1-pixels.evidence.json"));
+        Assert.Contains("local-diff=pixels.diff.png", evidence, StringComparison.Ordinal);
+        Assert.DoesNotContain("data:image", evidence, StringComparison.Ordinal);
         var text = await connected.SceneTextAsync(CancellationToken.None);
         Assert.Contains("cube", text, StringComparison.Ordinal);
         Assert.DoesNotContain("data:image", text, StringComparison.Ordinal);
@@ -148,6 +176,9 @@ public sealed class SceneRecognitionTests
         Assert.Equal("no-earlier-snapshot", early.Actual);
         var wheeled = await connected.PerformAsync(new TestStep("roll", StepKind.Scene3d, "wheel", new ElementSelector(null, null, "#view", null, null, null, null, "cube"), null, "0,-40", 15, false, false), CancellationToken.None);
         Assert.True(wheeled.Ok, wheeled.Actual);
+        var occluded = await connected.PerformAsync(new TestStep("blocked", StepKind.Scene3d, "click", new ElementSelector(null, null, "#view", null, null, null, null, "hidden"), null, null, 15, false, false), CancellationToken.None);
+        Assert.False(occluded.Ok);
+        Assert.Equal("occluded-by:sphere", occluded.Actual);
         Directory.Delete(root, true);
     }
 

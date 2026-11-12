@@ -125,7 +125,12 @@ public sealed partial class SuiteRunner
         var baseline = ContainedPath.Combine(request.BaselineDirectory, step.Id + ".png");
         if (!File.Exists(baseline)) return new ShotComparison(false, ExecutorError.BaselineMissing, masked);
         var visual = suite.Visual ?? VisualSettings.Default;
-        var ratio = VisualDiff.MismatchRatio(masked.Png, await File.ReadAllBytesAsync(baseline, cancellationToken), visual.ChannelTolerance, visual.Ignore);
+        var baselineBytes = await File.ReadAllBytesAsync(baseline, cancellationToken);
+        var ratio = VisualDiff.MismatchRatio(masked.Png, baselineBytes, visual.ChannelTolerance, visual.Ignore);
+        var diffPng = VisualDiff.DiffImage(masked.Png, baselineBytes, visual.ChannelTolerance, visual.Ignore);
+        var diffName = step.Id + ".diff.png";
+        await File.WriteAllBytesAsync(ContainedPath.Combine(request.ReportDirectory, diffName), diffPng, cancellationToken);
+        log.Add("local-diff=" + diffName);
         log.Add("visual-mismatch=" + ratio.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture));
         return ratio <= visual.MaxMismatchRatio
             ? new ShotComparison(true, "", masked)

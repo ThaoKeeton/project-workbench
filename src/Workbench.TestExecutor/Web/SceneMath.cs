@@ -54,6 +54,45 @@ public static class SceneProjection
         return width > 0 && height > 0;
     }
 
+    public static bool TryReadFrame(JsonElement value, out ViewportFrame frame)
+    {
+        frame = default;
+        if (!Try(value, "left", out var left) || !Try(value, "top", out var top) || !Try(value, "width", out var width) || !Try(value, "height", out var height))
+            return false;
+        Try(value, "dpr", out var ratio);
+        Try(value, "zoom", out var zoom);
+        Try(value, "offsetLeft", out var offsetLeft);
+        Try(value, "offsetTop", out var offsetTop);
+        var device = value.TryGetProperty("deviceBox", out var box) && box.ValueKind == JsonValueKind.True;
+        frame = new ViewportFrame(left, top, width, height, ratio == 0 ? 1 : ratio, zoom == 0 ? 1 : zoom, offsetLeft, offsetTop, device);
+        return width > 0 && height > 0;
+    }
+
+    public static bool TryReadPoints(JsonElement value, out IReadOnlyList<(double X, double Y)> points)
+    {
+        points = [];
+        if (!TryReadFrame(value, out var frame) || !value.TryGetProperty("points", out var list) || list.ValueKind != JsonValueKind.Array || list.GetArrayLength() == 0)
+            return false;
+        var mapped = new List<(double X, double Y)>();
+        foreach (var item in list.EnumerateArray())
+        {
+            if (!Try(item, "ndcX", out var ndcX) || !Try(item, "ndcY", out var ndcY)) return false;
+            mapped.Add(ToViewport(ndcX, ndcY, frame));
+        }
+        points = mapped;
+        return true;
+    }
+
+    public static bool IsOccluded(JsonElement value, out string detail)
+    {
+        detail = "";
+        if (!value.TryGetProperty("hit", out var hit) || hit.ValueKind != JsonValueKind.False) return false;
+        detail = value.TryGetProperty("actual", out var actual) && actual.ValueKind == JsonValueKind.String
+            ? actual.GetString() ?? "occluded"
+            : "occluded";
+        return true;
+    }
+
     private static bool Try(JsonElement value, string name, out double number)
     {
         number = 0;
@@ -82,6 +121,25 @@ public static class ScenePointer
 
     public static IReadOnlyList<SceneMouse> Wheel(double x, double y, double dx, double dy)
         => [new SceneMouse("mouseWheel", x, y, dx, dy)];
+
+    /// <summary>
+    /// Press at the first screen point, move through each later point, then release.
+    /// A single point still moves one pixel so the page observes a drag.
+    /// </summary>
+    public static IReadOnlyList<SceneMouse> Along(IReadOnlyList<(double X, double Y)> points)
+    {
+        if (points.Count == 0) return [];
+        var moves = new List<SceneMouse> { new("mousePressed", points[0].X, points[0].Y) };
+        if (points.Count == 1) moves.Add(new SceneMouse("mouseMoved", points[0].X + 1, points[0].Y));
+        else
+        {
+            for (var index = 1; index < points.Count; index++)
+                moves.Add(new SceneMouse("mouseMoved", points[index].X, points[index].Y));
+        }
+        var last = moves[^1];
+        moves.Add(new SceneMouse("mouseReleased", last.X, last.Y));
+        return moves;
+    }
 
     public static (double Dx, double Dy) ParseDelta(string? input)
     {

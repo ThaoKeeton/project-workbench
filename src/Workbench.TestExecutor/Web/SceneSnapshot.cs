@@ -50,6 +50,21 @@ public static class SceneSnapshot
         return output.ToJsonString();
     }
 
+    public static string AttachDiff(string snapshotJson, string diffJson)
+    {
+        try
+        {
+            if (JsonNode.Parse(snapshotJson) is not JsonObject snapshot || JsonNode.Parse(diffJson) is not JsonNode diff)
+                return snapshotJson;
+            snapshot["actionDiff"] = diff;
+            return snapshot.ToJsonString();
+        }
+        catch (JsonException)
+        {
+            return snapshotJson;
+        }
+    }
+
     public static string TextOf(string json)
     {
         try

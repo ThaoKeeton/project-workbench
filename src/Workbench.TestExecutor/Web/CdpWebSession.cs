@@ -492,25 +492,52 @@ public sealed class CdpWebSession : IWebSession
         if (step.Action is "click" or "drag" or "orbit" or "wheel" or "project")
         {
             var projected = await EvaluateAsync(RequestFor(step, "project"), cancellationToken);
+            if (SceneProjection.IsOccluded(projected, out var blocked))
+                return new WebResult(true, false, blocked, false, null);
             if (!TryPointer(projected, out var x, out var y))
                 return ToResult(step, projected) with { Ok = false };
             if (step.Action == "project")
                 return new WebResult(true, true, x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "," + y.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), false, null);
-            await DispatchPointerAsync(step, x, y, cancellationToken);
+            if (step.Action == "drag" && SceneProjection.TryReadPoints(projected, out var path) && path.Count > 1)
+                await DispatchPathAsync(path, cancellationToken);
+            else
+                await DispatchPointerAsync(step, x, y, cancellationToken);
         }
         var read = ToResult(step, await EvaluateAsync(RequestFor(step, "read-scene"), cancellationToken));
         if (!read.Found || !read.Ok) return read;
         var snapshot = SceneSnapshot.Normalize(read.Actual);
         if (step.Action is "snapshot" or "read-scene") _sceneBaseline = snapshot;
+        var judged = snapshot;
         var actual = snapshot;
         if (step.Action == "diff")
         {
             if (_sceneBaseline is null) return new WebResult(true, false, "no-earlier-snapshot", false, null);
-            actual = SceneDiff.Compare(_sceneBaseline, snapshot, step.Tolerance ?? 0.0001);
+            judged = SceneDiff.Compare(_sceneBaseline, snapshot, step.Tolerance ?? 0.0001);
+            actual = judged;
         }
+        else if (_sceneBaseline is not null && step.Action is "click" or "drag" or "wheel" or "orbit")
+            actual = SceneSnapshot.AttachDiff(snapshot, SceneDiff.Compare(_sceneBaseline, snapshot, step.Tolerance ?? 0.0001));
         if (step.Expected is not { Length: > 0 }) return new WebResult(true, true, actual, false, null);
-        var ok = SceneAssert.Matches(actual, step.Expected, step.Tolerance ?? 0, out var detail);
+        var ok = SceneAssert.Matches(judged, step.Expected, step.Tolerance ?? 0, out var detail);
         return new WebResult(true, ok, ok ? actual : detail, false, null);
+    }
+
+    private async Task DispatchPathAsync(IReadOnlyList<(double X, double Y)> path, CancellationToken cancellationToken)
+    {
+        foreach (var move in ScenePointer.Along(path))
+        {
+            await CallAsync("Input.dispatchMouseEvent", new
+            {
+                type = move.Type,
+                x = move.X,
+                y = move.Y,
+                button = "left",
+                buttons = move.Type == "mouseReleased" ? 0 : 1,
+                clickCount = 1,
+                deltaX = 0,
+                deltaY = 0
+            }, cancellationToken);
+        }
     }
 
     private async Task DispatchPointerAsync(TestStep step, double x, double y, CancellationToken cancellationToken)

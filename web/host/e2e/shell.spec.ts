@@ -98,6 +98,8 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByRole("heading", { name: "自动化测试执行器" })).toBeVisible();
       await expect(page.getByRole("checkbox", { name: "AI 修复" })).not.toBeChecked();
       await page.getByRole("button", { name: "从样品录制" }).click();
+      await expect(page.getByLabel("rec-cut-4 动作")).toHaveValue("drag-path");
+      await expect(page.getByLabel("rec-keep-4 对象")).toHaveValue("sphere.vertexCount");
       await page.getByRole("button", { name: "回放" }).click();
       await expect(page.getByText("全部通过")).toBeVisible();
       await expect(page.getByText("正常回放不调用模型")).toBeVisible();

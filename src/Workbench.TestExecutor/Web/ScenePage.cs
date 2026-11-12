@@ -301,31 +301,105 @@ internal static class ScenePage
           });
           return found;
         }
-        function explicitWorld(input) {
-          if (typeof input !== 'string' || input.indexOf('world:') !== 0) return null;
-          const parts = input.slice(6).split(',');
+        function numbers3(text) {
+          const parts = text.split(',');
           if (parts.length !== 3) return null;
           const x = Number(parts[0]), y = Number(parts[1]), z = Number(parts[2]);
           if (!Number.isFinite(x) || !Number.isFinite(y) || !Number.isFinite(z)) return null;
           return { x, y, z };
+        }
+        function explicitWorld(input) {
+          if (typeof input !== 'string' || input.indexOf('world:') !== 0) return null;
+          return numbers3(input.slice(6));
+        }
+        function worldPath(input) {
+          if (typeof input !== 'string' || input.indexOf('world-path:') !== 0) return null;
+          const points = input.slice(11).split(';').map((part) => numbers3(part.trim())).filter((point) => point);
+          return points.length ? points : null;
         }
         function centerOf(object) {
           const local = localBox(object);
           if (!local) return { x: object.position.x, y: object.position.y, z: object.position.z };
           return transformPoint(worldMatrix(object), (local.min.x + local.max.x) / 2, (local.min.y + local.max.y) / 2, (local.min.z + local.max.z) / 2);
         }
+        function localPoint(object, input) {
+          if (!object || typeof input !== 'string' || input.indexOf('local:') !== 0) return null;
+          const local = numbers3(input.slice(6));
+          if (!local) return null;
+          return transformPoint(worldMatrix(object), local.x, local.y, local.z);
+        }
+        function rayThrough(camera, ndcX, ndcY) {
+          const Vector3 = camera.position.constructor;
+          const near = new Vector3(ndcX, ndcY, -1).unproject(camera);
+          const far = new Vector3(ndcX, ndcY, 1).unproject(camera);
+          let dx = far.x - near.x, dy = far.y - near.y, dz = far.z - near.z;
+          const length = Math.hypot(dx, dy, dz) || 1;
+          return { x: near.x, y: near.y, z: near.z, dx: dx / length, dy: dy / length, dz: dz / length, Vector3 };
+        }
+        function hitTriangle(ox, oy, oz, dx, dy, dz, ax, ay, az, bx, by, bz, cx, cy, cz) {
+          const e1x = bx - ax, e1y = by - ay, e1z = bz - az;
+          const e2x = cx - ax, e2y = cy - ay, e2z = cz - az;
+          const px = dy * e2z - dz * e2y, py = dz * e2x - dx * e2z, pz = dx * e2y - dy * e2x;
+          const det = e1x * px + e1y * py + e1z * pz;
+          if (Math.abs(det) < 1e-8) return null;
+          const inv = 1 / det;
+          const tx = ox - ax, ty = oy - ay, tz = oz - az;
+          const u = (tx * px + ty * py + tz * pz) * inv;
+          if (u < 0 || u > 1) return null;
+          const qx = ty * e1z - tz * e1y, qy = tz * e1x - tx * e1z, qz = tx * e1y - ty * e1x;
+          const v = (dx * qx + dy * qy + dz * qz) * inv;
+          if (v < 0 || u + v > 1) return null;
+          const t = (e2x * qx + e2y * qy + e2z * qz) * inv;
+          return t > 1e-4 ? t : null;
+        }
+        function meshDistance(object, ray) {
+          const geometry = object.geometry;
+          const position = geometry && geometry.attributes && geometry.attributes.position;
+          if (!position) return null;
+          const Matrix4 = object.matrixWorld && object.matrixWorld.constructor;
+          if (!Matrix4) return null;
+          const world = new Matrix4().fromArray(worldMatrix(object));
+          const inverse = world.clone().invert();
+          const origin = new ray.Vector3(ray.x, ray.y, ray.z).applyMatrix4(inverse);
+          const direction = new ray.Vector3(ray.dx, ray.dy, ray.dz).transformDirection(inverse);
+          const index = geometry.index;
+          const limit = index ? Math.min(index.count, 6000) : Math.min(position.count, 6000);
+          let best = null;
+          const tri = (ia, ib, ic) => {
+            const t = hitTriangle(origin.x, origin.y, origin.z, direction.x, direction.y, direction.z,
+              position.getX(ia), position.getY(ia), position.getZ(ia),
+              position.getX(ib), position.getY(ib), position.getZ(ib),
+              position.getX(ic), position.getY(ic), position.getZ(ic));
+            if (t !== null && (best === null || t < best)) best = t;
+          };
+          if (index) {
+            for (let cursor = 0; cursor + 2 < limit; cursor += 3) tri(index.getX(cursor), index.getX(cursor + 1), index.getX(cursor + 2));
+          } else {
+            for (let cursor = 0; cursor + 2 < limit; cursor += 3) tri(cursor, cursor + 1, cursor + 2);
+          }
+          return best;
+        }
+        function occlusion(scene, camera, ndcX, ndcY, target) {
+          if (!target) return { hit: true };
+          const ray = rayThrough(camera, ndcX, ndcY);
+          let best = null;
+          let bestT = Infinity;
+          scene.traverse((object) => {
+            if (!object.isMesh || object.visible === false) return;
+            const distance = meshDistance(object, ray);
+            if (distance !== null && distance < bestT) { bestT = distance; best = object; }
+          });
+          if (!best) return { hit: false, actual: 'miss' };
+          const same = (target.uuid && best.uuid === target.uuid) || (!target.uuid && target.name && best.name === target.name);
+          if (!same) return { hit: false, actual: 'occluded-by:' + (best.name || best.uuid) };
+          return { hit: true };
+        }
         function projectPoint(camera, x, y, z) {
-          const view = camera.matrixWorldInverse.elements;
-          const proj = camera.projectionMatrix.elements;
-          const vx = view[0] * x + view[4] * y + view[8] * z + view[12];
-          const vy = view[1] * x + view[5] * y + view[9] * z + view[13];
-          const vz = view[2] * x + view[6] * y + view[10] * z + view[14];
-          const vw = view[3] * x + view[7] * y + view[11] * z + view[15];
-          const cx = proj[0] * vx + proj[4] * vy + proj[8] * vz + proj[12] * vw;
-          const cy = proj[1] * vx + proj[5] * vy + proj[9] * vz + proj[13] * vw;
-          const cw = proj[3] * vx + proj[7] * vy + proj[11] * vz + proj[15] * vw;
-          if (!cw) return null;
-          return { x: cx / cw, y: cy / cw };
+          const Vector3 = camera.position.constructor;
+          const point = new Vector3(x, y, z);
+          point.project(camera);
+          if (!Number.isFinite(point.x) || !Number.isFinite(point.y)) return null;
+          return { x: point.x, y: point.y };
         }
         function canvasFor(selector) {
           if (selector) {
@@ -376,18 +450,23 @@ internal static class ScenePage
           if (!camera) return { found: false, ok: false, actual: 'camera-not-found' };
           const canvas = canvasFor(request.selector || '');
           if (!canvas) return { found: false, ok: false, actual: 'canvas-not-found' };
-          let point = explicitWorld(request.value || '');
-          if (!point) {
-            const object = findObject(scene, request);
-            if (!object) return { found: false, ok: false, actual: 'object-not-found' };
-            point = centerOf(object);
+          const object = findObject(scene, request);
+          const path = worldPath(request.value || '');
+          const points = path || [localPoint(object, request.value || '') || explicitWorld(request.value || '') || (object ? centerOf(object) : null)];
+          if (!points[0]) return { found: false, ok: false, actual: object ? 'project-failed' : 'object-not-found' };
+          const projected = [];
+          for (let index = 0; index < points.length; index += 1) {
+            const ndc = projectPoint(camera, points[index].x, points[index].y, points[index].z);
+            if (!ndc) return { found: false, ok: false, actual: 'project-failed' };
+            const cover = occlusion(scene, camera, ndc.x, ndc.y, object);
+            if (!cover.hit) return { found: false, ok: false, hit: false, actual: cover.actual || 'occluded' };
+            projected.push({ ndcX: ndc.x, ndcY: ndc.y });
           }
-          const ndc = projectPoint(camera, point.x, point.y, point.z);
-          if (!ndc) return { found: false, ok: false, actual: 'project-failed' };
           const frame = frameOf(canvas);
           return {
-            found: true, ok: true, actual: 'projected',
-            ndcX: ndc.x, ndcY: ndc.y,
+            found: true, ok: true, hit: true, actual: 'projected',
+            ndcX: projected[0].ndcX, ndcY: projected[0].ndcY,
+            points: projected,
             left: frame.left, top: frame.top, width: frame.width, height: frame.height,
             dpr: frame.dpr, zoom: frame.zoom, offsetLeft: frame.offsetLeft, offsetTop: frame.offsetTop,
             deviceBox: frame.deviceBox

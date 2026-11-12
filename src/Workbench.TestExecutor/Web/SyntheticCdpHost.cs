@@ -239,6 +239,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
         private double _lastX;
         private double _azimuth;
         private double _cubeX;
+        private bool _cut;
         private string _dragMode = "camera";
 
         private SyntheticModel(List<Page> pages) => _pages = pages;
@@ -348,8 +349,15 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 return "{\"found\":true,\"ok\":true,\"actual\":" + JsonSerializer.Serialize(SceneJson()) + "}";
             if (op == "project")
             {
-                _dragMode = Text(request, "objectName").Length > 0 ? "mesh" : "camera";
-                return "{\"found\":true,\"ok\":true,\"x\":160,\"y\":120,\"ndcX\":0,\"ndcY\":0,\"left\":0,\"top\":0,\"width\":320,\"height\":240,\"dpr\":1,\"zoom\":1,\"offsetLeft\":0,\"offsetTop\":0,\"deviceBox\":false,\"actual\":\"projected\"}";
+                var name = Text(request, "objectName");
+                var value = Text(request, "value");
+                if (name == "hidden")
+                    return "{\"found\":true,\"ok\":false,\"hit\":false,\"actual\":\"occluded-by:sphere\"}";
+                _dragMode = name == "stock" ? "cut" : name.Length > 0 ? "mesh" : "camera";
+                var points = value.StartsWith("world-path:", StringComparison.Ordinal)
+                    ? "[{\"ndcX\":-0.2,\"ndcY\":0.2},{\"ndcX\":0,\"ndcY\":0.2},{\"ndcX\":0.2,\"ndcY\":0.2}]"
+                    : "[{\"ndcX\":0,\"ndcY\":0}]";
+                return "{\"found\":true,\"ok\":true,\"hit\":true,\"x\":160,\"y\":120,\"ndcX\":0,\"ndcY\":0,\"points\":" + points + ",\"left\":0,\"top\":0,\"width\":320,\"height\":240,\"dpr\":1,\"zoom\":1,\"offsetLeft\":0,\"offsetTop\":0,\"deviceBox\":false,\"actual\":\"projected\"}";
             }
             if (Text(request, "selector") == "#slow") Thread.Sleep(400);
             if (Text(request, "selector") == "#slower") Thread.Sleep(2500);
@@ -413,7 +421,8 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             else if (type == "mouseMoved" && _dragging)
             {
                 var delta = (x - _lastX) * 0.01;
-                if (_dragMode == "mesh") _cubeX += delta;
+                if (_dragMode == "cut") _cut = true;
+                else if (_dragMode == "mesh") _cubeX += delta;
                 else _azimuth += delta;
                 _lastX = x;
             }
@@ -460,13 +469,14 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
         private string SceneJson()
         {
             var camera = new { x = Math.Sin(_azimuth) * 9, y = 4d, z = Math.Cos(_azimuth) * 9, fov = 50d, azimuth = _azimuth };
-            var cube = Mesh("cube", "cube-1", "Scene/cube", _cubeX, 0, -1, 1, -1, 1, -1, 1);
-            var sphere = Mesh("sphere", "sphere-1", "Scene/sphere", 3, 0, 2.2, 3.8, -0.8, 0.8, -0.8, 0.8);
-            var cone = Mesh("cone", "cone-1", "Scene/cone", -3, 0, -3.7, -2.3, -0.7, 0.7, -0.7, 0.7);
-            return JsonSerializer.Serialize(new { mount = "devtools", camera, nodes = new object[] { cube, sphere, cone }, diagnostics = Array.Empty<string>() });
+            var cube = Mesh("cube", "cube-1", "Scene/cube", _cubeX, 0, -1, 1, -1, 1, -1, 1, 24, 12, 8, "box2");
+            var sphere = Mesh("sphere", "sphere-1", "Scene/sphere", 3, 0, 2.2, 3.8, -0.8, 0.8, -0.8, 0.8, 117, 168, 1.97, "sphere");
+            var cone = Mesh("cone", "cone-1", "Scene/cone", -3, 0, -3.7, -2.3, -0.7, 0.7, -0.7, 0.7, 24, 12, 8, "cone");
+            var stock = Mesh("stock", "stock-1", "Scene/stock", 0, 2, -1, 1, _cut ? -1 : -1, _cut ? 0 : 1, -1, 1, _cut ? 12 : 24, _cut ? 6 : 12, _cut ? 4 : 8, _cut ? "cut" : "stock");
+            return JsonSerializer.Serialize(new { mount = "devtools", camera, nodes = new object[] { cube, sphere, cone, stock }, diagnostics = Array.Empty<string>() });
         }
 
-        private static object Mesh(string name, string uuid, string path, double x, double y, double minX, double maxX, double minY, double maxY, double minZ, double maxZ)
+        private static object Mesh(string name, string uuid, string path, double x, double y, double minX, double maxX, double minY, double maxY, double minZ, double maxZ, int vertices, int faces, double volume, string hash)
             => new
             {
                 name,
@@ -478,10 +488,10 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 rotation = new { x = 0d, y = 0d, z = 0d },
                 min = new { x = minX, y = minY, z = minZ },
                 max = new { x = maxX, y = maxY, z = maxZ },
-                vertexCount = 24,
-                faceCount = 12,
-                volume = 8d,
-                hash = "box2",
+                vertexCount = vertices,
+                faceCount = faces,
+                volume,
+                hash,
                 vertices = new[] { new { x = -1d, y = -1d, z = 1d } }
             };
 

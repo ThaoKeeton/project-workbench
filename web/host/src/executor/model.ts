@@ -3,6 +3,7 @@ export type StepAction =
   | "click"
   | "click-scene"
   | "drag-scene"
+  | "drag-path"
   | "wheel-scene"
   | "probe-scene"
   | "snapshot"
@@ -21,6 +22,7 @@ export const actionLabels: Record<StepAction, string> = {
   click: "点击",
   "click-scene": "投影点击",
   "drag-scene": "投影拖拽",
+  "drag-path": "路径切削",
   "wheel-scene": "滚轮",
   "probe-scene": "探测场景",
   snapshot: "场景快照",
@@ -35,7 +37,7 @@ export const actionLabels: Record<StepAction, string> = {
   screenshot: "截图",
 };
 
-const sceneActions = new Set<StepAction>(["click-scene", "drag-scene", "wheel-scene", "probe-scene", "snapshot", "diff-scene", "assert-mesh", "compare-pixels"]);
+const sceneActions = new Set<StepAction>(["click-scene", "drag-scene", "drag-path", "wheel-scene", "probe-scene", "snapshot", "diff-scene", "assert-mesh", "compare-pixels"]);
 
 export function isSceneAction(action: StepAction): boolean {
   return sceneActions.has(action);
@@ -129,6 +131,8 @@ export function recordFromDom(dom: string): ExecutorStep[] {
     if (line.startsWith("[canvas]") && objectName.length > 0) {
       const view = selector || "#view";
       recorded.push(step(`rec-probe-${index + 1}`, "probe-scene", view, objectName, "devtools", ""));
+      recorded.push(step(`rec-cut-${index + 1}`, "drag-path", view, "stock", "4", "0.3"));
+      recorded.push(step(`rec-keep-${index + 1}`, "assert-mesh", view, "sphere.vertexCount", "117", "0"));
       recorded.push(step(`rec-snap-${index + 1}`, "snapshot", view, objectName, "", ""));
       recorded.push(step(`rec-click-scene-${index + 1}`, "click-scene", view, objectName, "", ""));
       recorded.push(step(`rec-drag-${index + 1}`, "drag-scene", view, objectName, "0.8", "0.4"));
@@ -147,7 +151,7 @@ export function repairPrompt(dom: string, failed: ExecutorStep): string {
   return [`${scene}只使用下面的文字结构修复失败步骤。不要附带截图。`, "DOM:", dom, `失败步骤 ${failed.id} ${failed.action} ${failed.selector} 期望 ${failed.expected}`].join("\n");
 }
 
-type SceneState = { y: number; size: number; x: number; snapped: boolean };
+type SceneState = { y: number; size: number; x: number; snapped: boolean; stock: number };
 
 function sceneOutcome(item: ExecutorStep, scene: SceneState): { ok: boolean; detail: string; evidence: string } | null {
   if (item.action === "probe-scene") {
@@ -164,8 +168,13 @@ function sceneOutcome(item: ExecutorStep, scene: SceneState): { ok: boolean; det
     scene.x = 0.8;
     return { ok: true, detail: "ok", evidence: "" };
   }
+  if (item.action === "drag-path") {
+    scene.stock = 4;
+    return { ok: true, detail: "cut volume=4", evidence: "local:scene-text" };
+  }
   if (item.action === "assert-mesh") {
-    return numberOutcome(item, item.text === "position.x" ? scene.x : scene.y);
+    const actual = item.text === "position.x" ? scene.x : item.text === "stock.volume" ? scene.stock : item.text === "sphere.vertexCount" ? 117 : scene.y;
+    return numberOutcome(item, actual);
   }
   if (item.action === "diff-scene") {
     const ok = scene.snapped && scene.x !== 0 && (item.expected.length === 0 || item.expected === "moved");
@@ -190,7 +199,7 @@ function pixelOutcome(item: ExecutorStep): { ok: boolean; detail: string; eviden
 export function replay(testCase: ExecutorCase, dom: string): ExecutorRun {
   let status = "";
   let attr = "data-state=";
-  const scene: SceneState = { y: 4, size: 2, x: 0, snapped: false };
+  const scene: SceneState = { y: 4, size: 2, x: 0, snapped: false, stock: 8 };
   const steps = testCase.steps.map((item) => {
     const started = Date.now();
     const sceneResult = sceneOutcome(item, scene);

@@ -17,10 +17,13 @@ sphere.position.set(3, 0, 0);
 const cone = new THREE.Mesh(new THREE.ConeGeometry(0.7, 1.4, 10), new THREE.MeshStandardMaterial({ color: 0xcc6644 }));
 cone.name = "cone";
 cone.position.set(-3, 0, 0);
+const stock = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshStandardMaterial({ color: 0xddcc66 }));
+stock.name = "stock";
+stock.position.set(0, 2, 0);
 scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 const light = new THREE.DirectionalLight(0xffffff, 2);
 light.position.set(4, 8, 6);
-scene.add(light, cube, sphere, cone, camera);
+scene.add(light, cube, sphere, cone, stock, camera);
 
 let azimuth = 0;
 function placeCamera() {
@@ -30,6 +33,7 @@ function placeCamera() {
   camera.updateMatrixWorld(true);
 }
 placeCamera();
+scene.updateMatrixWorld(true);
 
 // Paint with the 2D canvas. A WebGL context is not required to observe the scene,
 // and a missing GPU on CI can tear down the renderer process.
@@ -41,7 +45,7 @@ function paint() {
   if (!context) return;
   context.fillStyle = "#202028";
   context.fillRect(0, 0, canvas.width, canvas.height);
-  for (const object of [cone, cube, sphere]) {
+  for (const object of [cone, cube, sphere, stock]) {
     const center = object.position.clone();
     center.project(camera);
     const x = (center.x + 1) / 2 * canvas.width;
@@ -52,13 +56,24 @@ function paint() {
 }
 
 function pick(clientX, clientY) {
+  scene.updateMatrixWorld(true);
   const rect = canvas.getBoundingClientRect();
   if (clientX < rect.left || clientX > rect.right || clientY < rect.top || clientY > rect.bottom) return null;
   pointer.x = ((clientX - rect.left) / rect.width) * 2 - 1;
   pointer.y = -((clientY - rect.top) / rect.height) * 2 + 1;
   raycaster.setFromCamera(pointer, camera);
-  const hits = raycaster.intersectObjects([cube, sphere, cone], false);
+  const hits = raycaster.intersectObjects([cube, sphere, cone, stock], false);
   return hits.length ? hits[0].object : null;
+}
+
+function cutStock() {
+  if (stock.userData.cut) return;
+  stock.userData.cut = true;
+  const position = stock.geometry.attributes.position;
+  for (let index = 0; index < position.count; index += 1) {
+    if (position.getY(index) > 0) position.setY(index, 0);
+  }
+  position.needsUpdate = true;
 }
 
 let dragging = false;
@@ -70,12 +85,17 @@ window.addEventListener("mousedown", (event) => {
   dragging = true;
   lastX = event.clientX;
   picked = pick(event.clientX, event.clientY);
+  if (picked === stock) cutStock();
 });
 window.addEventListener("mousemove", (event) => {
   if (!dragging) return;
   const delta = event.clientX - lastX;
   lastX = event.clientX;
-  if (picked) picked.position.x += delta * 0.01;
+  if (picked === stock) cutStock();
+  else if (picked) {
+    picked.position.x += delta * 0.01;
+    picked.updateMatrixWorld(true);
+  }
   else {
     azimuth += delta * 0.01;
     placeCamera();

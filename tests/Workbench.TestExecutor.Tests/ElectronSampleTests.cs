@@ -169,6 +169,8 @@ public sealed class ElectronSampleTests
         Assert.True(sink.Steps.Any(step => step.StepId == "drag-cube" && step.Status == "passed" && step.Engine == "scene3d"), trace);
         Assert.True(sink.Steps.Any(step => step.StepId == "diff-cube" && step.Status == "passed" && step.Engine == "scene3d"), trace);
         Assert.True(sink.Steps.Any(step => step.StepId == "orbit" && step.Status == "passed" && step.Engine == "scene3d"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "cut-drag" && step.Status == "passed" && step.Engine == "scene3d"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "cut-diff" && step.Status == "passed" && step.Engine == "scene3d"), trace);
         using (var evidence = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(reports, "CASE-SCENE-probe.evidence.json"))))
         {
             var log = string.Join('\n', evidence.RootElement.GetProperty("log").EnumerateArray().Select(item => item.GetString()));

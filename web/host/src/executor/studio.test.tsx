@@ -50,6 +50,7 @@ describe("executor script", () => {
   it("keeps screenshots out of the recorded script and diffs pixels locally", () => {
     const steps = recordFromDom(sampleDom);
     expect(steps.some((item) => item.action === "click" && item.selector === "#start")).toBe(true);
+    expect(steps.some((item) => item.action === "drag-path" && item.text === "stock" && item.expected === "4")).toBe(true);
     expect(JSON.stringify(steps)).not.toContain("data:image");
     const result = replay({ ...seedCases()[0], steps }, sampleDom);
     expect(result.passed).toBe(true);
