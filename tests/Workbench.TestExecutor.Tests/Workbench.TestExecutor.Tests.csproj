@@ -15,7 +15,6 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <ProjectReference Include="../../src/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
-    <ProjectReference Include="../../tools/Workbench.SceneProbe/Workbench.SceneProbe.csproj" />
     <ProjectReference Include="../../plugins/v2/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
     <ProjectReference Include="../../src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
     <ProjectReference Include="../fixtures/TestExecutor.SyntheticCdp/TestExecutor.SyntheticCdp.csproj" ReferenceOutputAssembly="false" />

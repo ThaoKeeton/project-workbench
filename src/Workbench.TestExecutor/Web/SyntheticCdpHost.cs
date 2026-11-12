@@ -296,6 +296,8 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             if (method != "Runtime.evaluate")
                 return "{\"id\":" + id + ",\"result\":{}}";
             var expression = root.GetProperty("params").GetProperty("expression").GetString() ?? "";
+            if (expression.Contains("__WB_RELOAD_MARKER", StringComparison.Ordinal))
+                return "{\"id\":" + id + ",\"result\":{\"result\":{\"type\":\"object\",\"value\":{\"marker\":false,\"hook\":\"object\",\"ready\":\"complete\"}}}}";
             var embedded = EmbeddedRequest(expression);
             if (embedded is null) return "{\"id\":" + id + ",\"result\":{\"result\":{\"type\":\"object\",\"value\":{\"found\":false}}}}";
             var value = Execute(pageId, embedded.Value);

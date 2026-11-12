@@ -253,6 +253,60 @@ public static class SceneDiff
     }
 }
 
+public static class SceneProbeCli
+{
+    public static async Task<int> RunAsync(string[] args, TextWriter? output = null, TextWriter? error = null, CancellationToken cancellationToken = default)
+    {
+        output ??= Console.Out;
+        error ??= Console.Error;
+        var port = 0;
+        var file = Path.Combine(Directory.GetCurrentDirectory(), "scene-probe.json");
+        var title = (string?)null;
+        var reload = false;
+        for (var index = 0; index < args.Length; index++)
+        {
+            var arg = args[index];
+            if (arg == "--reload")
+            {
+                reload = true;
+                continue;
+            }
+            if (index + 1 >= args.Length) return 2;
+            var value = args[++index];
+            switch (arg)
+            {
+                case "--port":
+                    if (!int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out port)) return 2;
+                    break;
+                case "--out":
+                    file = value;
+                    break;
+                case "--title":
+                    title = value;
+                    break;
+                default:
+                    return 2;
+            }
+        }
+        if (port is < 1 or > 65535) return 2;
+        var session = await CdpWebSession.ConnectAsync(port, title, null, cancellationToken);
+        if (session is null)
+        {
+            await error.WriteLineAsync("debug-port-unreachable");
+            return 1;
+        }
+        await using (session)
+        {
+            await session.InstallSceneHookAsync(reload, cancellationToken);
+            var report = await session.ProbeAsync(cancellationToken);
+            var full = Path.GetFullPath(file);
+            await File.WriteAllTextAsync(full, report, cancellationToken);
+            await output.WriteLineAsync(full);
+        }
+        return 0;
+    }
+}
+
 public static class SceneProbeReport
 {
     public const string Schema = "workbench.test-executor.scene-probe.v1";

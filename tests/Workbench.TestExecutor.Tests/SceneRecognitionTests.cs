@@ -153,46 +153,17 @@ public sealed class SceneRecognitionTests
     [Fact]
     public async Task Probe_command_writes_a_local_report_and_rejects_a_bad_port()
     {
-        var bad = RunProbe(["--port", "0"]);
-        Assert.Equal(2, bad);
+        Assert.Equal(2, await SceneProbeCli.RunAsync(["--port", "0"]));
+        Assert.Equal(2, await SceneProbeCli.RunAsync(["--nope"]));
         await using var host = SyntheticCdpHost.StartOn(0, "合成页面", null);
         var root = Fixtures.Temp();
         var output = Path.Combine(root, "scene-probe.json");
-        var code = RunProbe(["--port", host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "--out", output, "--title", "合成页面"]);
+        var code = await SceneProbeCli.RunAsync(["--port", host.Port.ToString(System.Globalization.CultureInfo.InvariantCulture), "--out", output, "--title", "合成页面", "--reload"]);
         Assert.Equal(0, code);
         var report = await File.ReadAllTextAsync(output);
         Assert.Contains("\"recommended\":\"devtools\"", report, StringComparison.Ordinal);
         Assert.DoesNotContain("data:image", report, StringComparison.Ordinal);
         Directory.Delete(root, true);
-    }
-
-    private static int RunProbe(string[] args)
-    {
-        var start = new System.Diagnostics.ProcessStartInfo("dotnet")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true
-        };
-        start.ArgumentList.Add(ProbeDll());
-        foreach (var arg in args) start.ArgumentList.Add(arg);
-        using var process = System.Diagnostics.Process.Start(start) ?? throw new InvalidOperationException("dotnet did not start");
-        process.WaitForExit();
-        return process.ExitCode;
-    }
-
-    private static string ProbeDll()
-    {
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        for (var depth = 0; depth < 8 && dir is not null; depth++, dir = dir.Parent)
-        {
-            foreach (var configuration in new[] { "Release", "Debug" })
-            {
-                var candidate = Path.Combine(dir.FullName, "tools", "Workbench.SceneProbe", "bin", configuration, "net10.0", "Workbench.SceneProbe.dll");
-                if (File.Exists(candidate)) return candidate;
-            }
-        }
-        throw new FileNotFoundException("Scene probe tool was not built.");
     }
 
     private static bool BuildBundle()
