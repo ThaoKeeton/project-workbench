@@ -430,6 +430,75 @@ jobs:
             web/host/test-results/
           if-no-files-found: warn
           retention-days: 1
+  shell-electron-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/shell/package-lock.json
+      - name: Install Electron libraries
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          if apt-cache show libgtk-3-0t64 >/dev/null 2>&1; then
+            gtk=libgtk-3-0t64
+            asound=libasound2t64
+            atk=libatk1.0-0t64
+            bridge=libatk-bridge2.0-0t64
+            cups=libcups2t64
+          else
+            gtk=libgtk-3-0
+            asound=libasound2
+            atk=libatk1.0-0
+            bridge=libatk-bridge2.0-0
+            cups=libcups2
+          fi
+          sudo apt-get install -y xvfb libnss3 libgbm1 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libpango-1.0-0 libcairo2 "$gtk" "$asound" "$atk" "$bridge" "$cups"
+      - name: Unit-test the Electron shell
+        working-directory: desktop/shell
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          npm rebuild electron
+          npm test
+          npm run build
+      - name: Build the existing React UI
+        working-directory: web/host
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          npm run build
+      - name: Start the real loopback service from the shell
+        working-directory: desktop/shell
+        env:
+          WORKBENCH_SHELL_LIVE: "1"
+        run: ./node_modules/.bin/vitest run src/supervisor.live.test.ts
+      - name: Open the React UI in Electron
+        working-directory: desktop/shell
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          xvfb-run -a ./node_modules/.bin/electron . --no-sandbox --disable-gpu --smoke \
+            --user-root "$root" \
+            --ui-dist "$GITHUB_WORKSPACE/web/host/dist" \
+            --smoke-report "$GITHUB_WORKSPACE/artifacts/electron-smoke.json"
+          rm -rf "$root"
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: electron-shell-smoke
+          path: artifacts/electron-smoke.json
+          if-no-files-found: warn
+          retention-days: 1
   sonarcloud:
     if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
     runs-on: ubuntu-latest
@@ -475,23 +544,35 @@ jobs:
           export PATH="$PATH:$HOME/.dotnet/tools"
           # Absolute report path: the .NET scanner resolves this property from each
           # project directory, so a repo-relative path is invisible to the plugin project.
-          lcov_report="$(pwd)/web/host/coverage/lcov.info"
-          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${lcov_report}"
+          web_lcov="$(pwd)/web/host/coverage/lcov.info"
+          shell_lcov="$(pwd)/desktop/shell/coverage/lcov.info"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.coverage.exclusions="web/host/e2e/**,**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,desktop/shell/src/main.ts,desktop/shell/src/preload.ts,desktop/shell/src/**/*.test.ts" /d:sonar.cs.opencover.reportsPaths="artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}"
           dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
           dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
           npm ci --ignore-scripts --prefix web/host
           npm rebuild esbuild --prefix web/host
           npm run test:unit --prefix web/host
+          npm ci --ignore-scripts --prefix desktop/shell
+          npm rebuild esbuild --prefix desktop/shell
+          npm test --prefix desktop/shell
           python3 - <<'PY'
           from pathlib import Path
-          report = Path("web/host/coverage/lcov.info")
-          root = Path("web/host").resolve()
-          lines = []
-          for line in report.read_text().splitlines():
-              if line.startswith("SF:"):
-                  line = "SF:" + (root / line[3:]).resolve().as_posix()
-              lines.append(line)
-          report.write_text("\n".join(lines) + "\n")
+
+          def absolutize(report_path: str, root_path: str) -> None:
+              report = Path(report_path)
+              root = Path(root_path).resolve()
+              lines = []
+              for line in report.read_text().splitlines():
+                  if line.startswith("SF:"):
+                      source = Path(line[3:])
+                      if not source.is_absolute():
+                          source = root / source
+                      line = "SF:" + source.resolve().as_posix()
+                  lines.append(line)
+              report.write_text("\n".join(lines) + "\n")
+
+          absolutize("web/host/coverage/lcov.info", "web/host")
+          absolutize("desktop/shell/coverage/lcov.info", "desktop/shell")
           PY
           set +e
           dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
