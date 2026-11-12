@@ -15,6 +15,7 @@ TestResults/
 # v2 preview web UI
 web/host/node_modules/
 tests/fixtures/TestExecutor.SyntheticElectron/node_modules/
+tests/fixtures/TestExecutor.SyntheticElectron/app.js
 web/host/dist/
 web/host/test-results/
 web/host/playwright-report/

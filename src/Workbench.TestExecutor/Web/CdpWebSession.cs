@@ -18,6 +18,8 @@ public interface IWebSession : IAsyncDisposable
     Task<byte[]?> CapturePngAsync(CancellationToken cancellationToken);
 
     Task<string> SnapshotAsync(int maxBytes, CancellationToken cancellationToken);
+
+    Task<string> SceneTextAsync(CancellationToken cancellationToken);
 }
 
 public interface IWebSessionSource
@@ -37,6 +39,8 @@ public sealed class DisconnectedWebSession : IWebSession
     public Task<byte[]?> CapturePngAsync(CancellationToken cancellationToken) => Task.FromResult<byte[]?>(null);
 
     public Task<string> SnapshotAsync(int maxBytes, CancellationToken cancellationToken) => Task.FromResult("");
+
+    public Task<string> SceneTextAsync(CancellationToken cancellationToken) => Task.FromResult("");
 
     public ValueTask DisposeAsync() => ValueTask.CompletedTask;
 }
@@ -63,7 +67,11 @@ public sealed class DefaultWebSessionSource : IWebSessionSource
                 if (launched is not null) await launched.DisposeAsync();
                 return DisconnectedWebSession.Instance;
             }
-            if (launched is not null) session.Own(launched);
+            if (launched is not null)
+            {
+                session.Own(launched);
+                await session.InstallSceneHookAsync(reload: true, cancellationToken);
+            }
             return session;
         }
         catch (Exception error) when (error is ExecutorDataException or HttpRequestException or IOException or WebSocketException or TaskCanceledException)
@@ -199,6 +207,7 @@ public sealed class CdpWebSession : IWebSession
     private string _popup = ExecutorSchemas.PopupSelector;
     private string? _title;
     private string? _url;
+    private string? _sceneBaseline;
 
     private CdpWebSession(int port) => _port = port;
 
@@ -257,9 +266,9 @@ public sealed class CdpWebSession : IWebSession
             var png = await ScreenshotAsync(cancellationToken);
             return new WebResult(true, true, "screenshot", false, png);
         }
+        if (step.Kind == StepKind.Scene3d) return await SceneAsync(step, cancellationToken);
         if (step.Action == "wait-for") return await WaitForAsync(step, cancellationToken);
         if (step.Action is "click" or "invoke" or "expand") return await ClickAsync(step, cancellationToken);
-        if (step.Action is "read-scene" or "assert-scene" or "project" or "drag" or "orbit") return await SceneAsync(step, cancellationToken);
         var blocked = await PopupAsync(step, cancellationToken);
         if (blocked is not null) return blocked;
         return ToResult(step, await EvaluateAsync(RequestFor(step), cancellationToken));
@@ -407,40 +416,199 @@ public sealed class CdpWebSession : IWebSession
         return after ?? last ?? new WebResult(false, false, ExecutorError.ActionFailed, false, null);
     }
 
+    public async Task InstallSceneHookAsync(bool reload, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await CallAsync("Page.enable", new { }, cancellationToken);
+            await CallAsync("Page.addScriptToEvaluateOnNewDocument", new { source = SceneHook.Source }, cancellationToken);
+            if (!reload) return;
+            // The current document is already complete. Mark it so the wait below
+            // cannot return before the reload replaces the page.
+            await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
+            await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
+            await WaitForHookAsync(cancellationToken);
+        }
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+        }
+    }
+
+    public async Task<string> ProbeAsync(CancellationToken cancellationToken)
+    {
+        var value = await EvaluateAsync(RequestFor(new TestStep("probe", StepKind.Scene3d, "probe", null, null, null, 15, false, false)), cancellationToken);
+        var actual = ReadText(value, "actual");
+        return SceneProbeReport.FromSignals(string.IsNullOrEmpty(actual) ? "{}" : actual);
+    }
+
+    public async Task<string> SceneTextAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var value = await EvaluateAsync(RequestFor(new TestStep("scene", StepKind.Scene3d, "read-scene", null, null, null, 15, false, false)), cancellationToken);
+            var actual = ReadText(value, "actual");
+            if (string.IsNullOrEmpty(actual) || actual.Contains("data:image", StringComparison.Ordinal)) return "";
+            var normalized = SceneSnapshot.Normalize(actual);
+            return normalized.Contains("data:image", StringComparison.Ordinal) ? "" : SceneSnapshot.TextOf(normalized);
+        }
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException or JsonException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+            return "";
+        }
+    }
+
     private async Task<WebResult> SceneAsync(TestStep step, CancellationToken cancellationToken)
     {
-        var blocked = await PopupAsync(step, cancellationToken);
-        if (blocked is not null) return blocked;
-        if (step.Action is "drag" or "orbit")
+        if (step.Action is not ("probe" or "snapshot" or "read-scene" or "assert-scene" or "diff" or "project" or "compare-pixels" or "screenshot"))
+        {
+            var blocked = await PopupAsync(step, cancellationToken);
+            if (blocked is not null) return blocked;
+        }
+        if (step.Action == "probe")
+        {
+            var report = await ProbeAsync(cancellationToken);
+            var matched = step.Expected is not { Length: > 0 } || report.Contains(step.Expected, StringComparison.Ordinal);
+            return new WebResult(true, matched, matched ? report : report, false, null);
+        }
+        if (step.Action is "compare-pixels" or "screenshot")
+        {
+            var png = await CaptureCanvasAsync(step, cancellationToken);
+            return new WebResult(png is not null, png is not null, png is null ? ExecutorError.CaptureFailed : "local-canvas", false, png);
+        }
+        if (step.Action is "click" or "drag" or "orbit" or "wheel" or "project")
         {
             var projected = await EvaluateAsync(RequestFor(step, "project"), cancellationToken);
-            var point = ToResult(step, projected);
-            if (!point.Found || !projected.TryGetProperty("x", out var xValue) || !projected.TryGetProperty("y", out var yValue))
-                return point with { Ok = false };
-            var (dx, dy) = step.Action == "orbit" ? (80d, 0d) : ScenePointer.ParseDelta(step.Input);
-            foreach (var move in ScenePointer.Drag(xValue.GetDouble(), yValue.GetDouble(), dx, dy))
+            if (!TryPointer(projected, out var x, out var y))
+                return ToResult(step, projected) with { Ok = false };
+            if (step.Action == "project")
+                return new WebResult(true, true, x.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture) + "," + y.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture), false, null);
+            await DispatchPointerAsync(step, x, y, cancellationToken);
+        }
+        var read = ToResult(step, await EvaluateAsync(RequestFor(step, "read-scene"), cancellationToken));
+        if (!read.Found || !read.Ok) return read;
+        var snapshot = SceneSnapshot.Normalize(read.Actual);
+        if (step.Action is "snapshot" or "read-scene") _sceneBaseline = snapshot;
+        var actual = snapshot;
+        if (step.Action == "diff")
+        {
+            if (_sceneBaseline is null) return new WebResult(true, false, "no-earlier-snapshot", false, null);
+            actual = SceneDiff.Compare(_sceneBaseline, snapshot, step.Tolerance ?? 0.0001);
+        }
+        if (step.Expected is not { Length: > 0 }) return new WebResult(true, true, actual, false, null);
+        var ok = SceneAssert.Matches(actual, step.Expected, step.Tolerance ?? 0, out var detail);
+        return new WebResult(true, ok, ok ? actual : detail, false, null);
+    }
+
+    private async Task DispatchPointerAsync(TestStep step, double x, double y, CancellationToken cancellationToken)
+    {
+        if (step.Action == "click")
+        {
+            await DispatchClickAsync(x, y, cancellationToken);
+            return;
+        }
+        var (dx, dy) = step.Action == "orbit" ? (80d, 0d) : ScenePointer.ParseDelta(step.Input);
+        var moves = step.Action == "wheel" ? ScenePointer.Wheel(x, y, dx, dy) : ScenePointer.Drag(x, y, dx, dy);
+        foreach (var move in moves)
+        {
+            await CallAsync("Input.dispatchMouseEvent", new
             {
-                await CallAsync("Input.dispatchMouseEvent", new
+                type = move.Type,
+                x = move.X,
+                y = move.Y,
+                button = move.Type == "mouseWheel" ? "none" : "left",
+                buttons = move.Type is "mouseReleased" or "mouseWheel" ? 0 : 1,
+                clickCount = move.Type == "mouseWheel" ? 0 : 1,
+                deltaX = move.DeltaX,
+                deltaY = move.DeltaY
+            }, cancellationToken);
+        }
+    }
+
+    private static bool TryPointer(JsonElement projected, out double x, out double y)
+    {
+        x = 0;
+        y = 0;
+        if (SceneProjection.TryRead(projected, out var ndcX, out var ndcY, out var frame))
+        {
+            (x, y) = SceneProjection.ToViewport(ndcX, ndcY, frame);
+            return true;
+        }
+        if (projected.TryGetProperty("x", out var xValue) && projected.TryGetProperty("y", out var yValue) && xValue.TryGetDouble(out x) && yValue.TryGetDouble(out y))
+            return true;
+        return false;
+    }
+
+    private async Task<byte[]?> CaptureCanvasAsync(TestStep step, CancellationToken cancellationToken)
+    {
+        var rect = await EvaluateAsync(RequestFor(step, "canvas-rect"), cancellationToken);
+        if (rect.TryGetProperty("left", out var left) && rect.TryGetProperty("top", out var top)
+            && rect.TryGetProperty("width", out var width) && rect.TryGetProperty("height", out var height)
+            && left.TryGetDouble(out var x) && top.TryGetDouble(out var y) && width.TryGetDouble(out var w) && height.TryGetDouble(out var h)
+            && w > 0 && h > 0)
+        {
+            try
+            {
+                var result = await CallAsync("Page.captureScreenshot", new
                 {
-                    type = move.Type,
-                    x = move.X,
-                    y = move.Y,
-                    button = "left",
-                    buttons = move.Type == "mouseReleased" ? 0 : 1,
-                    clickCount = 1
+                    format = "png",
+                    clip = new { x, y, width = w, height = h, scale = 1 }
                 }, cancellationToken);
+                if (result.ValueKind == JsonValueKind.Object && result.TryGetProperty("data", out var data))
+                {
+                    var encoded = data.GetString() ?? "";
+                    if (encoded.Length > 0) return Convert.FromBase64String(encoded);
+                }
+            }
+            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException or FormatException)
+            {
+                if (cancellationToken.IsCancellationRequested) throw;
             }
         }
-        if (step.Action == "project") return ToResult(step, await EvaluateAsync(RequestFor(step, "project"), cancellationToken));
-        var read = ToResult(step, await EvaluateAsync(RequestFor(step, "read-scene"), cancellationToken));
-        if (!read.Found || !read.Ok || step.Expected is not { Length: > 0 }) return read;
-        var ok = SceneAssert.Matches(read.Actual, step.Expected, step.Tolerance ?? 0, out var detail);
-        return read with { Ok = ok, Actual = ok ? read.Actual : detail };
+        try
+        {
+            return await ScreenshotAsync(cancellationToken);
+        }
+        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+        {
+            if (cancellationToken.IsCancellationRequested) throw;
+            return null;
+        }
+    }
+
+    private async Task WaitForHookAsync(CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(15);
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var result = await CallAsync("Runtime.evaluate", new
+                {
+                    expression = "({marker: window.__WB_RELOAD_MARKER === 1, hook: typeof window.__THREE_DEVTOOLS__, ready: document.readyState})",
+                    returnByValue = true
+                }, cancellationToken);
+                if (result.TryGetProperty("result", out var inner) && inner.TryGetProperty("value", out var value))
+                {
+                    var marker = value.TryGetProperty("marker", out var marked) && marked.ValueKind == JsonValueKind.True;
+                    var hook = value.TryGetProperty("hook", out var kind) && kind.GetString() == "object";
+                    var ready = value.TryGetProperty("ready", out var state) && state.GetString() == "complete";
+                    if (!marker && hook && ready) return;
+                }
+            }
+            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+            {
+                if (cancellationToken.IsCancellationRequested) throw;
+            }
+            await Task.Delay(100, cancellationToken);
+        }
     }
 
     private async Task<WebResult?> PopupAsync(TestStep step, CancellationToken cancellationToken)
     {
-        if (step.AllowPopup || step.Action is "screenshot" or "switch-window") return null;
+        if (step.AllowPopup || step.Action is "screenshot" or "compare-pixels" or "switch-window" or "probe") return null;
         var value = await EvaluateAsync(RequestFor(step, "popup"), cancellationToken);
         if (!value.TryGetProperty("popup", out var popup) || popup.ValueKind != JsonValueKind.True) return null;
         return ToResult(step, value);
@@ -542,6 +710,8 @@ public sealed class CdpWebSession : IWebSession
         strategy = strategy ?? "element",
         popup = _popup,
         objectName = step.Target?.ObjectName ?? "",
+        uuid = step.Target?.Uuid ?? "",
+        path = step.Target?.Path ?? "",
         allowPopup = step.AllowPopup
     };
 
@@ -552,7 +722,7 @@ public sealed class CdpWebSession : IWebSession
         if (value.TryGetProperty("popup", out var popup) && popup.ValueKind == JsonValueKind.True)
             return new WebResult(true, false, ReadText(value, "actual") ?? "", false, null, ExecutorError.UnexpectedPopup);
         var found = value.TryGetProperty("found", out var foundValue) && foundValue.ValueKind == JsonValueKind.True && foundValue.GetBoolean();
-        if (!found) return new WebResult(false, false, ExecutorError.ControlNotFound, true, null);
+        if (!found) return new WebResult(false, false, ReadText(value, "actual") ?? ExecutorError.ControlNotFound, true, null);
         var ok = !value.TryGetProperty("ok", out var okValue) || okValue.ValueKind != JsonValueKind.False;
         var actual = ReadText(value, "actual") ?? ReadText(value, "value") ?? "ok";
         if (step.Sensitive) actual = "[masked]";

@@ -85,7 +85,10 @@ public sealed partial class SuiteRunner
     private async Task<TestStep?> RepairOnceAsync(TestCase testCase, TestStep step, IWebSession web, RunRequest request, List<string> log, CancellationToken cancellationToken)
     {
         if (!request.Policy.CanRepair) return null;
-        var snapshot = await web.SnapshotAsync(4096, cancellationToken);
+        var dom = await web.SnapshotAsync(4096, cancellationToken);
+        var scene = await web.SceneTextAsync(cancellationToken);
+        var snapshot = scene.Length == 0 ? dom : "SCENE:\n" + scene + "\nDOM:\n" + dom;
+        if (snapshot.Contains("data:image", StringComparison.Ordinal)) return null;
         var tokens = Math.Max(1, snapshot.Length / 4 + 50);
         var cost = tokens / 1000m * request.Policy.CostPerThousandTokens;
         if (!_deps.Budget.TryCharge(request.RunId, tokens, cost, request.Policy))

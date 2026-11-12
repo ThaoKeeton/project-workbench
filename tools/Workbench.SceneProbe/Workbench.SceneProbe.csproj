@@ -1,0 +1,14 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>Workbench.SceneProbe</RootNamespace>
+    <AssemblyName>Workbench.SceneProbe</AssemblyName>
+    <Version>0.1.0</Version>
+    <InformationalVersion>0.1.0-preview.1</InformationalVersion>
+    <Description>Read-only scene probe for an Electron app that already exposes a loopback DevTools port. Writes a local JSON report and does not upload it.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Workbench.TestExecutor\Workbench.TestExecutor.csproj" />
+  </ItemGroup>
+</Project>

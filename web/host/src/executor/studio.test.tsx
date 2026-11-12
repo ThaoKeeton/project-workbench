@@ -48,5 +48,12 @@ describe("executor script", () => {
     expect(mismatch(new Uint8Array([1, 2]), new Uint8Array([1, 9]), 0)).toBeGreaterThan(0);
     expect(repairPrompt(sampleDom, steps[1])).toContain("DOM:");
     expect(repairPrompt(sampleDom, steps[1])).not.toContain("data:image");
+    const sceneStep = steps.find((item) => item.action === "probe-scene");
+    expect(sceneStep).toBeTruthy();
+    const prompt = repairPrompt(sampleDom, sceneStep!);
+    expect(prompt).toContain("SCENE:");
+    expect(prompt).toContain("hash=box2");
+    expect(prompt).not.toContain("data:image");
+    expect(result.steps.find((item) => item.id.startsWith("rec-pixels"))?.evidence.startsWith("local:")).toBe(true);
   });
 });

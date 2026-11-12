@@ -143,9 +143,13 @@ public sealed class SuiteLoader
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
         if (kind == StepKind.Web && step.Action == "switch-window" && target?.Title is null && target?.Url is null)
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
-        if (kind == StepKind.Scene3d && step.Action is not ("read-scene" or "project" or "drag" or "orbit" or "assert-scene" or "screenshot"))
+        if (kind == StepKind.Scene3d && step.Action is not ("read-scene" or "project" or "drag" or "orbit" or "assert-scene" or "screenshot" or "probe" or "snapshot" or "diff" or "click" or "wheel" or "compare-pixels"))
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
-        if (kind == StepKind.Scene3d && step.Action != "screenshot" && target?.HasDomLocator != true && target?.ObjectName is null)
+        var sceneLocator = target?.HasSceneLocator == true;
+        var worldPoint = step.Input?.StartsWith("world:", StringComparison.Ordinal) == true;
+        if (kind == StepKind.Scene3d && step.Action is "click" or "drag" or "project" && !sceneLocator && !worldPoint)
+            throw new ExecutorDataException(ExecutorError.InvalidSuite);
+        if (kind == StepKind.Scene3d && step.Action is not ("screenshot" or "probe" or "compare-pixels" or "snapshot" or "diff" or "read-scene" or "assert-scene") && target?.HasDomLocator != true && !sceneLocator && !worldPoint)
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
         var timeout = step.TimeoutSeconds ?? kind switch
         {
@@ -180,12 +184,14 @@ public sealed class SuiteLoader
         var title = BlankToNull(selector.Title);
         var url = BlankToNull(selector.Url);
         var objectName = BlankToNull(selector.Object);
-        if (name is null && automationId is null && css is null && text is null && role is null && title is null && url is null && objectName is null) return null;
+        var uuid = BlankToNull(selector.Uuid);
+        var path = BlankToNull(selector.Path);
+        if (name is null && automationId is null && css is null && text is null && role is null && title is null && url is null && objectName is null && uuid is null && path is null) return null;
         if (!TextRules.IsOptionalText(name, 200) || !TextRules.IsOptionalText(automationId, 200) || !TextRules.IsOptionalText(css, 200)
             || !TextRules.IsOptionalText(text, 200) || !TextRules.IsOptionalText(role, 40) || !TextRules.IsOptionalText(title, 120) || !TextRules.IsOptionalText(url, 200)
-            || !TextRules.IsOptionalText(objectName, 80))
+            || !TextRules.IsOptionalText(objectName, 80) || !TextRules.IsOptionalText(uuid, 80) || !TextRules.IsOptionalText(path, 200))
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
-        return new ElementSelector(name, automationId, css, text, role, title, url, objectName);
+        return new ElementSelector(name, automationId, css, text, role, title, url, objectName, uuid, path);
     }
 
     private static string NormalizePopup(string? selector)
@@ -277,6 +283,8 @@ public sealed class SuiteLoader
         public string? Title { get; init; }
         public string? Url { get; init; }
         public string? Object { get; init; }
+        public string? Uuid { get; init; }
+        public string? Path { get; init; }
     }
 
     private sealed class MaskDto

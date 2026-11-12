@@ -9,6 +9,7 @@
   </Folder>
   <Folder Name="/engine/">
     <Project Path="src/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
+    <Project Path="tools/Workbench.SceneProbe/Workbench.SceneProbe.csproj" />
   </Folder>
   <Folder Name="/tests/">
     <Project Path="tests/Workbench.Service.Tests/Workbench.Service.Tests.csproj" />

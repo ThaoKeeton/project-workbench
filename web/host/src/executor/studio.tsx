@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
 import "./studio.css";
-import { recordFromDom, repairPrompt, replay, sampleDom, seedCases, type ExecutorCase, type ExecutorRun, type ExecutorStep, type StepAction } from "./model";
+import { actionLabels, isSceneAction, recordFromDom, repairPrompt, replay, sampleDom, seedCases, type ExecutorCase, type ExecutorRun, type ExecutorStep, type StepAction } from "./model";
 
-const actions: StepAction[] = ["attach", "click", "click-scene", "type", "wait-for", "assert-text", "assert-attr", "assert-number", "screenshot"];
+const actions = Object.keys(actionLabels) as StepAction[];
 
 export function ExecutorStudio() {
   const [cases, setCases] = useState<ExecutorCase[]>(seedCases);
@@ -42,7 +42,7 @@ export function ExecutorStudio() {
       <header className="executor-head">
         <div>
           <h1>自动化测试执行器</h1>
-          <p>目标是合成电子样品。录制只保留文本 DOM，回放不发送截图，自动发送保持关闭。</p>
+          <p>目标是合成电子样品。场景识别写出文字快照，像素只留在本机，回放不调用模型。</p>
         </div>
         <div className="executor-actions">
           <button type="button" className="btn" onClick={record}>从样品录制</button>
@@ -66,24 +66,32 @@ export function ExecutorStudio() {
             <ol>
               {selected.steps.map((entry) => (
                 <li key={entry.id}>
-                  <label>
-                    动作
-                    <select aria-label={`${entry.id} 动作`} value={entry.action} onChange={(event) => updateStep(entry.id, "action", event.target.value)}>
-                      {actions.map((action) => <option key={action} value={action}>{action}</option>)}
-                    </select>
-                  </label>
-                  <label>
-                    选择器
-                    <input aria-label={`${entry.id} 选择器`} value={entry.selector} onChange={(event) => updateStep(entry.id, "selector", event.target.value)} />
-                  </label>
-                  <label>
-                    期望
-                    <input aria-label={`${entry.id} 期望`} value={entry.expected} onChange={(event) => updateStep(entry.id, "expected", event.target.value)} />
-                  </label>
-                  <label>
-                    容差
-                    <input aria-label={`${entry.id} 容差`} value={entry.tolerance} onChange={(event) => updateStep(entry.id, "tolerance", event.target.value)} />
-                  </label>
+                  <div className="step-main">
+                    <label>
+                      动作
+                      <select aria-label={`${entry.id} 动作`} value={entry.action} onChange={(event) => updateStep(entry.id, "action", event.target.value)}>
+                        {actions.map((action) => <option key={action} value={action}>{actionLabels[action]}</option>)}
+                      </select>
+                    </label>
+                    <label>
+                      选择器
+                      <input aria-label={`${entry.id} 选择器`} value={entry.selector} onChange={(event) => updateStep(entry.id, "selector", event.target.value)} />
+                    </label>
+                    <label>
+                      期望
+                      <input aria-label={`${entry.id} 期望`} value={entry.expected} onChange={(event) => updateStep(entry.id, "expected", event.target.value)} />
+                    </label>
+                    <label>
+                      容差
+                      <input aria-label={`${entry.id} 容差`} value={entry.tolerance} onChange={(event) => updateStep(entry.id, "tolerance", event.target.value)} />
+                    </label>
+                  </div>
+                  {isSceneAction(entry.action) ? (
+                    <label className="step-object">
+                      对象
+                      <input aria-label={`${entry.id} 对象`} value={entry.text} placeholder="名称、uuid 或路径" onChange={(event) => updateStep(entry.id, "text", event.target.value)} />
+                    </label>
+                  ) : null}
                 </li>
               ))}
             </ol>

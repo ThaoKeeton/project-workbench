@@ -6,7 +6,7 @@
   padding: 32px 40px 48px;
   color: var(--text-primary);
 }
-.executor-head, .executor-actions, .executor-body, .case-editor ol li, .replay-steps li {
+.executor-head, .executor-actions, .executor-body, .replay-steps li {
   display: flex;
   gap: 12px;
   align-items: center;
@@ -28,7 +28,9 @@
 .case-list button.is-on, .executor .btn-accent { background: var(--accent); color: var(--accent-on); border-color: transparent; }
 .case-editor { flex: 1; display: grid; gap: 16px; min-width: 0; }
 .case-editor ol { display: grid; gap: 8px; }
-.case-editor li { display: grid; grid-template-columns: 140px 1fr 1fr 80px; gap: 8px; }
+.case-editor li { display: grid; gap: 8px; min-width: 0; }
+.step-main { display: grid; grid-template-columns: 148px minmax(0, 1.2fr) minmax(0, 1fr) 72px; gap: 8px; min-width: 0; }
+.step-object { min-width: 0; }
 .case-editor label, .repair label { display: grid; gap: 4px; color: var(--text-secondary); font-size: 12px; }
 .repair label.repair-toggle { display: flex; align-items: center; gap: 8px; color: var(--text-primary); font-size: 14px; }
 .case-editor input, .case-editor select, .repair input {
@@ -61,5 +63,5 @@
 }
 @media (max-width: 1100px) {
   .executor { grid-template-columns: 1fr; }
-  .case-editor li { grid-template-columns: 1fr 1fr; }
+  .step-main { grid-template-columns: 1fr 1fr; }
 }

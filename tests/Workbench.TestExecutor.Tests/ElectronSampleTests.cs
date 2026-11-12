@@ -105,7 +105,14 @@ public sealed class ElectronSampleTests
         var session = await CdpWebSession.ConnectAsync(port, "合成电子样品", null, CancellationToken.None);
         Assert.NotNull(session);
         await using var connected = session!;
-        var snapshot = await connected.SnapshotAsync(4096, CancellationToken.None);
+        var snapshot = "";
+        var ready = DateTime.UtcNow.AddSeconds(10);
+        while (DateTime.UtcNow < ready)
+        {
+            snapshot = await connected.SnapshotAsync(4096, CancellationToken.None);
+            if (snapshot.Contains("#start", StringComparison.Ordinal)) break;
+            await Task.Delay(100, CancellationToken.None);
+        }
         Assert.Contains("#start", snapshot, StringComparison.Ordinal);
         Assert.DoesNotContain("data:image", snapshot, StringComparison.Ordinal);
         await connected.StartRecordingAsync(CancellationToken.None);
@@ -157,8 +164,17 @@ public sealed class ElectronSampleTests
         var trace = string.Join(" || ", sink.Steps.Select(step => step.StepId + "=" + step.Status + "/" + step.ErrorType + "/" + step.Message));
         Assert.True(sink.Steps.Any(step => step.StepId == "start" && step.Status == "passed" && step.Engine == "web"), trace);
         Assert.True(sink.Steps.Any(step => step.StepId == "status" && step.Status == "passed"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "probe" && step.Status == "passed" && step.Engine == "scene3d"), trace);
         Assert.True(sink.Steps.Any(step => step.StepId == "read-camera" && step.Status == "passed" && step.Engine == "scene3d"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "drag-cube" && step.Status == "passed" && step.Engine == "scene3d"), trace);
+        Assert.True(sink.Steps.Any(step => step.StepId == "diff-cube" && step.Status == "passed" && step.Engine == "scene3d"), trace);
         Assert.True(sink.Steps.Any(step => step.StepId == "orbit" && step.Status == "passed" && step.Engine == "scene3d"), trace);
+        using (var evidence = System.Text.Json.JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(reports, "CASE-SCENE-probe.evidence.json"))))
+        {
+            var log = string.Join('\n', evidence.RootElement.GetProperty("log").EnumerateArray().Select(item => item.GetString()));
+            Assert.Contains("\"recommended\":\"devtools\"", log, StringComparison.Ordinal);
+            Assert.Contains("\"workbenchHook\":false", log, StringComparison.Ordinal);
+        }
         Assert.True(sink.Steps.Any(step => step.StepId == "open-modal" && step.Status == "failed" && step.ErrorType == ExecutorError.UnexpectedPopup), trace);
         foreach (var name in new[] { "CASE-UI-wait-start", "CASE-UI-start", "CASE-UI-status", "CASE-UI-shot-ui", "CASE-SCENE-read-camera", "CASE-SCENE-orbit", "CASE-SCENE-shot-scene" })
             Assert.True(File.Exists(Path.Combine(reports, name + ".png")), name);
