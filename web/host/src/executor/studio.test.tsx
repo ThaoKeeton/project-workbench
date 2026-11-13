@@ -214,7 +214,10 @@ describe("executor script", () => {
     writeAiSettings({ provider: "compatible", key: "<script>alert(1)</script>", base: "javascript:alert(1)", cap: 4 });
     expect(localStorage.getItem(aiKeyStorageKey)).toBe("");
     expect(localStorage.getItem(aiBaseStorageKey)).toBe("");
+    expect(readAiSettings().key).toBe("");
     writeAiSettings({ provider: "openai", key: "sample-key-0001", base: "http://127.0.0.1:9", cap: 4 });
+    expect(localStorage.getItem(aiKeyStorageKey)).toBe("1");
+    expect(localStorage.getItem(aiKeyStorageKey)).not.toContain("sample");
     expect(readAiSettings().key).toBe("sample-key-0001");
     expect(readAiSettings().base).toBe("http://127.0.0.1:9");
     expect(describeStep(saved!.steps[1]).will).toContain("点击");

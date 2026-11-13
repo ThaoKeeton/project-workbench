@@ -348,18 +348,17 @@ export function readAuthorFake(): "off" | "pass" | "fail" {
   return "off";
 }
 
+let sessionKey = "";
+let sessionBase = "";
+
 export function readAiSettings(): AiSettings {
   let provider: AiProvider = "openai";
-  let key = "";
-  let base = "";
   try {
     if (localStorage.getItem(aiProviderStorageKey) === "compatible") provider = "compatible";
-    key = storedSecret(localStorage.getItem(aiKeyStorageKey) ?? "");
-    base = storedBase(localStorage.getItem(aiBaseStorageKey) ?? "");
   } catch {
     provider = "openai";
   }
-  return { provider, key, base, cap: readDailyCap() };
+  return { provider, key: sessionKey, base: sessionBase, cap: readDailyCap() };
 }
 
 function storedSecret(value: string): string {
@@ -372,9 +371,11 @@ function storedBase(value: string): string {
 
 export function writeAiSettings(value: AiSettings) {
   const provider = value.provider === "compatible" ? "compatible" : "openai";
+  sessionKey = storedSecret(value.key);
+  sessionBase = storedBase(value.base);
   localStorage.setItem(aiProviderStorageKey, provider);
-  localStorage.setItem(aiKeyStorageKey, storedSecret(value.key));
-  localStorage.setItem(aiBaseStorageKey, storedBase(value.base));
+  localStorage.setItem(aiKeyStorageKey, sessionKey ? "1" : "");
+  localStorage.setItem(aiBaseStorageKey, sessionBase ? "1" : "");
   writeDailyCap(value.cap);
 }
 

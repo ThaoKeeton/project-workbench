@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api";
 import { HomePage } from "./launcher";
 import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
+import { writeAiSettings } from "./executor/model";
 import { AiSettingsPage, DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SampleCasesPage, SettingsPage } from "./workspace";
 
 afterEach(() => cleanup());
@@ -128,6 +129,7 @@ describe("launcher pages", () => {
     expect(sessionStorage.getItem("workbench.wizard.resume")).toBe("1");
     cleanup();
     sessionStorage.removeItem("workbench.author.fake");
+    writeAiSettings({ provider: "openai", key: "", base: "", cap: 20 });
     localStorage.clear();
     render(<MemoryRouter><AiSettingsPage /></MemoryRouter>);
     await user.click(screen.getByRole("radio", { name: "兼容接口" }));
