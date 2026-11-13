@@ -122,17 +122,22 @@ public static class ElectronTargetLauncher
 {
     public static async Task<LaunchedTarget> LaunchAsync(ApplicationTarget application, CancellationToken cancellationToken)
     {
-        if (application.Executable is not { Length: > 0 } || !File.Exists(application.Executable))
+        var executable = ExecutablePath.NormalizeLaunch(application.Executable);
+        if (executable is null)
             throw new ExecutorDataException(ExecutorError.LaunchFailed);
         var port = application.DebugPort ?? FreePort();
-        var start = new ProcessStartInfo(application.Executable)
+        var start = new ProcessStartInfo(executable)
         {
             UseShellExecute = false,
             RedirectStandardOutput = true,
             RedirectStandardError = true
         };
         var debuggingPort = "--remote-debugging-port=" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
-        var userArguments = (application.Arguments ?? []).Where(argument => !argument.StartsWith("--remote-debugging-port=", StringComparison.Ordinal) && argument != "--remote-allow-origins=*").ToArray();
+        var userArguments = (application.Arguments ?? []).Where(argument =>
+            argument.IndexOfAny(['\0', '\r', '\n']) < 0
+            && !argument.StartsWith("--remote-debugging-port=", StringComparison.Ordinal)
+            && !argument.StartsWith("--user-data-dir=", StringComparison.Ordinal)
+            && argument != "--remote-allow-origins=*").ToArray();
         var dotnet = Path.GetFileName(application.Executable) is "dotnet" or "dotnet.exe";
         string? profile = null;
         if (!dotnet)

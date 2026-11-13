@@ -369,7 +369,7 @@ export function AiSettingsPage() {
     <div className="page narrow-page">
       <header className="page-head">
         <h1>AI 设置</h1>
-        <p>密钥只留在这台电脑上，页面上会遮住。每天重跑不会再用 AI。</p>
+        <p>密钥交给这台电脑的系统凭据保存，页面上会遮住，也不会写进浏览器。每天重跑不会再用 AI。</p>
       </header>
       <fieldset className="theme-list">
         <legend>提供方</legend>

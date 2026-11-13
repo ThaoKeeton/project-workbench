@@ -97,36 +97,85 @@ public sealed record AuthorGate(bool Enabled, decimal DailySpendCap, decimal Cos
     }
 }
 
+public interface IAuthorKeyProtector
+{
+    byte[] Protect(byte[] plaintext);
+    byte[] Unprotect(byte[] ciphertext);
+}
+
+/// <summary>Current-user DPAPI. Off Windows this refuses to store a key as plaintext.</summary>
+public sealed class DpapiAuthorKeyProtector : IAuthorKeyProtector
+{
+    private static readonly byte[] Entropy = "workbench.test-executor.author-key.v1"u8.ToArray();
+
+    public byte[] Protect(byte[] plaintext)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        return System.Security.Cryptography.ProtectedData.Protect(plaintext, Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+    }
+
+    public byte[] Unprotect(byte[] ciphertext)
+    {
+        if (!OperatingSystem.IsWindows()) throw new PlatformNotSupportedException();
+        return System.Security.Cryptography.ProtectedData.Unprotect(ciphertext, Entropy, System.Security.Cryptography.DataProtectionScope.CurrentUser);
+    }
+}
+
+public sealed class AuthorKeyVault
+{
+    public const string FileName = "author-key.bin";
+    private readonly IAuthorKeyProtector _protector;
+
+    public AuthorKeyVault(IAuthorKeyProtector? protector = null)
+        => _protector = protector ?? new DpapiAuthorKeyProtector();
+
+    public bool Save(string previewDirectory, string key)
+    {
+        var normalized = AuthorSecrets.Normalize(key);
+        if (normalized is null) return false;
+        var root = Path.GetFullPath(previewDirectory);
+        Directory.CreateDirectory(root);
+        var cipher = _protector.Protect(System.Text.Encoding.UTF8.GetBytes(normalized));
+        var path = Path.Combine(root, FileName);
+        File.WriteAllBytes(path, cipher);
+        return !System.Text.Encoding.UTF8.GetString(cipher).Contains(normalized, StringComparison.Ordinal);
+    }
+
+    public string? Read(string previewDirectory)
+    {
+        var path = Path.Combine(Path.GetFullPath(previewDirectory), FileName);
+        if (!File.Exists(path)) return null;
+        var info = new FileInfo(path);
+        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length is < 8 or > 4096) return null;
+        try
+        {
+            var plain = _protector.Unprotect(File.ReadAllBytes(path));
+            return AuthorSecrets.Normalize(System.Text.Encoding.UTF8.GetString(plain));
+        }
+        catch (Exception error) when (error is System.Security.Cryptography.CryptographicException or PlatformNotSupportedException or InvalidOperationException or IOException)
+        {
+            return null;
+        }
+    }
+}
+
 public sealed class AuthorSecrets
 {
     public const string EnvironmentVariable = "WORKBENCH_AUTHOR_API_KEY";
     private readonly Func<string, string?> _environment;
+    private readonly AuthorKeyVault _vault;
 
-    public AuthorSecrets(Func<string, string?>? environment = null)
-        => _environment = environment ?? Environment.GetEnvironmentVariable;
+    public AuthorSecrets(Func<string, string?>? environment = null, AuthorKeyVault? vault = null)
+    {
+        _environment = environment ?? Environment.GetEnvironmentVariable;
+        _vault = vault ?? new AuthorKeyVault();
+    }
 
     public string? Read(string previewDirectory)
     {
         var fromEnv = _environment(EnvironmentVariable);
         if (fromEnv is not null) return Normalize(fromEnv);
-        return ReadFile(previewDirectory);
-    }
-
-    private static string? ReadFile(string previewDirectory)
-    {
-        var path = Path.Combine(Path.GetFullPath(previewDirectory), "author.local.json");
-        if (!File.Exists(path)) return null;
-        var info = new FileInfo(path);
-        if (info.Attributes.HasFlag(FileAttributes.ReparsePoint) || info.Length is < 2 or > 8192) return null;
-        try
-        {
-            if (JsonNode.Parse(File.ReadAllText(path)) is not JsonObject node) return null;
-            return Normalize(node["apiKey"]?.GetValue<string>());
-        }
-        catch (Exception error) when (error is JsonException or InvalidOperationException)
-        {
-            return null;
-        }
+        return _vault.Read(previewDirectory);
     }
 
     internal static string? Normalize(string? value)

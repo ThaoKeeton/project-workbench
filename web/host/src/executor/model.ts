@@ -370,12 +370,12 @@ function storedBase(value: string): string {
 }
 
 export function writeAiSettings(value: AiSettings) {
-  const provider = value.provider === "compatible" ? "compatible" : "openai";
   sessionKey = storedSecret(value.key);
   sessionBase = storedBase(value.base);
-  localStorage.setItem(aiProviderStorageKey, provider);
-  localStorage.setItem(aiKeyStorageKey, sessionKey ? "1" : "");
-  localStorage.setItem(aiBaseStorageKey, sessionBase ? "1" : "");
+  if (value.provider === "compatible") localStorage.setItem(aiProviderStorageKey, "compatible");
+  else localStorage.setItem(aiProviderStorageKey, "openai");
+  localStorage.removeItem(aiKeyStorageKey);
+  localStorage.removeItem(aiBaseStorageKey);
   writeDailyCap(value.cap);
 }
 

@@ -27,7 +27,7 @@ public sealed class ScriptAuthorTests
         var preview = Fixtures.Temp();
         WriteGate(preview, true, 1, 0.01m);
         var model = new FixedScriptModel();
-        var author = new ScriptAuthor(model, new AuthorSecrets(_ => null));
+        var author = new ScriptAuthor(model, TestAuthorKeys.Secrets());
         var draft = await author.GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal("review", draft.Status);
         Assert.Equal(AuthorMessages.Review, draft.Message);
@@ -61,7 +61,7 @@ public sealed class ScriptAuthorTests
     {
         var preview = Fixtures.Temp();
         var model = new FixedScriptModel();
-        var closed = await new ScriptAuthor(model, new AuthorSecrets(_ => null)).GenerateAsync(Sample(), preview, CancellationToken.None);
+        var closed = await new ScriptAuthor(model, TestAuthorKeys.Secrets()).GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.Disabled, closed.Message);
         Assert.Equal(0, model.Calls);
         Assert.Equal(0, closed.ModelCalls);
@@ -69,13 +69,13 @@ public sealed class ScriptAuthorTests
         Assert.False(File.Exists(Path.Combine(preview, "confirmed-script.json")));
 
         var image = Sample() with { SceneSnapshot = Snapshot + "\ndata:image/png;base64,AAAA" };
-        var refused = await new ScriptAuthor(model, new AuthorSecrets(_ => null)).GenerateAsync(image, preview, CancellationToken.None);
+        var refused = await new ScriptAuthor(model, TestAuthorKeys.Secrets()).GenerateAsync(image, preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.Image, refused.Message);
         Assert.Equal(0, model.Calls);
         Assert.DoesNotContain("base64,AAAA", string.Join('\n', Directory.GetFiles(Path.Combine(preview, "author-log")).Select(File.ReadAllText)), StringComparison.Ordinal);
 
         WriteGate(preview, true, 1, 0.01m, Key);
-        var leaked = await new ScriptAuthor(model, new AuthorSecrets(_ => null)).GenerateAsync(Sample() with { DomText = Dom + " " + Key }, preview, CancellationToken.None);
+        var leaked = await new ScriptAuthor(model, TestAuthorKeys.Secrets()).GenerateAsync(Sample() with { DomText = Dom + " " + Key }, preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.KeyLeak, leaked.Message);
         Assert.Equal(0, model.Calls);
         Assert.DoesNotContain(Key, leaked.Prompt, StringComparison.Ordinal);
@@ -84,7 +84,7 @@ public sealed class ScriptAuthorTests
             Assert.DoesNotContain(Key, await File.ReadAllTextAsync(log), StringComparison.Ordinal);
 
         File.Delete(Path.Combine(preview, "author.local.json"));
-        var repair = await new ScriptAuthor(model, new AuthorSecrets(_ => null)).RepairAsync(Sample() with { FailedStep = "cut-drag drag stock", DiffText = "counts.deformed=0;counts.moved=0" }, preview, CancellationToken.None);
+        var repair = await new ScriptAuthor(model, TestAuthorKeys.Secrets()).RepairAsync(Sample() with { FailedStep = "cut-drag drag stock", DiffText = "counts.deformed=0;counts.moved=0" }, preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.Disabled, repair.Message);
         Assert.Equal(0, model.Calls);
         Assert.Contains("失败步骤:", repair.Prompt, StringComparison.Ordinal);
@@ -103,7 +103,7 @@ public sealed class ScriptAuthorTests
         WriteGate(preview, true, estimate + 0.01m, 20m, Key);
         var model = new PricedModel();
         var clock = new ManualClock();
-        var author = new ScriptAuthor(model, new AuthorSecrets(_ => null), clock);
+        var author = new ScriptAuthor(model, TestAuthorKeys.Secrets(), clock);
         var first = await author.GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal("review", first.Status);
         Assert.Equal(1, model.Calls);
@@ -118,7 +118,7 @@ public sealed class ScriptAuthorTests
         var blocked = Fixtures.Temp();
         WriteGate(blocked, true, 0, 0.01m, Key);
         var handler = new StubHandler { Responder = (_, _) => throw new InvalidOperationException("cap zero must not send") };
-        var none = await new ScriptAuthor(new OpenAiScriptModel(handler), new AuthorSecrets(_ => null)).GenerateAsync(Sample(), blocked, CancellationToken.None);
+        var none = await new ScriptAuthor(new OpenAiScriptModel(handler), TestAuthorKeys.Secrets()).GenerateAsync(Sample(), blocked, CancellationToken.None);
         Assert.Equal(AuthorMessages.OverBudget, none.Message);
         Assert.Equal(0, handler.Calls);
         Directory.Delete(preview, true);
@@ -147,7 +147,7 @@ public sealed class ScriptAuthorTests
                 return new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(payload) };
             }
         };
-        var draft = await new ScriptAuthor(new OpenAiScriptModel(handler), new AuthorSecrets(_ => null)).GenerateAsync(Sample(), preview, CancellationToken.None);
+        var draft = await new ScriptAuthor(new OpenAiScriptModel(handler), TestAuthorKeys.Secrets()).GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal("review", draft.Status);
         Assert.Equal(1, handler.Calls);
         Assert.Equal("Bearer " + Key, handler.Authorizations[0]);
@@ -160,7 +160,7 @@ public sealed class ScriptAuthorTests
         var missing = Fixtures.Temp();
         WriteGate(missing, true, 5, 0.01m);
         var quiet = new StubHandler { Responder = (_, _) => throw new InvalidOperationException("missing key must not send") };
-        var noKey = await new ScriptAuthor(new OpenAiScriptModel(quiet), new AuthorSecrets(_ => null)).GenerateAsync(Sample(), missing, CancellationToken.None);
+        var noKey = await new ScriptAuthor(new OpenAiScriptModel(quiet), TestAuthorKeys.Secrets()).GenerateAsync(Sample(), missing, CancellationToken.None);
         Assert.Equal(AuthorMessages.MissingKey, noKey.Message);
         Assert.Equal(0, quiet.Calls);
 
@@ -174,7 +174,7 @@ public sealed class ScriptAuthorTests
         Assert.Throws<ExecutorDataException>(() => ScriptAuthor.ToSuite("{\"note\":\"请添加测试钩子\"}"));
         var broken = new PricedModel { Text = "{\"note\":\"not a script\"}" };
         WriteGate(preview, true, 20, 0.01m, Key);
-        var invalid = await new ScriptAuthor(broken, new AuthorSecrets(_ => null)).GenerateAsync(Sample(), preview, CancellationToken.None);
+        var invalid = await new ScriptAuthor(broken, TestAuthorKeys.Secrets()).GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.Invalid, invalid.Message);
         Assert.Null(invalid.ScriptJson);
         Assert.False(File.Exists(Path.Combine(preview, "confirmed-script.json")));
@@ -187,26 +187,26 @@ public sealed class ScriptAuthorTests
     {
         var preview = Fixtures.Temp();
         var model = new FixedScriptModel();
-        var author = new ScriptAuthor(model, new AuthorSecrets(_ => null));
+        var author = new ScriptAuthor(model, TestAuthorKeys.Secrets());
         var empty = await author.GenerateAsync(Sample() with { Goal = "  " }, preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.Empty, empty.Message);
         Assert.Equal(0, model.Calls);
         var noFailure = await author.RepairAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.NoFailure, noFailure.Message);
         WriteGate(preview, true, 5, 0.01m);
-        var missingModel = await new ScriptAuthor(null, new AuthorSecrets(_ => null)).GenerateAsync(Sample(), preview, CancellationToken.None);
+        var missingModel = await new ScriptAuthor(null, TestAuthorKeys.Secrets()).GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.MissingModel, missingModel.Message);
         WriteGate(preview, true, 5, 0.01m, "local-file-key");
         var handler = new StubHandler
         {
             Responder = (_, _) => new HttpResponseMessage(HttpStatusCode.InternalServerError) { Content = new StringContent("no") }
         };
-        var failed = await new ScriptAuthor(new OpenAiScriptModel(handler), new AuthorSecrets(name => name == AuthorSecrets.EnvironmentVariable ? Key : null))
+        var failed = await new ScriptAuthor(new OpenAiScriptModel(handler), TestAuthorKeys.Secrets(name => name == AuthorSecrets.EnvironmentVariable ? Key : null))
             .GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.Unavailable, failed.Message);
         Assert.Equal("Bearer " + Key, handler.Authorizations[0]);
         File.WriteAllText(Path.Combine(preview, "author.local.json"), "{");
-        var corrupt = await new ScriptAuthor(new FixedScriptModel(), new AuthorSecrets(_ => null)).GenerateAsync(Sample(), preview, CancellationToken.None);
+        var corrupt = await new ScriptAuthor(new FixedScriptModel(), TestAuthorKeys.Secrets()).GenerateAsync(Sample(), preview, CancellationToken.None);
         Assert.Equal(AuthorMessages.Disabled, corrupt.Message);
         Assert.Throws<ExecutorDataException>(() => ScriptAuthor.SaveConfirmed(preview, "{\"note\":\"请添加测试钩子\"}"));
         Assert.False(File.Exists(Path.Combine(preview, "confirmed-script.json")));
@@ -218,12 +218,16 @@ public sealed class ScriptAuthorTests
     private static void WriteGate(string directory, bool enabled, decimal cap, decimal rate, string? key = null)
     {
         Directory.CreateDirectory(directory);
-        var keyField = key is null ? "" : ",\"apiKey\":\"" + key + "\"";
         File.WriteAllText(Path.Combine(directory, "author.local.json"),
             "{\"schema\":\"workbench.test-executor.author-local.v1\",\"schemaVersion\":1,\"enabled\":" + (enabled ? "true" : "false")
             + ",\"dailySpendCap\":" + cap.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            + ",\"costPerThousandTokens\":" + rate.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            + keyField + "}");
+            + ",\"costPerThousandTokens\":" + rate.ToString(System.Globalization.CultureInfo.InvariantCulture) + "}");
+        if (key is not null)
+        {
+            Assert.True(TestAuthorKeys.Vault.Save(directory, key));
+            Assert.DoesNotContain(key, File.ReadAllText(Path.Combine(directory, AuthorKeyVault.FileName)), StringComparison.Ordinal);
+            Assert.DoesNotContain(key, File.ReadAllText(Path.Combine(directory, "author.local.json")), StringComparison.Ordinal);
+        }
     }
 
     private static async Task ReplayAsync(TestSuite authored)

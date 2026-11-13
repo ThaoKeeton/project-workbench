@@ -17,15 +17,18 @@ public static class ElectronAppCatalog
 
     public static IReadOnlyList<DiscoveredElectronApp> Discover(IEnumerable<string> roots)
     {
-        var found = new List<DiscoveredElectronApp>();
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var allowed = new List<string>();
         foreach (var root in roots)
         {
             if (string.IsNullOrWhiteSpace(root) || !Directory.Exists(root)) continue;
             var info = new DirectoryInfo(root);
             if (info.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
-            Walk(info, 0, found, seen);
+            allowed.Add(info.FullName);
         }
+        var found = new List<DiscoveredElectronApp>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var root in allowed)
+            Walk(new DirectoryInfo(root), 0, found, seen, allowed);
         return found;
     }
 
@@ -69,7 +72,7 @@ public static class ElectronAppCatalog
         return found;
     }
 
-    private static void Walk(DirectoryInfo directory, int depth, List<DiscoveredElectronApp> found, HashSet<string> seen)
+    private static void Walk(DirectoryInfo directory, int depth, List<DiscoveredElectronApp> found, HashSet<string> seen, IReadOnlyList<string> allowed)
     {
         if (depth > 6 || found.Count >= 40) return;
         FileSystemInfo[] entries;
@@ -86,18 +89,18 @@ public static class ElectronAppCatalog
             if (entry.Attributes.HasFlag(FileAttributes.ReparsePoint)) continue;
             if (entry is DirectoryInfo child)
             {
-                Walk(child, depth + 1, found, seen);
+                Walk(child, depth + 1, found, seen, allowed);
                 continue;
             }
             if (entry is not FileInfo file) continue;
             if (file.Extension.Equals(".lnk", StringComparison.OrdinalIgnoreCase))
-                AddShortcuts(file, found, seen);
+                AddShortcuts(file, found, seen, allowed);
             else if (file.Extension.Equals(".exe", StringComparison.OrdinalIgnoreCase))
-                AddExecutable(file.FullName, InstallSource, found, seen);
+                AddExecutable(file.FullName, InstallSource, found, seen, allowed);
         }
     }
 
-    private static void AddShortcuts(FileInfo file, List<DiscoveredElectronApp> found, HashSet<string> seen)
+    private static void AddShortcuts(FileInfo file, List<DiscoveredElectronApp> found, HashSet<string> seen, IReadOnlyList<string> allowed)
     {
         if (file.Length is < 4 or > 65536) return;
         byte[] bytes;
@@ -111,25 +114,58 @@ public static class ElectronAppCatalog
         }
         foreach (var target in ReadShortcutTargets(bytes))
         {
-            if (!File.Exists(target)) continue;
-            AddExecutable(target, StartMenuSource, found, seen);
+            if (ExecutablePath.NormalizeInstalled(target, allowed) is not string full) continue;
+            AddExecutable(full, StartMenuSource, found, seen, allowed);
         }
     }
 
-    private static void AddExecutable(string path, string source, List<DiscoveredElectronApp> found, HashSet<string> seen)
+    private static void AddExecutable(string path, string source, List<DiscoveredElectronApp> found, HashSet<string> seen, IReadOnlyList<string> allowed)
     {
+        if (ExecutablePath.NormalizeInstalled(path, allowed) is not string full) return;
+        if (!seen.Add(full) || !HasElectronLayout(full)) return;
+        var name = Path.GetFileNameWithoutExtension(full);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        found.Add(new DiscoveredElectronApp(name, full, source));
+    }
+}
+
+public static class ExecutablePath
+{
+    public static string? NormalizeLaunch(string? path)
+    {
+        if (string.IsNullOrWhiteSpace(path) || path.Length > 260) return null;
+        if (path.Contains("..", StringComparison.Ordinal)) return null;
+        if (path.IndexOfAny(['\0', '\r', '\n', '"', '*', '?', '<', '>', '|']) >= 0) return null;
+        if (!Path.IsPathRooted(path)) return null;
         string full;
         try
         {
             full = Path.GetFullPath(path);
         }
-        catch (Exception error) when (error is IOException or ArgumentException or NotSupportedException)
+        catch (Exception error) when (error is ArgumentException or NotSupportedException or PathTooLongException or IOException)
         {
-            return;
+            return null;
         }
-        if (!seen.Add(full) || !HasElectronLayout(full)) return;
-        var name = Path.GetFileNameWithoutExtension(full);
-        if (string.IsNullOrWhiteSpace(name)) return;
-        found.Add(new DiscoveredElectronApp(name, full, source));
+        if (!File.Exists(full)) return null;
+        var name = Path.GetFileName(full);
+        if (name.Equals("cmd.exe", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("powershell.exe", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("pwsh.exe", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("bash", StringComparison.OrdinalIgnoreCase)
+            || name.Equals("sh", StringComparison.OrdinalIgnoreCase))
+            return null;
+        return full;
+    }
+
+    public static string? NormalizeInstalled(string? path, IReadOnlyList<string> allowedRoots)
+    {
+        var full = NormalizeLaunch(path);
+        if (full is null || !full.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return null;
+        foreach (var root in allowedRoots)
+        {
+            var prefix = root.TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar) + Path.DirectorySeparatorChar;
+            if (full.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)) return full;
+        }
+        return null;
     }
 }

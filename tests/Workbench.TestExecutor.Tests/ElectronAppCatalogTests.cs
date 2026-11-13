@@ -34,7 +34,7 @@ public sealed class ElectronAppCatalogTests
         Assert.Equal(ElectronAppCatalog.InstallSource, installed[0].Source);
         Assert.DoesNotContain(installed, app => app.Name == "Notepad");
 
-        var fromMenu = ElectronAppCatalog.Discover([menu]);
+        var fromMenu = ElectronAppCatalog.Discover([menu, Path.Combine(root, "Apps")]);
         Assert.Single(fromMenu);
         Assert.Equal("Mill", fromMenu[0].Name);
         Assert.Equal(ElectronAppCatalog.StartMenuSource, fromMenu[0].Source);
@@ -49,6 +49,10 @@ public sealed class ElectronAppCatalogTests
         Assert.Equal("launch", ElectronAppCatalog.Decide(Path.Combine(cutter, "Cutter.exe"), false, false).Kind);
         Assert.Empty(ElectronAppCatalog.ReadShortcutTargets([1, 2, 3]));
         Assert.Empty(ElectronAppCatalog.Discover([]));
+        Assert.Null(ExecutablePath.NormalizeLaunch("Cutter.exe"));
+        Assert.Null(ExecutablePath.NormalizeLaunch(Path.Combine(cutter, "..", "Cutter.exe")));
+        Assert.Null(ExecutablePath.NormalizeLaunch(Path.Combine(cutter, "Cutter.exe") + "\n"));
+        Assert.Null(ExecutablePath.NormalizeInstalled(millExe, [menu]));
         Directory.Delete(root, true);
     }
 }
