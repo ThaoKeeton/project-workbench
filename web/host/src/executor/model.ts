@@ -354,19 +354,27 @@ export function readAiSettings(): AiSettings {
   let base = "";
   try {
     if (localStorage.getItem(aiProviderStorageKey) === "compatible") provider = "compatible";
-    key = localStorage.getItem(aiKeyStorageKey) ?? "";
-    base = localStorage.getItem(aiBaseStorageKey) ?? "";
+    key = storedSecret(localStorage.getItem(aiKeyStorageKey) ?? "");
+    base = storedBase(localStorage.getItem(aiBaseStorageKey) ?? "");
   } catch {
     provider = "openai";
   }
   return { provider, key, base, cap: readDailyCap() };
 }
 
+function storedSecret(value: string): string {
+  return /^([A-Za-z0-9._+\/=-]{8,200})$/.exec(value.trim())?.[1] ?? "";
+}
+
+function storedBase(value: string): string {
+  return /^(https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:\/[A-Za-z0-9._~/-]*)?)$/.exec(value.trim())?.[1] ?? "";
+}
+
 export function writeAiSettings(value: AiSettings) {
   const provider = value.provider === "compatible" ? "compatible" : "openai";
   localStorage.setItem(aiProviderStorageKey, provider);
-  localStorage.setItem(aiKeyStorageKey, value.key.trim());
-  localStorage.setItem(aiBaseStorageKey, value.base.trim());
+  localStorage.setItem(aiKeyStorageKey, storedSecret(value.key));
+  localStorage.setItem(aiBaseStorageKey, storedBase(value.base));
   writeDailyCap(value.cap);
 }
 
