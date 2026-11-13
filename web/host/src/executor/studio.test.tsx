@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { authorPrompt, capStorageKey, caseFromScript, connectChoice, describeStep, failingReplayScript, fixedReplayScript, humanFindings, mismatch, plainPlan, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleDom, sceneSnapshotText, seedCases, writeDailyCap } from "./model";
+import { authorPrompt, capStorageKey, caseFromScript, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatWhen, humanFindings, mismatch, nextDailyInstant, plainPlan, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleDom, sampleLibrary, sceneSnapshotText, seedCases, writeDailyCap } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => {
@@ -84,7 +84,38 @@ describe("executor wizard", () => {
     expect(screen.getByRole("heading", { name: "已保存的测试" })).toBeTruthy();
     expect(screen.getByRole("button", { name: "新建一个测试" })).toBeTruthy();
     expect(screen.getByText("通过")).toBeTruthy();
-    expect(screen.getByText("下次 07:30")).toBeTruthy();
+    expect(screen.getByText(/下次 (今天|明天) 07:30/)).toBeTruthy();
+  });
+
+  it("filters, renames, pauses, and deletes a longer list", async () => {
+    sessionStorage.setItem("workbench.author.samples", "1");
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    expect(screen.getByRole("group", { name: "筛选" })).toBeTruthy();
+    expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "通过", pressed: false }));
+    expect(screen.queryByText("旁边的牙变了")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "全部" }));
+    await user.click(screen.getByRole("button", { name: /^切削后体积减小通过/ }));
+    expect(await screen.findByText("工件体积从 8 变成 4，小了 50%")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回首页" }));
+    await user.click(screen.getByRole("button", { name: "旁边的牙变了 更多" }));
+    await user.click(screen.getByRole("menuitem", { name: "重命名" }));
+    fireEvent.change(screen.getByLabelText("新名称"), { target: { value: "牙的检查" } });
+    await user.click(screen.getByRole("button", { name: "保存名称" }));
+    expect(screen.getByText("牙的检查")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "牙的检查 更多" }));
+    await user.click(screen.getByRole("menuitem", { name: "暂停每天重跑" }));
+    expect(screen.getByRole("button", { name: /^牙的检查没通过/ }).textContent).toContain("每天重跑已暂停");
+    await user.click(screen.getByRole("button", { name: "牙的检查 更多" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除" }));
+    expect(screen.getByRole("dialog", { name: "确认删除" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getByText("牙的检查")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "牙的检查 更多" }));
+    await user.click(screen.getByRole("menuitem", { name: "删除" }));
+    await user.click(screen.getByRole("button", { name: "删除" }));
+    expect(screen.queryByText("牙的检查")).toBeNull();
   });
 
   it("explains a failed check and offers another try", async () => {
@@ -143,5 +174,16 @@ describe("executor script", () => {
     expect(resultSentence(false)).toContain("没有达到预期");
     writeDailyCap(3);
     expect(readDailyCap()).toBe(3);
+    const now = new Date(2026, 10, 13, 3, 26, 0);
+    expect(formatWhen(now, now)).toBe(`今天 ${now.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}`);
+    const tomorrow = new Date(now);
+    tomorrow.setDate(now.getDate() + 1);
+    tomorrow.setHours(7, 30, 0, 0);
+    expect(formatWhen(tomorrow, now)).toBe(`明天 ${tomorrow.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false })}`);
+    const older = new Date(2026, 10, 12, 3, 26, 0);
+    expect(formatWhen(older, now)).toMatch(/^11月12日 /);
+    expect(nextDailyInstant("07:30", now).getDate()).toBe(13);
+    expect(sampleLibrary(now)).toHaveLength(8);
+    expect(sampleLibrary(now).some((item) => !item.passed)).toBe(true);
   });
 });

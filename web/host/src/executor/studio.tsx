@@ -7,24 +7,28 @@ import {
   connectChoice,
   failingReplayScript,
   fixedReplayScript,
+  formatWhen,
   humanFindings,
+  nextDailyInstant,
   plainPlan,
   readDailyCap,
   replay,
   resultSentence,
   sampleAppName,
   sampleDom,
+  sampleLibrary,
   sceneSnapshotText,
   type ExecutorCase,
   type ExecutorRun,
   type Finding,
+  type SavedTestRecord,
 } from "./model";
 
 export type ScriptCompleter = (prompt: string) => Promise<{ text: string; cost: number }>;
 
 const stepNames = ["选择程序", "说一句", "看一遍", "每天重跑"] as const;
 
-type SavedTest = { id: string; name: string; passed: boolean; at: string; dailyAt: string };
+type SavedTest = SavedTestRecord;
 
 export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: ScriptCompleter; stepDelay?: number }) {
   const [phase, setPhase] = useState<"home" | "wizard" | "demo" | "result">("home");
@@ -44,7 +48,8 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [findings, setFindings] = useState<Finding[]>([]);
   const [shown, setShown] = useState(0);
   const [stopped, setStopped] = useState(false);
-  const [library, setLibrary] = useState<SavedTest[]>([]);
+  const [library, setLibrary] = useState<SavedTest[]>(() => (readSamples() ? sampleLibrary() : []));
+  const [opened, setOpened] = useState<SavedTest | null>(null);
   const [dailyAt, setDailyAt] = useState("09:00");
   const [scheduled, setScheduled] = useState(false);
   const keyReady = Boolean(complete) || readFake() !== "off";
@@ -110,12 +115,27 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       id: draft.id,
       name: draft.name,
       passed: demo.passed,
-      at: new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false }),
+      lastRun: new Date().toISOString(),
       dailyAt,
+      paused: false,
+      script: draft.script ?? "",
     }, ...library.filter((item) => item.id !== draft.id)]);
     setScheduled(false);
     setStepIndex(3);
     setPhase("wizard");
+  };
+
+  const openSaved = (item: SavedTest, rerun: boolean) => {
+    const saved = caseFromScript(item.script);
+    if (!saved) return;
+    const result = replay(saved, sampleDom);
+    const next = rerun ? { ...item, passed: result.passed, lastRun: new Date().toISOString() } : item;
+    if (rerun) setLibrary((items) => items.map((entry) => entry.id === item.id ? next : entry));
+    setDraft(saved);
+    setDemo(result);
+    setFindings(humanFindings(saved, result));
+    setOpened(next);
+    setPhase("result");
   };
 
   return (
@@ -127,7 +147,15 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
         </div>
       </header>
       {phase === "home" ? (
-        <Home library={library} onNew={() => { setStepIndex(0); setPhase("wizard"); }} />
+        <Home
+          library={library}
+          onNew={() => { setOpened(null); setStepIndex(0); setPhase("wizard"); }}
+          onOpen={(item) => openSaved(item, false)}
+          onRun={(item) => openSaved(item, true)}
+          onRename={(id, name) => setLibrary((items) => items.map((item) => item.id === id ? { ...item, name } : item))}
+          onPause={(id) => setLibrary((items) => items.map((item) => item.id === id ? { ...item, paused: !item.paused } : item))}
+          onDelete={(id) => setLibrary((items) => items.filter((item) => item.id !== id))}
+        />
       ) : null}
       {phase === "wizard" ? (
         <div className="wizard">
@@ -172,9 +200,10 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
         <ResultPage
           passed={demo.passed}
           findings={findings}
-          onSave={saveAndSchedule}
-          onAgain={showDemo}
-          onEdit={() => { setPhase("wizard"); setStepIndex(2); }}
+          onSave={opened ? () => setPhase("home") : saveAndSchedule}
+          saveLabel={opened ? "返回首页" : "保存并设置每天重跑"}
+          onAgain={opened ? () => openSaved(opened, true) : showDemo}
+          onEdit={() => { setOpened(null); setPhase("wizard"); setStepIndex(2); }}
         />
       ) : null}
     </section>
@@ -191,6 +220,14 @@ function readPace(fallback: number): number {
   return fallback;
 }
 
+function readSamples(): boolean {
+  try {
+    return window.sessionStorage.getItem("workbench.author.samples") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function readFake(): "off" | "pass" | "fail" {
   try {
     const value = window.sessionStorage.getItem("workbench.author.fake");
@@ -202,7 +239,20 @@ function readFake(): "off" | "pass" | "fail" {
   return "off";
 }
 
-function Home({ library, onNew }: { library: SavedTest[]; onNew: () => void }) {
+function Home({ library, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
+  library: SavedTest[];
+  onNew: () => void;
+  onOpen: (item: SavedTest) => void;
+  onRun: (item: SavedTest) => void;
+  onRename: (id: string, name: string) => void;
+  onPause: (id: string) => void;
+  onDelete: (id: string) => void;
+}) {
+  const [filter, setFilter] = useState<"all" | "fail" | "pass">("all");
+  const [menu, setMenu] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<SavedTest | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [removing, setRemoving] = useState<SavedTest | null>(null);
   if (library.length === 0) {
     return (
       <div className="wizard-card" aria-label="开始">
@@ -214,22 +264,67 @@ function Home({ library, onNew }: { library: SavedTest[]; onNew: () => void }) {
       </div>
     );
   }
+  const visible = library.filter((item) => filter === "all" || (filter === "pass" ? item.passed : !item.passed));
   return (
     <div className="wizard-card" aria-label="已保存的测试">
       <div className="wizard-actions">
         <h2>已保存的测试</h2>
         <button type="button" className="btn-accent" onClick={onNew}>新建一个测试</button>
       </div>
+      {library.length > 5 ? (
+        <div className="filter-row" role="group" aria-label="筛选">
+          {([["all", "全部"], ["fail", "没通过"], ["pass", "通过"]] as const).map(([value, label]) => (
+            <button key={value} type="button" className={filter === value ? "is-on" : ""} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
+          ))}
+        </div>
+      ) : null}
       <ul className="saved-list">
-        {library.map((item) => (
-          <li key={item.id}>
-            <strong>{item.name}</strong>
-            <span>{item.passed ? "通过" : "没通过"}</span>
-            <span>{item.at}</span>
-            <span>下次 {item.dailyAt}</span>
-          </li>
-        ))}
+        {visible.map((item) => {
+          const next = item.paused ? "每天重跑已暂停" : `下次 ${formatWhen(nextDailyInstant(item.dailyAt))}`;
+          return (
+            <li key={item.id} className={item.passed ? "" : "is-fail"}>
+              <button type="button" className="row-open" onClick={() => onOpen(item)}>
+                <strong>{item.name}</strong>
+                <span className="result-label">{item.passed ? "通过" : "没通过"}</span>
+                <span>上次 {formatWhen(new Date(item.lastRun))}</span>
+                <span>{next}</span>
+              </button>
+              <button type="button" className="btn" onClick={() => onRun(item)}>现在跑一次</button>
+              <div className="more-menu">
+                <button type="button" className="btn" aria-expanded={menu === item.id} aria-label={`${item.name} 更多`} onClick={() => setMenu(menu === item.id ? null : item.id)}>…</button>
+                {menu === item.id ? (
+                  <div role="menu">
+                    <button type="button" role="menuitem" onClick={() => { setRenaming(item); setRenameValue(item.name); setMenu(null); }}>重命名</button>
+                    <button type="button" role="menuitem" onClick={() => { onPause(item.id); setMenu(null); }}>{item.paused ? "恢复每天重跑" : "暂停每天重跑"}</button>
+                    <button type="button" role="menuitem" onClick={() => { setRemoving(item); setMenu(null); }}>删除</button>
+                  </div>
+                ) : null}
+              </div>
+            </li>
+          );
+        })}
       </ul>
+      {renaming ? (
+        <div role="dialog" aria-label="重命名">
+          <label>
+            新名称
+            <input aria-label="新名称" value={renameValue} onChange={(event) => setRenameValue(event.target.value)} />
+          </label>
+          <div className="wizard-actions">
+            <button type="button" className="btn" onClick={() => setRenaming(null)}>取消</button>
+            <button type="button" className="btn-accent" onClick={() => { onRename(renaming.id, renameValue.trim() || renaming.name); setRenaming(null); }}>保存名称</button>
+          </div>
+        </div>
+      ) : null}
+      {removing ? (
+        <div role="dialog" aria-label="确认删除">
+          <p>删除「{removing.name}」？删掉之后不能恢复。</p>
+          <div className="wizard-actions">
+            <button type="button" className="btn" onClick={() => setRemoving(null)}>取消</button>
+            <button type="button" className="btn-accent" onClick={() => { onDelete(removing.id); setRemoving(null); }}>删除</button>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -368,8 +463,8 @@ function ScheduleStep({ dailyAt, scheduled, onTime, onSave, onHome }: {
   );
 }
 
-function ResultPage({ passed, findings, onSave, onAgain, onEdit }: {
-  passed: boolean; findings: Finding[]; onSave: () => void; onAgain: () => void; onEdit: () => void;
+function ResultPage({ passed, findings, onSave, saveLabel, onAgain, onEdit }: {
+  passed: boolean; findings: Finding[]; onSave: () => void; saveLabel: string; onAgain: () => void; onEdit: () => void;
 }) {
   return (
     <div className="wizard-card result-page" aria-label="结果">
@@ -407,7 +502,7 @@ function ResultPage({ passed, findings, onSave, onAgain, onEdit }: {
         <pre>{findings.map((item) => `${item.ok ? "ok" : "bad"} ${item.sentence}`).join("\n")}</pre>
       </details>
       <div className="wizard-actions">
-        {passed ? <button type="button" className="btn-accent" onClick={onSave}>保存并设置每天重跑</button> : (
+        {passed ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : (
           <>
             <button type="button" className="btn" onClick={onEdit}>修改检查</button>
             <button type="button" className="btn-accent" onClick={onAgain}>重新演示</button>

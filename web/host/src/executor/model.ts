@@ -191,6 +191,65 @@ export function writeDailyCap(value: number) {
   localStorage.setItem(capStorageKey, String(next));
 }
 
+/** Today and tomorrow stay relative. Any other day uses the month and date. */
+export function formatWhen(when: Date, now = new Date()): string {
+  const time = when.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const start = (value: Date) => new Date(value.getFullYear(), value.getMonth(), value.getDate()).getTime();
+  const day = Math.round((start(when) - start(now)) / 86_400_000);
+  if (day === 0) return `今天 ${time}`;
+  if (day === 1) return `明天 ${time}`;
+  return `${when.getMonth() + 1}月${when.getDate()}日 ${time}`;
+}
+
+export function nextDailyInstant(clock: string, now = new Date()): Date {
+  const [hour, minute] = clock.split(":").map((part) => Number(part));
+  const next = new Date(now);
+  next.setHours(hour || 0, minute || 0, 0, 0);
+  if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+  return next;
+}
+
+export type SavedTestRecord = {
+  id: string;
+  name: string;
+  passed: boolean;
+  lastRun: string;
+  dailyAt: string;
+  paused: boolean;
+  script: string;
+};
+
+/** A clock already reached today, so the next daily run is tomorrow. */
+function pastClock(now: Date): string {
+  const total = now.getHours() * 60 + now.getMinutes();
+  const earlier = total === 0 ? 0 : total - 1;
+  return `${String(Math.floor(earlier / 60)).padStart(2, "0")}:${String(earlier % 60).padStart(2, "0")}`;
+}
+
+/** Eight local samples so a returning tester can see pass, fail, and older dates. */
+export function sampleLibrary(now = new Date()): SavedTestRecord[] {
+  const last = (daysAgo: number, hour: number, minute: number) => {
+    const value = new Date(now);
+    value.setDate(value.getDate() - daysAgo);
+    value.setHours(hour, minute, 0, 0);
+    return value.toISOString();
+  };
+  const rows: Array<[string, string, boolean, number, number, number, string, boolean]> = [
+    ["cut", "切削后体积减小", true, 0, 3, 26, "07:30", false],
+    ["tooth", "旁边的牙变了", false, 0, 2, 10, "08:00", false],
+    ["start", "点开始后有反应", true, 1, 18, 4, "09:00", false],
+    ["size", "工件没有变小", false, 1, 11, 2, "18:00", true],
+    ["path", "沿路径切一刀", true, 2, 9, 15, "07:30", false],
+    ["text", "画面文字不对", false, 3, 16, 40, "12:00", false],
+    ["keep", "邻件保持原样", true, 0, 1, 5, pastClock(now), false],
+    ["again", "再切一次仍变小", false, 4, 8, 8, "07:30", false],
+  ];
+  return rows.map(([id, name, passed, daysAgo, hour, minute, dailyAt, paused]) => ({
+    id, name, passed, lastRun: last(daysAgo, hour, minute), dailyAt, paused,
+    script: passed ? fixedReplayScript : failingReplayScript,
+  }));
+}
+
 export type ConnectResult = { ok: boolean; status: string; hint: string };
 
 /** Launch decision for a picked program. The port stays inside the runner. */

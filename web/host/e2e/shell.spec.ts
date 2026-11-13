@@ -167,8 +167,26 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "回到首页" }).click();
       await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
       await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
-      await expect(page.getByText("下次 07:30")).toBeVisible();
+      await expect(page.getByText(/下次 (今天|明天) 07:30/)).toBeVisible();
       await shot(page, `wizard-home-${theme}`);
+    });
+
+    test("home shows dated saved tests and can hide the ones that passed", async ({ page }) => {
+      await page.addInitScript(() => sessionStorage.setItem("workbench.author.samples", "1"));
+      await page.goto("/plugin/runner");
+      await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
+      await expect(page.getByText(/上次 今天/).first()).toBeVisible();
+      await expect(page.getByText(/下次 今天/).first()).toBeVisible();
+      await expect(page.getByText(/下次 明天/).first()).toBeVisible();
+      await expect(page.getByText(/\d+月\d+日/).first()).toBeVisible();
+      await expect(page.getByText("没通过").first()).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `wizard-library-${theme}`);
+      await page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" }).click();
+      await expect(page.locator(".row-open", { hasText: "切削后体积减小" })).toHaveCount(0);
+      await expect(page.locator(".row-open", { hasText: "旁边的牙变了" })).toBeVisible();
     });
 
     test("wizard explains a failed check in plain words", async ({ page }) => {
