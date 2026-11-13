@@ -49,6 +49,17 @@ describe("launcher pages", () => {
     await user.click(screen.getByRole("button", { name: /UPCAM 站会日报/ }));
   });
 
+  it("opens today's automatic-test summary on the tests that did not pass", async () => {
+    sessionStorage.setItem("workbench.author.summary", JSON.stringify({ ran: 8, passed: 7, failed: 1, needsUpdate: 0 }));
+    const user = userEvent.setup();
+    render(<MemoryRouter initialEntries={["/"]}><Routes><Route path="/" element={<HomePage onOpenPalette={vi.fn()} />} /><Route path="/plugin/:id" element={<p>打开了自动测试</p>} /></Routes></MemoryRouter>);
+    const link = screen.getByRole("link", { name: /今天跑了 8 个，7 个通过，1 个没通过/ });
+    expect(link.getAttribute("href")).toBe("/plugin/runner?filter=fail");
+    await user.click(link);
+    expect(screen.getByText("打开了自动测试")).toBeTruthy();
+    sessionStorage.removeItem("workbench.author.summary");
+  });
+
   it("browses the market, confirms an install, and opens the detail", async () => {
     const user = userEvent.setup();
     render(<MemoryRouter><MarketPage onOpen={vi.fn()} /></MemoryRouter>);

@@ -256,6 +256,31 @@ export function shouldToast(outcome: RunOutcome): boolean {
   return outcome !== "pass";
 }
 
+export function outcomeWord(outcome: RunOutcome): string {
+  if (outcome === "pass") return "通过";
+  if (outcome === "fail") return "没通过";
+  return "需要更新";
+}
+
+/** The step whose target is no longer on the page. Counting starts at 1. */
+export function stuckStepSentence(testCase?: { steps: Array<{ action: string; text: string }> } | null): string {
+  const steps = testCase?.steps ?? [];
+  const index = steps.findIndex((item) => item.action === "click");
+  if (index < 0) return "第 2 步找不到「开始」按钮";
+  const text = steps[index]?.text || "开始";
+  return `第 ${index + 1} 步找不到「${text}」按钮`;
+}
+
+/** A saved key, or the CI stand-in, is what lets a repair draft start. */
+export function authorKeyReady(fake: "off" | "pass" | "fail" | "changed", hasCompleter = false): boolean {
+  if (hasCompleter || fake === "pass" || fake === "fail") return true;
+  try {
+    return window.sessionStorage.getItem("workbench.author.key") === "1";
+  } catch {
+    return false;
+  }
+}
+
 export type SavedTestRecord = {
   id: string;
   name: string;
@@ -303,7 +328,7 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
     weekdays: allWeekdays,
     history: id === "cut" ? [
       { at: last(3, 9, 0), outcome: "pass", reason: "通过", image: false },
-      { at: last(1, 9, 0), outcome: "needs-update", reason: "页面变了，需要更新这个测试", image: true },
+      { at: last(1, 9, 0), outcome: "needs-update", reason: "第 2 步找不到「开始」按钮", image: true },
       { at: last(0, 3, 26), outcome: "pass", reason: "通过", image: true },
     ] : [{ at: last(daysAgo, hour, minute), outcome: passed ? "pass" : "fail", reason: passed ? "通过" : "没通过", image: true }],
   }));
@@ -526,8 +551,8 @@ export function plainPlan(testCase: ExecutorCase): PlainPlan {
 
 export type Finding = { ok: boolean; sentence: string; expected?: string; seen?: string; kind?: "check" | "missing" };
 
-export function pageChangedFindings(): Finding[] {
-  return [{ ok: false, kind: "missing", sentence: "页面变了，需要更新这个测试" }];
+export function pageChangedFindings(testCase?: { steps: Array<{ action: string; text: string }> } | null): Finding[] {
+  return [{ ok: false, kind: "missing", sentence: stuckStepSentence(testCase) }];
 }
 
 /** Numbers come from the script that actually ran. */

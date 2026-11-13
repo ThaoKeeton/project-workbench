@@ -1,7 +1,7 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatDailySummary, formatWhen, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, writeAiSettings, writeDailyCap } from "./model";
+import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorKeyReady, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatDailySummary, formatWhen, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, outcomeWord, pageChangedFindings, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, stuckStepSentence, writeAiSettings, writeDailyCap } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => {
@@ -165,6 +165,80 @@ describe("executor wizard", () => {
     expect(screen.getByRole("heading", { name: "看它准备做什么" })).toBeTruthy();
   });
 
+  it("treats a changed page as an update and can re-record without AI", async () => {
+    sessionStorage.setItem("workbench.author.samples", "1");
+    sessionStorage.setItem("workbench.author.fake", "changed");
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    await user.click(screen.getAllByRole("button", { name: "现在跑一次" })[0]);
+    expect(screen.getByRole("status").textContent).toBe("第 2 步找不到「开始」按钮");
+    expect(document.querySelector(".result-mark")?.textContent).toBe("需要更新");
+    expect(screen.getByText("找不到")).toBeTruthy();
+    expect(screen.queryByText("没通过")).toBeNull();
+    expect((screen.getByRole("button", { name: "用 AI 修一下" }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("需要先设置 AI 密钥")).toBeTruthy();
+    expect(screen.getByRole("link", { name: "去设置" }).getAttribute("href")).toBe("/settings/ai?return=/plugin/runner");
+    expect(screen.getByRole("img", { name: "停在这里" })).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "用 AI 修一下" }));
+    expect(screen.getByRole("status").textContent).toBe("第 2 步找不到「开始」按钮");
+    await user.click(screen.getByRole("button", { name: "重新演示并更新" }));
+    expect(screen.getByRole("status").textContent).toContain("会重新打开「合成电子样品」");
+    await user.click(screen.getByRole("button", { name: "打开" }));
+    expect(screen.getByRole("status").textContent).toContain("请在画面上做到刚才找不到的那一步");
+    await user.click(screen.getByRole("button", { name: "这一步做好了" }));
+    expect(screen.getByRole("status").textContent).toContain("这一步已经按现在的画面记下");
+    await user.click(screen.getByRole("button", { name: "保存这次更新" }));
+    expect(screen.getByRole("heading", { name: "已保存的测试" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /^切削后体积减小通过/ })).toBeTruthy();
+  });
+
+  it("lists past results newest first and clears pictures after confirm", async () => {
+    sessionStorage.setItem("workbench.author.samples", "1");
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    await user.click(screen.getByRole("button", { name: /^切削后体积减小通过/ }));
+    const list = screen.getByRole("list", { name: "以前的结果" });
+    const entries = within(list).getAllByRole("button");
+    expect(entries[0]?.getAttribute("aria-current")).toBe("true");
+    expect(entries[0]?.textContent).toContain("通过");
+    expect(entries[1]?.textContent).toContain("需要更新");
+    await user.click(entries[1]!);
+    expect(screen.getByRole("status").textContent).toBe("第 2 步找不到「开始」按钮");
+    await user.click(within(list).getAllByRole("button").at(-1)!);
+    expect(screen.getByRole("status").textContent).toContain("做完了你说的检查");
+    await user.click(within(list).getAllByRole("button")[1]!);
+    expect(screen.getByRole("img", { name: "停在这里" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "清理" }));
+    expect(screen.getByRole("dialog", { name: "确认清理" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog", { name: "确认清理" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "清理" }));
+    await user.click(within(screen.getByRole("dialog", { name: "确认清理" })).getByRole("button", { name: "清理" }));
+    expect(screen.getByText("这一次的画面已经清掉。")).toBeTruthy();
+  });
+
+  it("opens the list on tests that did not pass", () => {
+    window.history.pushState({}, "", "/plugin/runner?filter=fail");
+    sessionStorage.setItem("workbench.author.samples", "1");
+    render(<ExecutorStudio />);
+    expect((screen.getByRole("button", { name: "没通过" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect(screen.queryByText("切削后体积减小")).toBeNull();
+    expect(screen.getByText("旁边的牙变了")).toBeTruthy();
+    window.history.pushState({}, "", "/");
+  });
+
+  it("keeps a repair as a draft only while today's count remains", async () => {
+    sessionStorage.setItem("workbench.author.samples", "1");
+    sessionStorage.setItem("workbench.author.fake", "changed");
+    sessionStorage.setItem("workbench.author.key", "1");
+    localStorage.setItem(capStorageKey, "0");
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    await user.click(screen.getAllByRole("button", { name: "现在跑一次" })[0]);
+    await user.click(screen.getByRole("button", { name: "用 AI 修一下" }));
+    expect(screen.getByText("今天已经问得够多了。先用保存好的检查，或把每天的次数调大。")).toBeTruthy();
+  });
+
   it("stops generating when today's count is used up", async () => {
     localStorage.setItem(capStorageKey, "0");
     const user = userEvent.setup();
@@ -263,6 +337,13 @@ describe("executor script", () => {
     expect(keepRecentImages(Array.from({ length: 31 }, () => ({ image: true }))).filter((item) => item.image)).toHaveLength(30);
     expect(shouldToast("pass")).toBe(false);
     expect(shouldToast("needs-update")).toBe(true);
+    expect(outcomeWord("needs-update")).toBe("需要更新");
+    expect(stuckStepSentence(caseFromScript(fixedReplayScript))).toBe("第 2 步找不到「开始」按钮");
+    expect(pageChangedFindings()[0]?.sentence).toBe("第 2 步找不到「开始」按钮");
+    expect(authorKeyReady("changed")).toBe(false);
+    sessionStorage.setItem("workbench.author.key", "1");
+    expect(authorKeyReady("off")).toBe(true);
+    sessionStorage.removeItem("workbench.author.key");
     expect(sampleLibrary(now)).toHaveLength(8);
     expect(sampleLibrary(now).some((item) => !item.passed)).toBe(true);
   });

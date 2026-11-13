@@ -10,12 +10,14 @@ import {
   failingReplayScript,
   fixedReplayScript,
   allWeekdays,
+  authorKeyReady,
   formatWhen,
   hintDismissed,
   humanFindings,
   missedBecauseOff,
   nextDailyInstant,
   outcomeOf,
+  outcomeWord,
   pageChangedFindings,
   plainPlan,
   readAuthorFake,
@@ -45,7 +47,7 @@ type SavedTest = SavedTestRecord;
 export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: ScriptCompleter; stepDelay?: number }) {
   const [resumed] = useState(readWizardDraft);
   const resumedApp = sampleApps().find((item) => item.id === resumed.appId) ?? null;
-  const [phase, setPhase] = useState<"home" | "wizard" | "demo" | "result">(resumed.resume ? "wizard" : "home");
+  const [phase, setPhase] = useState<"home" | "wizard" | "demo" | "result" | "rerecord">(resumed.resume ? "wizard" : "home");
   const [stepIndex, setStepIndex] = useState(resumed.resume ? resumed.step : 0);
   const [picked, setPicked] = useState<TestApp | null>(resumed.resume ? resumedApp : null);
   const [attempt, setAttempt] = useState(1);
@@ -69,9 +71,10 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [autostart, setAutostart] = useState(readAutostart);
   const [missedNote, setMissedNote] = useState("");
   const [repairNote, setRepairNote] = useState("");
+  const [rerecordStep, setRerecordStep] = useState(0);
   const [scheduled, setScheduled] = useState(false);
   const fakeMode = readAuthorFake();
-  const keyReady = Boolean(complete) || fakeMode === "pass" || fakeMode === "fail";
+  const keyReady = authorKeyReady(fakeMode, Boolean(complete));
   const connection = connectApp(picked, { attempt, relaunch });
   const pace = readPace(stepDelay);
   const left = Math.max(0, cap - spent);
@@ -171,9 +174,9 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const openSaved = (item: SavedTest, rerun: boolean) => {
     const saved = caseFromScript(item.script);
     if (!saved) return;
-    const changed = readAuthorFake() === "changed";
+    const changed = rerun ? readAuthorFake() === "changed" : item.history.at(-1)?.outcome === "needs-update";
     const result = replay(saved, sampleDom);
-    const findingsForRun = changed ? pageChangedFindings() : humanFindings(saved, result);
+    const findingsForRun = changed ? pageChangedFindings(saved) : humanFindings(saved, result);
     const outcome = changed ? "needs-update" as const : outcomeOf(findingsForRun);
     const next = rerun ? {
       ...item,
@@ -259,6 +262,24 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       {phase === "demo" && draft ? (
         <DemoRun findings={findings} shown={shown} stopped={stopped} onStop={() => setStopped(true)} onBack={() => setPhase("wizard")} />
       ) : null}
+      {phase === "rerecord" && draft ? (
+        <Rerecord
+          appName={opened?.appName || picked?.name || sampleAppName}
+          sentence={findings.find((item) => item.kind === "missing")?.sentence ?? "第 2 步找不到「开始」按钮"}
+          step={rerecordStep}
+          onAdvance={() => setRerecordStep((value) => value + 1)}
+          onSave={() => {
+            if (opened) {
+              const at = new Date().toISOString();
+              const history = [...opened.history, { at, outcome: "pass" as const, reason: "已按刚才的演示更新", image: true }];
+              const next = { ...opened, passed: true, lastRun: at, history };
+              setOpened(next);
+              setLibrary((items) => items.map((item) => item.id === opened.id ? next : item));
+            }
+            setPhase("home");
+          }}
+        />
+      ) : null}
       {phase === "result" && demo && draft ? (
         <ResultPage
           passed={demo.passed}
@@ -270,6 +291,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
           keyReady={keyReady}
           canRepair={left > 0}
           onRepair={() => { const text = goal || draft.name; setRepairNote("这是建议的修改，还没保存。"); setGoal(text); setStepIndex(2); setPhase("wizard"); void draftCase("", text); }}
+          onRerecord={() => { setRerecordStep(0); setPhase("rerecord"); }}
           onClearImages={() => {
             if (!opened) return;
             const history = (opened.history ?? []).map((entry) => ({ ...entry, image: false }));
@@ -286,7 +308,9 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
 
 function readPace(fallback: number): number {
   try {
-    const value = Number(window.sessionStorage.getItem("workbench.author.pace"));
+    const raw = window.sessionStorage.getItem("workbench.author.pace");
+    if (raw === null || raw === "") return fallback;
+    const value = Number(raw);
     if (Number.isFinite(value) && value >= 0) return value;
   } catch {
     return fallback;
@@ -368,7 +392,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
   onPause: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const [filter, setFilter] = useState<"all" | "fail" | "pass">("all");
+  const [filter, setFilter] = useState<"all" | "fail" | "pass">(readListFilter);
   const [menu, setMenu] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<SavedTest | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -392,7 +416,12 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
       </div>
     );
   }
-  const visible = library.filter((item) => filter === "all" || (filter === "pass" ? item.passed : !item.passed));
+  const visible = library.filter((item) => {
+    const outcome = listedOutcome(item);
+    if (filter === "pass") return outcome === "pass";
+    if (filter === "fail") return outcome !== "pass";
+    return true;
+  });
   return (
     <div className="wizard-card" aria-label="已保存的测试">
       <div className="wizard-actions">
@@ -409,12 +438,13 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
       {missedNote ? <p role="status">{missedNote}</p> : null}
       <ul className="saved-list">
         {visible.map((item) => {
+          const outcome = listedOutcome(item);
           const next = item.paused ? "每天重跑已暂停" : `下次 ${formatWhen(nextDailyInstant(item.dailyAt, readClock(), item.weekdays ?? allWeekdays), readClock())}`;
           return (
-            <li key={item.id} className={item.passed ? "" : "is-fail"}>
+            <li key={item.id} className={outcome === "fail" ? "is-fail" : outcome === "needs-update" ? "is-update" : ""}>
               <button type="button" className="row-open" onClick={() => onOpen(item)}>
                 <strong>{item.name}</strong>
-                <span className="result-label">{item.passed ? "通过" : "没通过"}</span>
+                <span className="result-label">{outcomeWord(outcome)}</span>
                 <span>上次 {formatWhen(new Date(item.lastRun))}</span>
                 <span>{next}</span>
               </button>
@@ -610,8 +640,8 @@ function DemoRun({ findings, shown, stopped, onStop, onBack }: {
       <h2>正在这个程序里做一遍</h2>
       <ol className="live-list" aria-label="演示进度">
         {findings.slice(0, shown).map((item) => (
-          <li key={item.sentence} data-state={item.ok ? "ok" : "bad"}>
-            <span>{item.ok ? "完成" : "没通过"}</span>
+          <li key={item.sentence} data-state={item.kind === "missing" ? "missing" : item.ok ? "ok" : "bad"}>
+            <span>{item.kind === "missing" ? "找不到" : item.ok ? "完成" : "没通过"}</span>
             <span>{item.sentence}</span>
           </li>
         ))}
@@ -660,20 +690,23 @@ function ScheduleStep({ dailyAt, weekdays, autostart, scheduled, onTime, onWeekd
   );
 }
 
-function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, history, keyReady, canRepair, onRepair, onClearImages }: {
+function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, history, keyReady, canRepair, onRepair, onRerecord, onClearImages }: {
   passed: boolean; findings: Finding[]; onSave: () => void; saveLabel: string; onAgain: () => void; onEdit: () => void; note?: string;
-  history: RunRecord[]; keyReady: boolean; canRepair: boolean; onRepair: () => void; onClearImages: () => void;
+  history: RunRecord[]; keyReady: boolean; canRepair: boolean; onRepair: () => void; onRerecord: () => void; onClearImages: () => void;
 }) {
-  const [picked, setPicked] = useState<RunRecord | null>(null);
+  const [pickedAt, setPickedAt] = useState<string | null>(null);
   const [repairHint, setRepairHint] = useState("");
+  const [confirmClear, setConfirmClear] = useState(false);
+  const newest = [...history].reverse();
+  const picked = newest.find((entry) => entry.at === pickedAt) ?? null;
+  const viewingCurrent = !picked || picked.at === newest[0]?.at;
   const outcome = picked?.outcome ?? outcomeOf(findings);
-  const headline = outcome === "pass" ? "通过" : outcome === "needs-update" ? "页面变了，需要更新这个测试" : "没通过";
+  const sentence = picked && !viewingCurrent
+    ? (picked.outcome === "needs-update" ? picked.reason : resultSentence(picked.outcome === "pass"))
+    : (outcome === "needs-update" ? findings.find((item) => item.kind === "missing")?.sentence ?? "第 2 步找不到「开始」按钮" : resultSentence(outcome === "pass"));
+  const showPicture = (picked ?? newest[0])?.image ?? true;
   const repair = () => {
-    const ready = keyReady || readAuthorFake() === "pass" || readAuthorFake() === "fail";
-    if (!ready) {
-      setRepairHint("需要先设置 AI 密钥");
-      return;
-    }
+    if (!keyReady) return;
     if (!canRepair) {
       setRepairHint("今天已经问得够多了。先用保存好的检查，或把每天的次数调大。");
       return;
@@ -682,60 +715,71 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
   };
   return (
     <div className="wizard-card result-page" aria-label="结果">
-      <p className={outcome === "pass" ? "result-mark pass" : "result-mark fail"}>{headline}</p>
-      <p role="status">{outcome === "needs-update" ? "页面变了，需要更新这个测试" : resultSentence(outcome === "pass")}</p>
-      {note ? <p>{note}</p> : null}
-      <div className="frames" aria-label="前后画面">
-        <figure>
-          <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="之前">
-            <rect className="frame-bg" width="320" height="200" />
-            <rect className="piece" x="70" y="30" width="180" height="140" />
-          </svg>
-          <figcaption>之前。只留在这台电脑上。</figcaption>
-        </figure>
-        <figure>
-          <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="之后">
-            <rect className="frame-bg" width="320" height="200" />
-            <rect className="piece" x="110" y="60" width="100" height="80" />
-            <rect className="changed" x="100" y="50" width="120" height="100" />
-          </svg>
-          <figcaption>之后。框出变小的部分。只留在这台电脑上。</figcaption>
-        </figure>
-      </div>
-      <ul className="finding-list" aria-label="核对结果">
-        {findings.map((item) => (
-          <li key={item.sentence} data-state={item.ok ? "ok" : "bad"}>
-            <strong>{item.ok ? "通过" : "没通过"}</strong>
-            <span>{item.sentence}</span>
-            {item.expected ? <span>{item.expected}</span> : null}
-            {item.seen ? <span>{item.seen}</span> : null}
-          </li>
-        ))}
-      </ul>
-      <details>
-        <summary>详情</summary>
-        <pre>{findings.map((item) => `${item.ok ? "ok" : "bad"} ${item.sentence}`).join("\n")}</pre>
-      </details>
-      {history.length > 0 ? (
-        <div>
-          <h3>以前的结果</h3>
+      <p className={outcome === "pass" ? "result-mark pass" : outcome === "needs-update" ? "result-mark update" : "result-mark fail"}>{outcomeWord(outcome)}</p>
+      <p role="status">{sentence}</p>
+      {note && viewingCurrent ? <p>{note}</p> : null}
+      {showPicture ? <ResultFrames stuck={outcome === "needs-update"} /> : <p>这一次的画面已经清掉。</p>}
+      {viewingCurrent ? (
+        <ul className="finding-list" aria-label="核对结果">
+          {findings.map((item) => (
+            <li key={item.sentence} data-state={item.kind === "missing" ? "missing" : item.ok ? "ok" : "bad"}>
+              <strong>{item.kind === "missing" ? "找不到" : item.ok ? "通过" : "没通过"}</strong>
+              {item.kind === "missing" ? null : <span>{item.sentence}</span>}
+              {item.expected ? <span>{item.expected}</span> : null}
+              {item.seen ? <span>{item.seen}</span> : null}
+            </li>
+          ))}
+        </ul>
+      ) : null}
+      {viewingCurrent ? (
+        <details>
+          <summary>详情</summary>
+          <pre>{findings.map((item) => `${item.kind === "missing" ? "missing" : item.ok ? "ok" : "bad"} ${item.sentence}`).join("\n")}</pre>
+        </details>
+      ) : null}
+      {newest.length > 0 ? (
+        <div className="history-block">
+          <div className="history-head">
+            <h3>以前的结果</h3>
+            <button type="button" className="text-btn" onClick={() => setConfirmClear(true)}>清理</button>
+          </div>
           <p className="tiny">前后画面只留最近 30 次，免得占太多磁盘。</p>
           <ol className="timeline" aria-label="以前的结果">
-            {history.map((entry) => (
-              <li key={entry.at + entry.outcome}>
-                <button type="button" onClick={() => setPicked(entry)}>
-                  {formatWhen(new Date(entry.at), readClock())} {entry.outcome === "pass" ? "通过" : entry.outcome === "fail" ? "没通过" : "页面变了，需要更新这个测试"}
-                </button>
-              </li>
-            ))}
+            {newest.map((entry) => {
+              const current = (picked?.at ?? newest[0]?.at) === entry.at;
+              return (
+                <li key={entry.at + entry.outcome}>
+                  <button type="button" className={current ? "is-current" : ""} aria-current={current ? "true" : undefined} onClick={() => setPickedAt(entry.at)}>
+                    <i className={`mark-dot ${entry.outcome === "needs-update" ? "update" : entry.outcome}`} aria-hidden="true" />
+                    <span>{formatWhen(new Date(entry.at), readClock())}</span>
+                    <span>{outcomeWord(entry.outcome)}</span>
+                  </button>
+                </li>
+              );
+            })}
           </ol>
-          <button type="button" className="btn" onClick={onClearImages}>清理</button>
+          {confirmClear ? (
+            <div role="dialog" aria-label="确认清理">
+              <p>清掉保存的前后画面？每次的结果还会留着。</p>
+              <div className="wizard-actions">
+                <button type="button" className="btn" onClick={() => setConfirmClear(false)}>取消</button>
+                <button type="button" className="btn" onClick={() => { setConfirmClear(false); onClearImages(); }}>清理</button>
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
-      {repairHint ? <p role="status">{repairHint}{repairHint.startsWith("需要先设置") ? <a href="/settings/ai?return=/plugin/runner">去设置</a> : null}</p> : null}
       <div className="wizard-actions">
-        {outcome === "needs-update" ? <button type="button" className="btn-accent" onClick={repair}>用 AI 修一下</button> : null}
-        {outcome === "pass" ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : outcome === "fail" ? (
+        {outcome === "needs-update" ? (
+          <>
+            <button type="button" className="btn" disabled={!keyReady} onClick={repair}>用 AI 修一下</button>
+            {!keyReady ? <p className="repair-hint">需要先设置 AI 密钥<a href="/settings/ai?return=/plugin/runner">去设置</a></p> : null}
+            {repairHint ? <p className="repair-hint">{repairHint}</p> : null}
+            <button type="button" className="btn-accent" onClick={onRerecord}>重新演示并更新</button>
+          </>
+        ) : null}
+        {outcome === "pass" ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : null}
+        {outcome === "fail" ? (
           <>
             <button type="button" className="btn" onClick={onEdit}>修改检查</button>
             <button type="button" className="btn-accent" onClick={onAgain}>重新演示</button>
@@ -744,4 +788,76 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
       </div>
     </div>
   );
+}
+
+function ResultFrames({ stuck }: { stuck: boolean }) {
+  if (stuck) {
+    return (
+      <div className="frames frames-one" aria-label="停住的画面">
+        <figure>
+          <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="停在这里">
+            <rect className="frame-bg" width="320" height="200" />
+            <rect className="stuck-target" x="70" y="78" width="180" height="44" rx="6" />
+          </svg>
+          <figcaption>停在这一步。只留在这台电脑上。</figcaption>
+        </figure>
+      </div>
+    );
+  }
+  return (
+    <div className="frames" aria-label="前后画面">
+      <figure>
+        <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="之前">
+          <rect className="frame-bg" width="320" height="200" />
+          <rect className="piece" x="70" y="30" width="180" height="140" />
+        </svg>
+        <figcaption>之前。只留在这台电脑上。</figcaption>
+      </figure>
+      <figure>
+        <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="之后">
+          <rect className="frame-bg" width="320" height="200" />
+          <rect className="piece" x="110" y="60" width="100" height="80" />
+          <rect className="changed" x="100" y="50" width="120" height="100" />
+        </svg>
+        <figcaption>之后。框出变小的部分。只留在这台电脑上。</figcaption>
+      </figure>
+    </div>
+  );
+}
+
+function Rerecord({ appName, sentence, step, onAdvance, onSave }: {
+  appName: string; sentence: string; step: number; onAdvance: () => void; onSave: () => void;
+}) {
+  const titles = ["重新打开程序", "再做这一步", "保存更新"];
+  return (
+    <div className="wizard-card" aria-label="重新演示">
+      <h2>重新演示并更新</h2>
+      <p>{sentence}。不用 AI。</p>
+      <ol className="rerecord-steps" aria-label="重新演示的步骤">
+        {titles.map((title, index) => (
+          <li key={title} aria-current={index === step ? "step" : undefined}>{title}</li>
+        ))}
+      </ol>
+      {step === 0 ? <p role="status">会重新打开「{appName}」。</p> : null}
+      {step === 1 ? <p role="status">请在画面上做到刚才找不到的那一步。</p> : null}
+      {step === 2 ? <p role="status">这一步已经按现在的画面记下。</p> : null}
+      <div className="wizard-actions">
+        {step < 2 ? <button type="button" className="btn-accent" onClick={onAdvance}>{step === 0 ? "打开" : "这一步做好了"}</button> : <button type="button" className="btn-accent" onClick={onSave}>保存这次更新</button>}
+      </div>
+    </div>
+  );
+}
+
+function listedOutcome(item: SavedTest): "pass" | "fail" | "needs-update" {
+  return item.history.at(-1)?.outcome ?? (item.passed ? "pass" : "fail");
+}
+
+function readListFilter(): "all" | "fail" | "pass" {
+  try {
+    const value = new URLSearchParams(window.location.search).get("filter");
+    if (value === "fail" || value === "pass") return value;
+  } catch {
+    return "all";
+  }
+  return "all";
 }

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { devices, pinnedPlugins, recentPlugins, todayItems, type DeviceId, type IconName } from "./catalog";
 import { formatDailySummary } from "./executor/model";
 import { Icon } from "./icons";
@@ -27,8 +27,16 @@ export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void
         <>
           <section className="column">
             <h2 className="section">今日</h2>
-            {dailySummary() ? <p className="sub" role="status">{dailySummary()}</p> : null}
             <ul className="today">
+              {dailySummary() ? (
+                <li>
+                  <Link className="today-link" to="/plugin/runner?filter=fail">
+                    <span className="time"><Icon name="activity" size={18} /></span>
+                    <span className="source">自动测试</span>
+                    <span>{dailySummary()}</span>
+                  </Link>
+                </li>
+              ) : null}
               {todayItems.map((item) => (
                 <li key={item.time}>
                   <span className="time">{item.time}</span>
