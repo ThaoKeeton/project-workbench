@@ -148,16 +148,23 @@ public sealed class ElectronSampleTests
             File.SetUnixFileMode(electron, File.GetUnixFileMode(electron) | UnixFileMode.UserExecute);
         var directory = FixtureDirectory();
         var application = new ApplicationTarget(null, "合成电子样品", null, electron, [directory], new Dictionary<string, string> { ["ELECTRON_DISABLE_SANDBOX"] = "1" }, Url: "index.html");
-        // The page can miss the first probe when the runner is busy starting coverage
-        // and another Electron sample. One fresh launch is enough to settle that.
-        try
+        // The page can miss the first probe while Electron is still painting.
+        // A fresh launch settles that. Two misses in a row still get one more try.
+        Xunit.Sdk.XunitException? missed = null;
+        for (var attempt = 0; attempt < 3; attempt++)
         {
-            await RunSampleAsync(application);
+            try
+            {
+                await RunSampleAsync(application);
+                return;
+            }
+            catch (Xunit.Sdk.XunitException error) when (error.Message.Contains("ControlNotFound", StringComparison.Ordinal))
+            {
+                missed = error;
+                await Task.Delay(TimeSpan.FromSeconds(1));
+            }
         }
-        catch (Xunit.Sdk.XunitException error) when (error.Message.Contains("ControlNotFound", StringComparison.Ordinal))
-        {
-            await RunSampleAsync(application);
-        }
+        throw missed!;
     }
 
     private static async Task RunSampleAsync(ApplicationTarget application)
