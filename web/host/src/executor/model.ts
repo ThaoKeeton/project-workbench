@@ -473,7 +473,7 @@ export function dismissHint() {
 }
 
 /** A minimal check. CI sets the fake model and never sends the key. */
-export async function probeAi(input: { key: string; fake: "off" | "pass" | "fail" }, call?: () => Promise<boolean>): Promise<{ ok: boolean; message: string }> {
+export async function probeAi(input: { key: string; fake: "off" | "pass" | "fail" | "changed" }, call?: () => Promise<boolean>): Promise<{ ok: boolean; message: string }> {
   if (input.key.trim().length < 8) return { ok: false, message: "先填写密钥。" };
   if (input.fake === "pass") return { ok: true, message: "可以用" };
   if (input.fake === "fail") return { ok: false, message: "密钥不对" };

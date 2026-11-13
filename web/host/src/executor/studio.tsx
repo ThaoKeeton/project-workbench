@@ -660,7 +660,7 @@ function ScheduleStep({ dailyAt, weekdays, autostart, scheduled, onTime, onWeekd
   );
 }
 
-function ResultPage({ passed, findings, onSave, saveLabel, onAgain, onEdit, note, history, keyReady, canRepair, onRepair, onClearImages }: {
+function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, history, keyReady, canRepair, onRepair, onClearImages }: {
   passed: boolean; findings: Finding[]; onSave: () => void; saveLabel: string; onAgain: () => void; onEdit: () => void; note?: string;
   history: RunRecord[]; keyReady: boolean; canRepair: boolean; onRepair: () => void; onClearImages: () => void;
 }) {
