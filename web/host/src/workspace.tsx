@@ -100,12 +100,12 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
   if (empty === "target") {
     return (
       <EmptyBlock
-        title="找不到目标程序"
-        body="套件要操作的「星河任务」现在没有运行，或安装路径已经失效。"
-        heading="检测结果"
-        rows={[["进程", "Xinghe.Tasks.exe · 未运行"], ["路径", "C:\\Apps\\Xinghe.Tasks.exe · 不存在"], ["上次附着", "11月10日 21:18 · 本机 · 星河笔记本"]]}
-        primary="重新检测"
-        secondary="选择窗口"
+        title="还没连上要测的程序"
+        body="请回到向导，重新选择一个可以自己运行的程序。"
+        heading="下一步"
+        rows={[["现在", "没有连上"], ["可以做的", "重新选择程序"]]}
+        primary="重新选择"
+        secondary="回到向导"
         onPrimary={() => void navigate("/plugin/runner")}
       />
     );
@@ -113,12 +113,12 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
   if (empty === "agent") {
     return (
       <EmptyBlock
-        title="Agent 未就绪"
-        body="已配对设备上的 Agent 超过 90 秒没有心跳。需要计算机使用的步骤会等到它恢复。"
-        heading="状态"
-        rows={[["配对", "已配对 · 11月8日 21:16"], ["心跳", "今天 11:14:02 · 已超过 90 秒"], ["Agent", "未响应 · 无待处理任务"], ["远程确认", "尚无待确认操作"]]}
-        primary="重新检查"
-        secondary="改在本机运行"
+        title="另一台电脑没有回应"
+        body="先在这台电脑上测。等那台电脑恢复后，再改到那边。"
+        heading="下一步"
+        rows={[["现在", "没有回应"], ["可以做的", "改在这台电脑上测"]]}
+        primary="改在这台电脑"
+        secondary="稍后再试"
         onPrimary={() => void navigate("/plugin/runner")}
       />
     );
@@ -126,12 +126,12 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
   if (empty === "key") {
     return (
       <EmptyBlock
-        title="尚未配置模型密钥"
-        body="FlaUI 步骤可以立即运行。需要模型判断的步骤会停在「待配置」，不会外发画面。"
-        heading="当前能力"
-        rows={[["FlaUI 步骤", "可以立即运行"], ["AI 步骤", "会停在「待配置」，不外发画面"], ["密钥", "只写入 Windows 凭据管理器，界面不回显"]]}
-        primary="打开运行设置"
-        secondary="仅用 FlaUI 继续"
+        title="需要先设置 AI 密钥"
+        body="没有密钥时不会向外发送。已经保存的检查仍然可以重跑。"
+        heading="下一步"
+        rows={[["询问", "先去设置"], ["重跑", "不用再问"]]}
+        primary="去设置"
+        secondary="先用已保存的检查"
         onPrimary={() => void navigate("/settings")}
       />
     );

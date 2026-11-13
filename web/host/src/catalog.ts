@@ -35,7 +35,7 @@ export const pinnedPlugins: Array<{ id: PluginId; name: string; icon: IconName; 
   { id: "upcam", name: "UPCAM 站会日报", icon: "clipboard", hint: "整理今日站会并生成草稿" },
   { id: "ding", name: "钉钉 Insights", icon: "chat", hint: "看本周沟通热点与会议节奏" },
   { id: "test", name: "测试设计", icon: "flask", hint: "用例仓库与失败分流" },
-  { id: "runner", name: "自动化测试执行器", icon: "activity", hint: "用文字结构编写可回放脚本" },
+  { id: "runner", name: "自动化测试执行器", icon: "activity", hint: "选一个程序，用一句话说要测什么" },
 ];
 
 export const todayItems = [
@@ -48,7 +48,7 @@ export const recentPlugins = [
   { id: "upcam" as const, name: "UPCAM 站会日报", hint: "采集站会记录并生成今日摘要", icon: "clipboard" as const },
   { id: "ding" as const, name: "钉钉 Insights", hint: "按需检查群聊洞察，不代发", icon: "chat" as const },
   { id: "test" as const, name: "测试设计", hint: "运行合成检查看板，仍需人工验收", icon: "flask" as const },
-  { id: "runner" as const, name: "自动化测试执行器", hint: "识别 3D 场景并沿路径切削", icon: "activity" as const },
+  { id: "runner" as const, name: "自动化测试执行器", hint: "选程序，说一句，看着它做一遍", icon: "activity" as const },
 ];
 
 export const devices = [

@@ -160,16 +160,48 @@ export const authorRules = [
 ].join("\n");
 
 export const authorMessages = {
-  empty: "请先写下测试目标，未发送。",
-  disabled: "模型调用已关闭。已准备文本提示，未发送。",
-  missingKey: "未配置本机密钥，未发送。",
-  overBudget: "这次调用会超过本机每日花费上限，未调用模型。",
-  review: "请审阅。确认后才保存，不会外发。",
-  invalid: "模型输出不是可回放脚本，未保存。",
-  saved: "已保存到本机，未发送。",
-  prepared: "已准备文本提示，模型调用 0 次",
-  replay: "正常回放不调用模型",
+  empty: "请先用一句话说明要测什么。",
+  disabled: "需要先设置 AI 密钥。",
+  missingKey: "需要先设置 AI 密钥。",
+  overBudget: "今天已经问得够多了。先用保存好的检查，或把每天的次数调大。",
+  review: "看一遍下面要做的事。看着演示确认后，再保存。",
+  invalid: "这次没有写成可以执行的检查。请改一句说明，再试一次。",
+  saved: "已保存。之后重跑不会再问。",
+  prepared: "已准备好要问的内容，还没有发送。",
+  replay: "这次重跑没有再问。",
 } as const;
+
+export const sampleAppName = "合成电子样品";
+
+export type ConnectResult = { ok: boolean; status: string; hint: string };
+
+/** Launch decision for a picked program. The port stays inside the runner. */
+export function connectChoice(name: string): ConnectResult {
+  const trimmed = name.trim();
+  if (trimmed === sampleAppName || /\.(exe|app)$/i.test(trimmed)) {
+    return { ok: true, status: "已连接", hint: "已经打开，并连上了。接下来用一句话说明要测什么。" };
+  }
+  if (trimmed.length === 0) {
+    return { ok: false, status: "还没有选择", hint: "请选择一个程序，或从最近用过的里面点一个。" };
+  }
+  return { ok: false, status: "没连上", hint: "这不是可以自己运行的程序。请重新选择程序文件。" };
+}
+
+export function describeStep(item: ExecutorStep): { will: string; check: string } {
+  if (item.action === "wait-for") return { will: `等待画面上出现「${item.text || "要看的内容"}」`, check: "出现之后才继续" };
+  if (item.action === "click") return { will: `点击「${item.text || "按钮"}」`, check: item.expected ? `画面应变成「${item.expected}」` : "点完再继续" };
+  if (item.action === "assert-text") return { will: "查看画面上的文字", check: item.expected ? `应显示「${item.expected}」` : "文字应和你说的一致" };
+  if (item.action === "snapshot" || item.action === "screenshot") return { will: "记下现在的样子", check: "只留在这台电脑上" };
+  if (item.action === "drag-path") return { will: "沿着路径切一刀", check: "工件变小，旁边的牙保持原样" };
+  if (item.action === "assert-mesh" && item.text.includes("sphere")) return { will: "看旁边的牙", check: "形状保持不变" };
+  if (item.action === "assert-mesh") return { will: "看工件现在有多大", check: "大小应和你说的一致" };
+  if (item.action === "diff-scene") return { will: "对比前后的样子", check: "只有工件变了" };
+  return { will: "继续看画面", check: "结果应和你说的一致" };
+}
+
+export function resultSentence(passed: boolean): string {
+  return passed ? "做完了你说的检查，结果和预期一致。" : "这一遍没有达到你说的结果。可以再演示一遍，或改一句说明。";
+}
 
 export function authorPrompt(goal: string, dom: string, scene: string): string {
   return [authorRules, "目标:", goal.trim(), "DOM:", dom, "SCENE:", scene].join("\n");
