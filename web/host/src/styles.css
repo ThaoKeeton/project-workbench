@@ -156,7 +156,24 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .column { width: min(720px, 100%); }
 .greet .date, .section, .sub, .crumb { color: var(--text-muted); }
 .setting-cap { display: grid; gap: 8px; max-width: 240px; margin: 12px 0; color: var(--text-secondary); font-size: 12px; }
-.ai-actions { display: flex; gap: 12px; align-items: center; }
+.ai-settings .setting-cap { max-width: 520px; }
+.ai-presets { display: flex; flex-wrap: wrap; gap: 8px; margin: 8px 0 4px; }
+.ai-presets button, .ai-settings .btn, .ai-settings .btn-accent {
+  width: auto;
+  min-height: 36px;
+  padding: 0 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 14px;
+}
+.ai-presets button.is-on { background: var(--accent); color: var(--accent-on); border-color: transparent; }
+.ai-saved { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.ai-saved [role="status"] { margin: 0; }
+.ai-actions { display: flex; justify-content: flex-end; gap: 12px; align-items: center; width: min(520px, 100%); }
+.ai-settings .btn-accent { background: var(--accent); color: var(--accent-on); border-color: transparent; font-weight: 500; }
 .setting-cap input { min-height: 36px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-primary); padding: 8px 12px; font: inherit; }
 .greet h1, .page h1, .doc h1, .empty-block h1, .crash h1, .offline h1, .pairing h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.02em; }
 .command-bar, .palette-input {

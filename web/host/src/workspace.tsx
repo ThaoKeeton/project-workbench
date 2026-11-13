@@ -7,7 +7,7 @@ import { DingPanel } from "../../../plugins/v2/Workbench.DingTalkInsights.V2/ui/
 import { TestCasesPanel } from "../../../plugins/v2/Workbench.TestCases.V2/ui/TestCasesPanel";
 import { TestingPanel } from "../../../plugins/v2/Workbench.TestingDesign.V2/ui/TestingPanel";
 import { UpcamPanel } from "../../../plugins/v2/Workbench.UpcamStandup.V2/ui/UpcamPanel";
-import { probeAi, readAiSettings, readAuthorFake, readDailyCap, writeAiSettings, writeDailyCap, type AiProvider } from "./executor/model";
+import { compatiblePresets, probeAi, readAiSettings, readAuthorFake, readDailyCap, writeAiSettings, writeDailyCap, type AiProvider, type CompatiblePresetId } from "./executor/model";
 import { ExecutorStudio } from "./executor/studio";
 
 const tabs: PluginId[] = ["upcam", "ding", "test", "runner"];
@@ -351,22 +351,37 @@ export function AiSettingsPage() {
   const [provider, setProvider] = useState<AiProvider>(initial.provider);
   const [secret, setSecret] = useState(initial.key);
   const [base, setBase] = useState(initial.base);
+  const [model, setModel] = useState(initial.model);
+  const [preset, setPreset] = useState<CompatiblePresetId | "">(initial.preset);
   const [cap, setCap] = useState(initial.cap);
   const [notice, setNotice] = useState("");
+  const [savedKey, setSavedKey] = useState(initial.key.length >= 8);
+  const [replacing, setReplacing] = useState(false);
 
   const save = () => {
-    writeAiSettings({ provider, key: secret, base, cap });
+    writeAiSettings({ provider, key: secret, base, model, preset, cap });
+    const kept = readAiSettings().key.length >= 8;
+    setSavedKey(kept);
+    setReplacing(false);
     const back = new URLSearchParams(location.search).get("return");
     if (back && back.startsWith("/") && !back.startsWith("//") && !back.includes("\\")) {
       window.sessionStorage.setItem("workbench.wizard.resume", "1");
       void navigate(back);
       return;
     }
-    setNotice("已保存。密钥只留在这台电脑上。");
+    setNotice(kept ? "已保存" : "");
+  };
+
+  const choosePreset = (id: CompatiblePresetId) => {
+    const next = compatiblePresets.find((item) => item.id === id);
+    if (!next) return;
+    setPreset(id);
+    setBase(next.base);
+    setModel(next.model);
   };
 
   return (
-    <div className="page narrow-page">
+    <div className="page narrow-page ai-settings">
       <header className="page-head">
         <h1>AI 设置</h1>
         <p>密钥交给这台电脑的系统凭据保存，页面上会遮住，也不会写进浏览器。每天重跑不会再用 AI。</p>
@@ -379,19 +394,39 @@ export function AiSettingsPage() {
         </label>
         <label className={provider === "compatible" ? "is-on" : ""}>
           <input type="radio" name="provider" aria-label="兼容接口" value="compatible" checked={provider === "compatible"} onChange={() => setProvider("compatible")} />
-          <span><strong>兼容接口</strong><small>填写你自己的接口地址</small></span>
+          <span><strong>兼容接口</strong><small>选一个常用的，或自己填地址</small></span>
         </label>
       </fieldset>
       {provider === "compatible" ? (
-        <label className="setting-cap">
-          接口地址
-          <input aria-label="接口地址" value={base} onChange={(event) => setBase(event.target.value)} />
-        </label>
+        <>
+          <div className="ai-presets" role="group" aria-label="常用接口">
+            {compatiblePresets.map((item) => (
+              <button key={item.id} type="button" className={preset === item.id ? "is-on" : ""} aria-pressed={preset === item.id} onClick={() => choosePreset(item.id)}>{item.label}</button>
+            ))}
+          </div>
+          <label className="setting-cap">
+            接口地址
+            <input aria-label="接口地址" value={base} onChange={(event) => { setBase(event.target.value); setPreset("custom"); }} />
+          </label>
+          <label className="setting-cap">
+            模型
+            <input aria-label="模型" value={model} onChange={(event) => { setModel(event.target.value); setPreset("custom"); }} />
+          </label>
+        </>
       ) : null}
-      <label className="setting-cap">
-        密钥
-        <input aria-label="密钥" type="password" autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} />
-      </label>
+      {savedKey && !replacing ? (
+        <div className="ai-saved">
+          <strong>已保存</strong>
+          <span aria-label="已保存的密钥">••••••••</span>
+          <button type="button" className="btn" onClick={() => { setReplacing(true); setSecret(""); setNotice(""); }}>更换</button>
+          <button type="button" className="btn" onClick={() => { setSecret(""); setSavedKey(false); setReplacing(false); setNotice(""); writeAiSettings({ provider, key: "", base, model, preset, cap }); }}>删除</button>
+        </div>
+      ) : (
+        <label className="setting-cap">
+          密钥
+          <input aria-label="密钥" type="password" autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} />
+        </label>
+      )}
       <label className="setting-cap">
         每天最多生成几次
         <input aria-label="每天最多生成几次" type="number" min={0} max={100} value={cap} onChange={(event) => setCap(Number(event.target.value))} />
@@ -399,7 +434,7 @@ export function AiSettingsPage() {
       <p className="sub">到次数就不再生成。已经保存的测试照常重跑。这里不写金额。每天重跑不会再用 AI。</p>
       {notice ? <p role="status">{notice}</p> : null}
       <p className="ai-actions">
-        <button type="button" className="btn" onClick={() => void probeAi({ key: secret, fake: readAuthorFake() !== "off" }).then((result) => setNotice(result.message))}>测试一下</button>
+        <button type="button" className="btn" onClick={() => void probeAi({ key: savedKey && !replacing ? readAiSettings().key : secret, fake: readAuthorFake() }).then((result) => setNotice(result.message))}>测试一下</button>
         <button type="button" className="btn-accent" onClick={save}>保存</button>
       </p>
     </div>

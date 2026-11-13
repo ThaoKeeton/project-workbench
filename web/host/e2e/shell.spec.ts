@@ -233,10 +233,36 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "1"));
       await page.getByLabel("密钥").fill("sample-key-0001");
       await page.getByRole("button", { name: "测试一下" }).click();
-      await expect(page.getByRole("status")).toHaveText("试过了。可以开始生成。");
+      await expect(page.getByRole("status")).toHaveText("可以用");
       await expect(page.getByRole("status")).not.toContainText("sample-key");
       await page.getByRole("button", { name: "保存" }).click();
       await expect(page.getByRole("heading", { name: "看它准备做什么" })).toBeVisible();
+    });
+
+    test("AI settings use the same buttons, presets, and a saved key", async ({ page }) => {
+      await page.goto("/settings/ai");
+      await expect(page.getByRole("heading", { name: "AI 设置" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "保存" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "测试一下" })).toBeVisible();
+      const radius = await page.getByRole("button", { name: "保存" }).evaluate((node) => getComputedStyle(node).borderRadius);
+      expect(radius === "6px" || radius === "8px").toBe(true);
+      await shot(page, `wizard-ai-empty-${theme}`);
+      await page.getByRole("radio", { name: "兼容接口" }).click();
+      await page.getByRole("button", { name: "DeepSeek" }).click();
+      await expect(page.getByLabel("接口地址")).toHaveValue("https://api.deepseek.com");
+      await expect(page.getByLabel("模型")).toHaveValue("deepseek-flash");
+      await shot(page, `wizard-ai-preset-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "1"));
+      await page.getByLabel("密钥").fill("sample-key-0001");
+      await page.getByRole("button", { name: "测试一下" }).click();
+      await expect(page.getByRole("status")).toHaveText("可以用");
+      await shot(page, `wizard-ai-result-${theme}`);
+      await page.getByRole("button", { name: "保存" }).click();
+      await expect(page.getByRole("status")).toHaveText("已保存");
+      await expect(page.getByLabel("已保存的密钥")).toHaveText("••••••••");
+      await expect(page.getByRole("button", { name: "更换" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "删除" })).toBeVisible();
+      await shot(page, `wizard-ai-saved-${theme}`);
     });
 
     test("wizard explains a failed check in plain words", async ({ page }) => {

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorPrompt, capStorageKey, caseFromScript, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatWhen, hintDismissedKey, humanFindings, mismatch, nextDailyInstant, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, writeAiSettings, writeDailyCap } from "./model";
+import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatWhen, hintDismissedKey, humanFindings, mismatch, nextDailyInstant, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, writeAiSettings, writeDailyCap } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => {
@@ -206,11 +206,12 @@ describe("executor script", () => {
     expect(connectApp(sampleApps().find((item) => item.id === "busy") ?? null).state).toBe("busy");
     expect(connectApp(appFromFileName("连不上的样品.exe"), { attempt: 2 }).state).toBe("connected");
     expect(sceneObjectCount(sceneSnapshotText)).toBe(2);
-    expect(await probeAi({ key: "short", fake: true })).toMatchObject({ ok: false });
-    expect(await probeAi({ key: "sample-key-0001", fake: true })).toMatchObject({ ok: true, message: "试过了。可以开始生成。" });
-    expect(await probeAi({ key: "sample-key-0001", fake: false }, async () => false)).toMatchObject({ ok: false });
-    expect(await probeAi({ key: "sample-key-0001", fake: false }, async () => { throw new Error("down"); })).toMatchObject({ ok: false });
-    expect((await probeAi({ key: "sample-key-0001", fake: false }, async () => true)).message).not.toContain("sample-key");
+    expect(await probeAi({ key: "short", fake: "pass" })).toMatchObject({ ok: false });
+    expect(await probeAi({ key: "sample-key-0001", fake: "pass" })).toMatchObject({ ok: true, message: "可以用" });
+    expect(await probeAi({ key: "sample-key-0001", fake: "fail" })).toMatchObject({ ok: false, message: "密钥不对" });
+    expect(await probeAi({ key: "sample-key-0001", fake: "off" }, async () => false)).toMatchObject({ ok: false, message: "密钥不对" });
+    expect(await probeAi({ key: "sample-key-0001", fake: "off" }, async () => { throw new Error("down"); })).toMatchObject({ ok: false, message: "连不上" });
+    expect((await probeAi({ key: "sample-key-0001", fake: "off" }, async () => true)).message).toBe("可以用");
     writeAiSettings({ provider: "compatible", key: "<script>alert(1)</script>", base: "javascript:alert(1)", cap: 4 });
     expect(localStorage.getItem(aiKeyStorageKey)).toBeNull();
     expect(localStorage.getItem(aiBaseStorageKey)).toBeNull();
@@ -220,6 +221,18 @@ describe("executor script", () => {
     expect(JSON.stringify(localStorage)).not.toContain("sample-key");
     expect(readAiSettings().key).toBe("sample-key-0001");
     expect(readAiSettings().base).toBe("http://127.0.0.1:9");
+    for (const preset of compatiblePresets) {
+      writeAiSettings({ provider: "compatible", key: "", base: preset.base, model: preset.model, preset: preset.id, cap: 20 });
+      expect(readAiSettings().base).toBe(preset.base);
+      expect(readAiSettings().model).toBe(preset.model);
+    }
+    expect(compatiblePresets.map((item) => item.base)).toEqual([
+      "https://api.deepseek.com",
+      "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "https://api.moonshot.cn/v1",
+      "https://open.bigmodel.cn/api/paas/v4",
+      "",
+    ]);
     expect(describeStep(saved!.steps[1]).will).toContain("点击");
     expect(resultSentence(false)).toContain("没有达到预期");
     writeDailyCap(3);

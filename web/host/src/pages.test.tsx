@@ -122,7 +122,7 @@ describe("launcher pages", () => {
     fireEvent.change(screen.getByLabelText("密钥"), { target: { value: "sample-key-0001" } });
     expect((screen.getByLabelText("密钥") as HTMLInputElement).type).toBe("password");
     await user.click(screen.getByRole("button", { name: "测试一下" }));
-    expect((await screen.findByRole("status")).textContent).toContain("试过了");
+    expect((await screen.findByRole("status")).textContent).toBe("可以用");
     expect(screen.getByRole("status").textContent).not.toContain("sample-key");
     await user.click(screen.getByRole("button", { name: "保存" }));
     expect(screen.getByText("回到向导")).toBeTruthy();
@@ -138,10 +138,15 @@ describe("launcher pages", () => {
     expect((await screen.findByRole("status")).textContent).toContain("先填写密钥");
     fireEvent.change(screen.getByLabelText("密钥"), { target: { value: "sample-key-0001" } });
     await user.click(screen.getByRole("button", { name: "测试一下" }));
-    expect((await screen.findByRole("status")).textContent).toContain("没有连上");
+    expect((await screen.findByRole("status")).textContent).toBe("密钥不对");
     await user.click(screen.getByRole("button", { name: "保存" }));
-    expect(screen.getByRole("status").textContent).toContain("已保存");
+    expect(screen.getByRole("status").textContent).toBe("已保存");
     expect(screen.getByRole("status").textContent).not.toContain("sample-key");
+    expect(screen.getByRole("button", { name: "更换" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "删除" })).toBeTruthy();
+    expect(screen.queryByLabelText("密钥")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "删除" }));
+    expect(screen.getByLabelText("密钥")).toBeTruthy();
     cleanup();
     sessionStorage.clear();
     render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);

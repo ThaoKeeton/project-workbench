@@ -335,7 +335,24 @@ export const aiBaseStorageKey = "workbench.author.base";
 export const hintDismissedKey = "workbench.author.hint";
 
 export type AiProvider = "openai" | "compatible";
-export type AiSettings = { provider: AiProvider; key: string; base: string; cap: number };
+export type CompatiblePresetId = "deepseek" | "dashscope" | "moonshot" | "zhipu" | "custom";
+export type AiSettings = {
+  provider: AiProvider;
+  key: string;
+  base: string;
+  model: string;
+  preset: CompatiblePresetId | "";
+  cap: number;
+};
+
+/** Official OpenAI-compatible endpoints for providers that answer from mainland China. */
+export const compatiblePresets: Array<{ id: CompatiblePresetId; label: string; base: string; model: string }> = [
+  { id: "deepseek", label: "DeepSeek", base: "https://api.deepseek.com", model: "deepseek-flash" },
+  { id: "dashscope", label: "通义千问", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  { id: "moonshot", label: "Kimi", base: "https://api.moonshot.cn/v1", model: "kimi-k3.1-pro" },
+  { id: "zhipu", label: "智谱", base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.3" },
+  { id: "custom", label: "自定义", base: "", model: "" },
+];
 
 export function readAuthorFake(): "off" | "pass" | "fail" {
   try {
@@ -350,6 +367,8 @@ export function readAuthorFake(): "off" | "pass" | "fail" {
 
 let sessionKey = "";
 let sessionBase = "";
+let sessionModel = "";
+let sessionPreset: CompatiblePresetId | "" = "";
 
 export function readAiSettings(): AiSettings {
   let provider: AiProvider = "openai";
@@ -358,7 +377,7 @@ export function readAiSettings(): AiSettings {
   } catch {
     provider = "openai";
   }
-  return { provider, key: sessionKey, base: sessionBase, cap: readDailyCap() };
+  return { provider, key: sessionKey, base: sessionBase, model: sessionModel, preset: sessionPreset, cap: readDailyCap() };
 }
 
 function storedSecret(value: string): string {
@@ -369,9 +388,15 @@ function storedBase(value: string): string {
   return /^(https?:\/\/[A-Za-z0-9.-]+(?::[0-9]{1,5})?(?:\/[A-Za-z0-9._~/-]*)?)$/.exec(value.trim())?.[1] ?? "";
 }
 
-export function writeAiSettings(value: AiSettings) {
+function storedModel(value: string): string {
+  return /^([A-Za-z0-9._-]{1,80})$/.exec(value.trim())?.[1] ?? "";
+}
+
+export function writeAiSettings(value: Omit<AiSettings, "model" | "preset"> & { model?: string; preset?: CompatiblePresetId | "" }) {
   sessionKey = storedSecret(value.key);
   sessionBase = storedBase(value.base);
+  sessionModel = storedModel(value.model ?? "");
+  sessionPreset = compatiblePresets.some((item) => item.id === value.preset) ? value.preset ?? "" : "";
   if (value.provider === "compatible") localStorage.setItem(aiProviderStorageKey, "compatible");
   else localStorage.setItem(aiProviderStorageKey, "openai");
   localStorage.removeItem(aiKeyStorageKey);
@@ -392,16 +417,15 @@ export function dismissHint() {
 }
 
 /** A minimal check. CI sets the fake model and never sends the key. */
-export async function probeAi(input: { key: string; fake: boolean }, call?: () => Promise<boolean>): Promise<{ ok: boolean; message: string }> {
+export async function probeAi(input: { key: string; fake: "off" | "pass" | "fail" }, call?: () => Promise<boolean>): Promise<{ ok: boolean; message: string }> {
   if (input.key.trim().length < 8) return { ok: false, message: "先填写密钥。" };
-  if (input.fake) return { ok: true, message: "试过了。可以开始生成。" };
+  if (input.fake === "pass") return { ok: true, message: "可以用" };
+  if (input.fake === "fail") return { ok: false, message: "密钥不对" };
   try {
     const ok = call ? await call() : false;
-    return ok
-      ? { ok: true, message: "试过了。可以开始生成。" }
-      : { ok: false, message: "没有连上。请检查密钥后再试。" };
+    return ok ? { ok: true, message: "可以用" } : { ok: false, message: "密钥不对" };
   } catch {
-    return { ok: false, message: "没有连上。请检查密钥后再试。" };
+    return { ok: false, message: "连不上" };
   }
 }
 
