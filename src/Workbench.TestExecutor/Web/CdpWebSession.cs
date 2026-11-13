@@ -86,11 +86,13 @@ public sealed class DefaultWebSessionSource : IWebSessionSource
 public sealed class LaunchedTarget : IAsyncDisposable
 {
     private readonly Process _process;
+    private readonly string? _profile;
 
-    public LaunchedTarget(Process process, int port)
+    public LaunchedTarget(Process process, int port, string? profile = null)
     {
         _process = process;
         Port = port;
+        _profile = profile;
     }
 
     public int Port { get; }
@@ -105,6 +107,13 @@ public sealed class LaunchedTarget : IAsyncDisposable
         {
         }
         _process.Dispose();
+        if (_profile is not null)
+        {
+            try { Directory.Delete(_profile, true); }
+            catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+            {
+            }
+        }
         await Task.CompletedTask;
     }
 }
@@ -125,10 +134,14 @@ public static class ElectronTargetLauncher
         var debuggingPort = "--remote-debugging-port=" + port.ToString(System.Globalization.CultureInfo.InvariantCulture);
         var userArguments = (application.Arguments ?? []).Where(argument => !argument.StartsWith("--remote-debugging-port=", StringComparison.Ordinal) && argument != "--remote-allow-origins=*").ToArray();
         var dotnet = Path.GetFileName(application.Executable) is "dotnet" or "dotnet.exe";
+        string? profile = null;
         if (!dotnet)
         {
             start.ArgumentList.Add(debuggingPort);
             start.ArgumentList.Add("--remote-allow-origins=*");
+            profile = Path.Combine(Path.GetTempPath(), "executor-electron-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(profile);
+            start.ArgumentList.Add("--user-data-dir=" + profile);
         }
         foreach (var argument in userArguments) start.ArgumentList.Add(argument);
         if (dotnet)
@@ -145,9 +158,13 @@ public static class ElectronTargetLauncher
         {
             try { process.Kill(entireProcessTree: true); } catch (InvalidOperationException) { }
             process.Dispose();
+            if (profile is not null)
+            {
+                try { Directory.Delete(profile, true); } catch (IOException) { }
+            }
             throw new ExecutorDataException(ExecutorError.LaunchFailed);
         }
-        return new LaunchedTarget(process, port);
+        return new LaunchedTarget(process, port, profile);
     }
 
     private static async Task Drain(Process process)

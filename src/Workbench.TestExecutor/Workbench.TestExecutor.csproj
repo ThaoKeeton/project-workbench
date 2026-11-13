@@ -22,6 +22,9 @@
     <EmbeddedResource Include="Schema\workbench.test-executor.suite.v2.schema.json">
       <LogicalName>Workbench.TestExecutor.suite.v2.schema.json</LogicalName>
     </EmbeddedResource>
+    <EmbeddedResource Include="Schema\workbench.test-executor.authored-script.v1.schema.json">
+      <LogicalName>Workbench.TestExecutor.authored-script.v1.schema.json</LogicalName>
+    </EmbeddedResource>
     <EmbeddedResource Include="Schema\workbench.test-executor.failure-report.v2.schema.json">
       <LogicalName>Workbench.TestExecutor.failure-report.v2.schema.json</LogicalName>
     </EmbeddedResource>

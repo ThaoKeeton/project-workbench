@@ -12,6 +12,11 @@ TestResults/
 # Native Windows tool state produced by Linux reference probes
 **/.mono/
 
+# Local authoring config, spend, and model transcripts. Never commit keys.
+**/author.local.json
+**/author-spend.json
+**/author-log/
+
 # v2 preview web UI
 web/host/node_modules/
 tests/fixtures/TestExecutor.SyntheticElectron/node_modules/

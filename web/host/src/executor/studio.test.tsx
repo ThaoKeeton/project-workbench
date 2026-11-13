@@ -1,7 +1,7 @@
 import { cleanup, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { mismatch, recordFromDom, repairPrompt, replay, sampleDom, seedCases } from "./model";
+import { authorPrompt, caseFromScript, fixedReplayScript, mismatch, readAuthoredScript, recordFromDom, repairPrompt, replay, sampleDom, sceneSnapshotText, seedCases } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => cleanup());
@@ -11,7 +11,11 @@ describe("executor studio", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio />);
     expect(screen.getByRole("heading", { name: "自动化测试执行器" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "AI 编写" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "从样品录制" })).toBeNull();
     expect((screen.getByRole("checkbox", { name: "AI 修复" }) as HTMLInputElement).checked).toBe(false);
+    expect((screen.getByRole("checkbox", { name: "允许调用模型" }) as HTMLInputElement).checked).toBe(false);
+    await user.click(screen.getByRole("button", { name: "高级：手动步骤" }));
     await user.click(screen.getByRole("button", { name: "从样品录制" }));
     expect(screen.getByRole("button", { name: "录制 · 合成电子样品" })).toBeTruthy();
     const objectName = screen.getByLabelText("rec-probe-4 对象");
@@ -33,16 +37,95 @@ describe("executor studio", () => {
   it("prepares a text-only repair prompt only after the switch is on", async () => {
     const user = userEvent.setup();
     render(<ExecutorStudio />);
+    await user.click(screen.getByRole("button", { name: "高级：手动步骤" }));
     const expected = screen.getByLabelText("status 期望");
     await user.clear(expected);
     await user.type(expected, "不会出现");
     await user.click(screen.getByRole("checkbox", { name: "AI 修复" }));
-    await user.clear(screen.getByLabelText("每日额度"));
-    await user.type(screen.getByLabelText("每日额度"), "1");
+    await user.clear(screen.getByLabelText("每日花费上限"));
+    await user.type(screen.getByLabelText("每日花费上限"), "1");
     await user.click(screen.getByRole("button", { name: "回放" }));
     expect(await screen.findByText("有步骤失败")).toBeTruthy();
     expect(screen.getByText(/失败步骤 status/)).toBeTruthy();
     expect(screen.getByText("已准备文本提示，模型调用 0 次")).toBeTruthy();
+    expect(screen.getByText(/差异:/)).toBeTruthy();
+  });
+
+  it("prepares an authoring prompt and saves a reviewed script only after confirmation", async () => {
+    const user = userEvent.setup();
+    let calls = 0;
+    render(<ExecutorStudio complete={async () => {
+      calls += 1;
+      return { text: fixedReplayScript, cost: 0 };
+    }} />);
+    await user.type(screen.getByLabelText("测试目标"), "切削工件后体积减小，邻件不变");
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    expect(screen.getByText("模型调用已关闭。已准备文本提示，未发送。")).toBeTruthy();
+    expect(screen.getByText(/不要添加测试钩子/)).toBeTruthy();
+    expect(calls).toBe(0);
+    await user.click(screen.getByRole("checkbox", { name: "允许调用模型" }));
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    expect(screen.getByText("这次调用会超过本机每日花费上限，未调用模型。")).toBeTruthy();
+    expect(calls).toBe(0);
+    await user.clear(screen.getByLabelText("每日花费上限"));
+    await user.type(screen.getByLabelText("每日花费上限"), "1");
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    expect(await screen.findByText("请审阅。确认后才保存，不会外发。")).toBeTruthy();
+    expect(screen.queryByText("已保存到本机，未发送。")).toBeNull();
+    expect(calls).toBe(1);
+    await user.click(screen.getByRole("button", { name: "确认保存" }));
+    expect(screen.getByText("已保存到本机，未发送。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "回放" }));
+    expect(await screen.findByText("全部通过")).toBeTruthy();
+    expect(JSON.stringify(fixedReplayScript)).not.toContain("data:image");
+  });
+
+  it("asks for a repair only after review and refuses an empty or unconfigured call", async () => {
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    await user.click(screen.getByRole("button", { name: "运行历史" }));
+    expect(screen.getByText("还没有运行历史。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回编辑" }));
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    expect(screen.getByText("请先写下测试目标，未发送。")).toBeTruthy();
+    await user.type(screen.getByLabelText("测试目标"), "切削工件后体积减小，邻件不变");
+    await user.click(screen.getByRole("checkbox", { name: "允许调用模型" }));
+    await user.clear(screen.getByLabelText("每日花费上限"));
+    await user.type(screen.getByLabelText("每日花费上限"), "1");
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    expect(screen.getByText("未配置本机密钥，未发送。")).toBeTruthy();
+    cleanup();
+
+    let text = "not-json";
+    render(<ExecutorStudio complete={async () => ({ text, cost: 0.1 })} />);
+    await user.type(screen.getByLabelText("测试目标"), "切削工件后体积减小，邻件不变");
+    await user.click(screen.getByRole("checkbox", { name: "允许调用模型" }));
+    await user.clear(screen.getByLabelText("每日花费上限"));
+    await user.type(screen.getByLabelText("每日花费上限"), "1");
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    expect(await screen.findByText("模型输出不是可回放脚本，未保存。")).toBeTruthy();
+    text = fixedReplayScript;
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    expect(await screen.findByText("请审阅。确认后才保存，不会外发。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "放弃" }));
+    expect(screen.getByText("正常回放不调用模型")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "生成脚本" }));
+    await user.click(await screen.findByRole("button", { name: "确认保存" }));
+    await user.click(screen.getByRole("button", { name: "点击后校验" }));
+    await user.click(screen.getByRole("button", { name: "切削后体积减小" }));
+    await user.click(screen.getByRole("button", { name: "高级：手动步骤" }));
+    const expected = screen.getByLabelText("status 期望");
+    await user.clear(expected);
+    await user.type(expected, "不会出现");
+    await user.click(screen.getByRole("checkbox", { name: "AI 修复" }));
+    await user.click(screen.getByRole("button", { name: "回放" }));
+    expect(await screen.findByText("有步骤失败")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "生成修复建议" }));
+    expect(await screen.findByRole("button", { name: "应用修复" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "应用修复" }));
+    expect(screen.getByText("已保存到本机，未发送。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "回放" }));
+    expect(await screen.findByText("全部通过")).toBeTruthy();
   });
 });
 
@@ -63,7 +146,16 @@ describe("executor script", () => {
     const prompt = repairPrompt(sampleDom, sceneStep!);
     expect(prompt).toContain("SCENE:");
     expect(prompt).toContain("hash=box2");
+    expect(prompt).toContain("差异:");
     expect(prompt).not.toContain("data:image");
     expect(result.steps.find((item) => item.id.startsWith("rec-pixels"))?.evidence.startsWith("local:")).toBe(true);
+    const authored = authorPrompt("切削工件后体积减小，邻件不变", sampleDom, sceneSnapshotText);
+    expect(authored).toContain("schemaVersion 必须是 1");
+    expect(authored).toContain("不要要求修改目标应用");
+    expect(authored).not.toContain("data:image");
+    expect(readAuthoredScript('{"schema":"workbench.test-executor.authored-script.v1","schemaVersion":2,"id":"A","name":"n","steps":[{"id":"s","type":"web","action":"click"}]}')).toBeNull();
+    const saved = caseFromScript(fixedReplayScript);
+    expect(saved?.script).toBe(fixedReplayScript);
+    expect(replay(saved!, sampleDom).passed).toBe(true);
   });
 });

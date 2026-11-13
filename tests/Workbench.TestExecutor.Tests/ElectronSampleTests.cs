@@ -3,6 +3,7 @@ using Xunit;
 
 namespace Workbench.TestExecutor.Tests;
 
+[Collection("synthetic-electron")]
 public sealed class ElectronSampleTests
 {
     [Fact]
