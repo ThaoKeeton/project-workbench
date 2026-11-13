@@ -348,7 +348,7 @@ export type AiSettings = {
 /** Official OpenAI-compatible endpoints for providers that answer from mainland China. */
 export const compatiblePresets: Array<{ id: CompatiblePresetId; label: string; base: string; model: string }> = [
   { id: "deepseek", label: "DeepSeek", base: "https://api.deepseek.com", model: "deepseek-flash" },
-  { id: "dashscope", label: "通义千问", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" },
+  { id: "dashscope", label: "通义千问", base: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen3.7-plus" },
   { id: "moonshot", label: "Kimi", base: "https://api.moonshot.cn/v1", model: "kimi-k3.1-pro" },
   { id: "zhipu", label: "智谱", base: "https://open.bigmodel.cn/api/paas/v4", model: "glm-5.3" },
   { id: "custom", label: "自定义", base: "", model: "" },

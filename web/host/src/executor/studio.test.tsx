@@ -233,6 +233,13 @@ describe("executor script", () => {
       "https://open.bigmodel.cn/api/paas/v4",
       "",
     ]);
+    expect(compatiblePresets.map((item) => item.model)).toEqual([
+      "deepseek-flash",
+      "qwen3.7-plus",
+      "kimi-k3.1-pro",
+      "glm-5.3",
+      "",
+    ]);
     expect(describeStep(saved!.steps[1]).will).toContain("点击");
     expect(resultSentence(false)).toContain("没有达到预期");
     writeDailyCap(3);
