@@ -217,6 +217,8 @@ export type SavedTestRecord = {
   dailyAt: string;
   paused: boolean;
   script: string;
+  appId: string;
+  appName: string;
 };
 
 /** A clock already reached today, so the next daily run is tomorrow. */
@@ -247,21 +249,151 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
   return rows.map(([id, name, passed, daysAgo, hour, minute, dailyAt, paused]) => ({
     id, name, passed, lastRun: last(daysAgo, hour, minute), dailyAt, paused,
     script: passed ? fixedReplayScript : failingReplayScript,
+    appId: "sample",
+    appName: sampleAppName,
   }));
+}
+
+export type TestApp = {
+  id: string;
+  name: string;
+  fileName: string;
+  kind: "electron" | "other";
+  running: "free" | "busy" | "timeout";
+  objects: number | null;
+  recent: boolean;
+};
+
+export type ConnectView = {
+  state: "empty" | "connected" | "busy" | "unsupported" | "timeout";
+  status: string;
+  detail: string;
+  objects: number | null;
+};
+
+export function sceneObjectCount(text: string): number {
+  return text.split("\n").filter((line) => line.includes("type=Mesh")).length;
+}
+
+/** Synthetic apps standing in for a start menu and ordinary install folders. */
+export function sampleApps(): TestApp[] {
+  return [
+    { id: "sample", name: sampleAppName, fileName: "合成电子样品.exe", kind: "electron", running: "free", objects: sceneObjectCount(sceneSnapshotText), recent: true },
+    { id: "cutter", name: "切削台", fileName: "Cutter.exe", kind: "electron", running: "free", objects: 3, recent: false },
+    { id: "busy", name: "已经开着的样品", fileName: "已经开着的样品.exe", kind: "electron", running: "busy", objects: sceneObjectCount(sceneSnapshotText), recent: false },
+    { id: "plain", name: "记事本", fileName: "记事本.exe", kind: "other", running: "free", objects: null, recent: false },
+  ];
+}
+
+export function appFromFileName(fileName: string): TestApp | null {
+  const trimmed = fileName.trim();
+  if (trimmed.length === 0) return null;
+  const known = sampleApps().find((app) => app.fileName.toLowerCase() === trimmed.toLowerCase() || app.name === trimmed);
+  if (known) return known;
+  const stem = trimmed.replace(/\.(exe|app)$/i, "");
+  if (/超时|timeout|连不上/i.test(trimmed)) {
+    return { id: "slow", name: stem, fileName: trimmed, kind: "electron", running: "timeout", objects: null, recent: false };
+  }
+  if (/记事本|notepad/i.test(trimmed) || !/\.(exe|app)$/i.test(trimmed)) {
+    return { id: "other", name: stem || trimmed, fileName: trimmed, kind: "other", running: "free", objects: null, recent: false };
+  }
+  return { id: "picked", name: stem, fileName: trimmed, kind: "electron", running: "free", objects: null, recent: false };
+}
+
+/** What the tester sees after a pick. The debugging port and profile stay inside the runner. */
+export function connectApp(app: TestApp | null, options: { attempt?: number; relaunch?: boolean } = {}): ConnectView {
+  if (!app) {
+    return { state: "empty", status: "还没有选择", detail: "请选择一个程序，或从最近用过的里面点一个。", objects: null };
+  }
+  if (app.kind !== "electron") {
+    return { state: "unsupported", status: "这个程序还不能自动测试。", detail: "请换一个用 Electron 做的程序。", objects: null };
+  }
+  const attempt = options.attempt ?? 1;
+  if (app.running === "timeout" && attempt < 2) {
+    return { state: "timeout", status: "连上用的时间太长了。", detail: "可以再试一次。", objects: null };
+  }
+  if (app.running === "busy" && !options.relaunch) {
+    return { state: "busy", status: "这个程序已经开着，需要由工作台重新打开它", detail: "正在用的窗口会先关掉。", objects: null };
+  }
+  const objects = app.objects;
+  const detail = objects !== null && objects > 0
+    ? `认出了 3D 画面，里面有 ${objects} 个物体`
+    : "已经打开，并连上了。接下来用一句话说明要测什么。";
+  return { state: "connected", status: `已连接：${app.name}`, detail, objects };
 }
 
 export type ConnectResult = { ok: boolean; status: string; hint: string };
 
-/** Launch decision for a picked program. The port stays inside the runner. */
 export function connectChoice(name: string): ConnectResult {
-  const trimmed = name.trim();
-  if (trimmed === sampleAppName || /\.(exe|app)$/i.test(trimmed)) {
-    return { ok: true, status: "已连接", hint: "已经打开，并连上了。接下来用一句话说明要测什么。" };
+  const view = connectApp(appFromFileName(name));
+  return { ok: view.state === "connected", status: view.status, hint: view.detail };
+}
+
+export const aiProviderStorageKey = "workbench.author.provider";
+export const aiKeyStorageKey = "workbench.author.key";
+export const aiBaseStorageKey = "workbench.author.base";
+export const hintDismissedKey = "workbench.author.hint";
+
+export type AiProvider = "openai" | "compatible";
+export type AiSettings = { provider: AiProvider; key: string; base: string; cap: number };
+
+export function readAuthorFake(): "off" | "pass" | "fail" {
+  try {
+    const value = window.sessionStorage.getItem("workbench.author.fake");
+    if (value === "1" || value === "pass") return "pass";
+    if (value === "fail") return "fail";
+  } catch {
+    return "off";
   }
-  if (trimmed.length === 0) {
-    return { ok: false, status: "还没有选择", hint: "请选择一个程序，或从最近用过的里面点一个。" };
+  return "off";
+}
+
+export function readAiSettings(): AiSettings {
+  let provider: AiProvider = "openai";
+  let key = "";
+  let base = "";
+  try {
+    if (localStorage.getItem(aiProviderStorageKey) === "compatible") provider = "compatible";
+    key = localStorage.getItem(aiKeyStorageKey) ?? "";
+    base = localStorage.getItem(aiBaseStorageKey) ?? "";
+  } catch {
+    provider = "openai";
   }
-  return { ok: false, status: "没连上", hint: "这不是可以自己运行的程序。请重新选择程序文件。" };
+  return { provider, key, base, cap: readDailyCap() };
+}
+
+export function writeAiSettings(value: AiSettings) {
+  const provider = value.provider === "compatible" ? "compatible" : "openai";
+  localStorage.setItem(aiProviderStorageKey, provider);
+  localStorage.setItem(aiKeyStorageKey, value.key.trim());
+  localStorage.setItem(aiBaseStorageKey, value.base.trim());
+  writeDailyCap(value.cap);
+}
+
+export function hintDismissed(): boolean {
+  try {
+    return localStorage.getItem(hintDismissedKey) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function dismissHint() {
+  localStorage.setItem(hintDismissedKey, "1");
+}
+
+/** A minimal check. CI sets the fake model and never sends the key. */
+export async function probeAi(input: { key: string; fake: boolean }, call?: () => Promise<boolean>): Promise<{ ok: boolean; message: string }> {
+  if (input.key.trim().length < 8) return { ok: false, message: "先填写密钥。" };
+  if (input.fake) return { ok: true, message: "试过了。可以开始生成。" };
+  try {
+    const ok = call ? await call() : false;
+    return ok
+      ? { ok: true, message: "试过了。可以开始生成。" }
+      : { ok: false, message: "没有连上。请检查密钥后再试。" };
+  } catch {
+    return { ok: false, message: "没有连上。请检查密钥后再试。" };
+  }
 }
 
 export function describeStep(item: ExecutorStep): { will: string; check: string } {

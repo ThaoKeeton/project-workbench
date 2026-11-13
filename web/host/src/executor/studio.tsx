@@ -1,27 +1,34 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import "./studio.css";
 import {
   authorMessages,
+  appFromFileName,
   authorPrompt,
   caseFromScript,
-  connectChoice,
+  connectApp,
+  dismissHint,
   failingReplayScript,
   fixedReplayScript,
   formatWhen,
+  hintDismissed,
   humanFindings,
   nextDailyInstant,
   plainPlan,
+  readAuthorFake,
   readDailyCap,
   replay,
   resultSentence,
   sampleAppName,
+  sampleApps,
   sampleDom,
   sampleLibrary,
   sceneSnapshotText,
+  type ConnectView,
   type ExecutorCase,
   type ExecutorRun,
   type Finding,
   type SavedTestRecord,
+  type TestApp,
 } from "./model";
 
 export type ScriptCompleter = (prompt: string) => Promise<{ text: string; cost: number }>;
@@ -31,14 +38,15 @@ const stepNames = ["选择程序", "说一句", "看一遍", "每天重跑"] as 
 type SavedTest = SavedTestRecord;
 
 export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: ScriptCompleter; stepDelay?: number }) {
-  const [phase, setPhase] = useState<"home" | "wizard" | "demo" | "result">("home");
-  const [stepIndex, setStepIndex] = useState(0);
-  const [appName, setAppName] = useState("");
-  const [connected, setConnected] = useState(false);
-  const [status, setStatus] = useState("还没有选择");
-  const [hint, setHint] = useState("请选择一个程序，或从最近用过的里面点一个。");
-  const [recent, setRecent] = useState<string[]>([sampleAppName]);
-  const [goal, setGoal] = useState("");
+  const [resumed] = useState(readWizardDraft);
+  const resumedApp = sampleApps().find((item) => item.id === resumed.appId) ?? null;
+  const [phase, setPhase] = useState<"home" | "wizard" | "demo" | "result">(resumed.resume ? "wizard" : "home");
+  const [stepIndex, setStepIndex] = useState(resumed.resume ? resumed.step : 0);
+  const [picked, setPicked] = useState<TestApp | null>(resumed.resume ? resumedApp : null);
+  const [attempt, setAttempt] = useState(1);
+  const [relaunch, setRelaunch] = useState(false);
+  const [recent, setRecent] = useState<TestApp[]>(() => sampleApps().filter((item) => item.recent));
+  const [goal, setGoal] = useState(resumed.resume ? resumed.goal : "");
   const [correction, setCorrection] = useState("");
   const [cap] = useState(readDailyCap);
   const [spent, setSpent] = useState(0);
@@ -50,11 +58,17 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [stopped, setStopped] = useState(false);
   const [library, setLibrary] = useState<SavedTest[]>(() => (readSamples() ? sampleLibrary() : []));
   const [opened, setOpened] = useState<SavedTest | null>(null);
+  const [relaunchNote, setRelaunchNote] = useState("");
   const [dailyAt, setDailyAt] = useState("09:00");
   const [scheduled, setScheduled] = useState(false);
-  const keyReady = Boolean(complete) || readFake() !== "off";
+  const keyReady = Boolean(complete) || readAuthorFake() !== "off";
+  const connection = connectApp(picked, { attempt, relaunch });
   const pace = readPace(stepDelay);
   const left = Math.max(0, cap - spent);
+
+  useEffect(() => {
+    rememberWizard(stepIndex, picked?.id ?? "", goal);
+  }, [stepIndex, picked, goal]);
 
   useEffect(() => {
     if (phase !== "demo" || stopped || !demo) return;
@@ -66,13 +80,21 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
     return () => window.clearTimeout(timer);
   }, [phase, shown, stopped, pace, findings.length, demo]);
 
-  const choose = (name: string) => {
-    const result = connectChoice(name);
-    setAppName(name);
-    setConnected(result.ok);
-    setStatus(result.status);
-    setHint(result.hint);
-    if (result.ok) setRecent([name, ...recent.filter((item) => item !== name)].slice(0, 4));
+  const choose = (next: TestApp | null, options: { attempt?: number; relaunch?: boolean } = {}) => {
+    if (!next) {
+      setPicked(null);
+      setAttempt(1);
+      setRelaunch(false);
+      return;
+    }
+    const nextAttempt = options.attempt ?? 1;
+    const nextRelaunch = Boolean(options.relaunch);
+    setPicked(next);
+    setAttempt(nextAttempt);
+    setRelaunch(nextRelaunch);
+    if (connectApp(next, { attempt: nextAttempt, relaunch: nextRelaunch }).state === "connected") {
+      setRecent((items) => [next, ...items.filter((item) => item.id !== next.id)].slice(0, 4));
+    }
   };
 
   const draftCase = async (note = correction) => {
@@ -88,7 +110,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       return;
     }
     const prompt = authorPrompt([goal, note].filter((part) => part.trim()).join("\n"), sampleDom, sceneSnapshotText);
-    const result = complete ? await complete(prompt) : { text: readFake() === "fail" ? failingReplayScript : fixedReplayScript, cost: 0 };
+    const result = complete ? await complete(prompt) : { text: readAuthorFake() === "fail" ? failingReplayScript : fixedReplayScript, cost: 0 };
     setSpent((value) => value + result.cost);
     const authored = caseFromScript(result.text);
     if (!authored) {
@@ -119,6 +141,8 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       dailyAt,
       paused: false,
       script: draft.script ?? "",
+      appId: picked?.id ?? "sample",
+      appName: picked?.name ?? sampleAppName,
     }, ...library.filter((item) => item.id !== draft.id)]);
     setScheduled(false);
     setStepIndex(3);
@@ -131,6 +155,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
     const result = replay(saved, sampleDom);
     const next = rerun ? { ...item, passed: result.passed, lastRun: new Date().toISOString() } : item;
     if (rerun) setLibrary((items) => items.map((entry) => entry.id === item.id ? next : entry));
+    setRelaunchNote(rerun ? `已重新打开「${item.appName || sampleAppName}」。` : "");
     setDraft(saved);
     setDemo(result);
     setFindings(humanFindings(saved, result));
@@ -170,7 +195,16 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               </li>
             ))}
           </ol>
-          {stepIndex === 0 ? <AppStep appName={appName} connected={connected} status={status} hint={hint} recent={recent} onChoose={choose} onNext={() => setStepIndex(1)} /> : null}
+          {stepIndex === 0 ? (
+            <AppStep
+              picked={picked}
+              connection={connection}
+              recent={recent}
+              installed={sampleApps().filter((item) => !recent.some((entry) => entry.id === item.id))}
+              onChoose={choose}
+              onNext={() => setStepIndex(1)}
+            />
+          ) : null}
           {stepIndex === 1 ? <GoalStep goal={goal} onGoal={setGoal} onBack={() => setStepIndex(0)} onNext={() => { setStepIndex(2); void draftCase(""); }} /> : null}
           {stepIndex === 2 ? (
             <DraftStep
@@ -183,6 +217,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               onRetry={() => void draftCase(correction)}
               onDemo={showDemo}
               onBack={() => setStepIndex(1)}
+              onLeave={() => rememberWizard(2, picked?.id ?? "", goal)}
             />
           ) : null}
           {stepIndex === 3 ? (
@@ -202,6 +237,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
           findings={findings}
           onSave={opened ? () => setPhase("home") : saveAndSchedule}
           saveLabel={opened ? "返回首页" : "保存并设置每天重跑"}
+          note={relaunchNote}
           onAgain={opened ? () => openSaved(opened, true) : showDemo}
           onEdit={() => { setOpened(null); setPhase("wizard"); setStepIndex(2); }}
         />
@@ -228,15 +264,27 @@ function readSamples(): boolean {
   }
 }
 
-function readFake(): "off" | "pass" | "fail" {
+function readWizardDraft(): { resume: boolean; step: number; appId: string; goal: string } {
   try {
-    const value = window.sessionStorage.getItem("workbench.author.fake");
-    if (value === "1" || value === "pass") return "pass";
-    if (value === "fail") return "fail";
+    const resume = window.sessionStorage.getItem("workbench.wizard.resume") === "1";
+    const step = Number(window.sessionStorage.getItem("workbench.wizard.step") ?? "0");
+    const appId = window.sessionStorage.getItem("workbench.wizard.app") ?? "";
+    const goal = window.sessionStorage.getItem("workbench.wizard.goal") ?? "";
+    if (resume) window.sessionStorage.removeItem("workbench.wizard.resume");
+    return { resume, step: Number.isFinite(step) && step >= 0 && step <= 3 ? step : 0, appId, goal };
   } catch {
-    return "off";
+    return { resume: false, step: 0, appId: "", goal: "" };
   }
-  return "off";
+}
+
+function rememberWizard(step: number, appId: string, goal: string) {
+  try {
+    window.sessionStorage.setItem("workbench.wizard.step", String(step));
+    window.sessionStorage.setItem("workbench.wizard.app", appId);
+    window.sessionStorage.setItem("workbench.wizard.goal", goal);
+  } catch {
+    return;
+  }
 }
 
 function Home({ library, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
@@ -253,11 +301,19 @@ function Home({ library, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
   const [renaming, setRenaming] = useState<SavedTest | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [removing, setRemoving] = useState<SavedTest | null>(null);
+  const [showHint, setShowHint] = useState(() => !hintDismissed());
   if (library.length === 0) {
     return (
       <div className="wizard-card" aria-label="开始">
         <h2>还没有测试</h2>
-        <p>先选择要测的程序。连上之后，用一句话说明要检查什么，再看着它做一遍。</p>
+        {showHint ? (
+          <div className="first-hint" role="note" aria-label="第一次使用">
+            <p>先选一个程序。</p>
+            <p>用一句话说明要检查什么。</p>
+            <p>看它做一遍，对了再保存。</p>
+            <button type="button" className="btn" onClick={() => { dismissHint(); setShowHint(false); }}>知道了</button>
+          </div>
+        ) : <p>先选择要测的程序，再用一句话说明要检查什么。</p>}
         <div className="wizard-actions">
           <button type="button" className="btn-accent" onClick={onNew}>选择程序</button>
         </div>
@@ -329,32 +385,84 @@ function Home({ library, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
   );
 }
 
-function AppStep({ appName, connected, status, hint, recent, onChoose, onNext }: {
-  appName: string; connected: boolean; status: string; hint: string; recent: string[];
-  onChoose: (name: string) => void; onNext: () => void;
+function AppStep({ picked, connection, recent, installed, onChoose, onNext }: {
+  picked: TestApp | null;
+  connection: ConnectView;
+  recent: TestApp[];
+  installed: TestApp[];
+  onChoose: (app: TestApp | null, options?: { attempt?: number; relaunch?: boolean }) => void;
+  onNext: () => void;
 }) {
+  const [confirm, setConfirm] = useState(false);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const connected = connection.state === "connected";
   return (
     <div className="wizard-card" aria-label="选择程序">
       <h2>选择要测的程序</h2>
-      <p>选好后会由这里打开并连上。打不开时，换一个可以自己运行的程序再试。</p>
-      <label className="btn">
-        浏览
-        <input aria-label="浏览程序" className="file-input" type="file" accept=".exe,.app,application/octet-stream" onChange={(event) => {
-          const file = event.target.files?.[0];
-          if (file) onChoose(file.name);
-        }} />
-      </label>
-      <p>最近用过的</p>
-      <ul className="case-list" aria-label="最近用过的程序">
-        {recent.map((name) => (
-          <li key={name}><button type="button" className={name === appName ? "is-on" : ""} onClick={() => onChoose(name)}>{name}</button></li>
-        ))}
+      <p>从最近用过的里面选，浏览一个程序，或从这台电脑上已安装的里面选。选中后由这里打开并连上。</p>
+      <button type="button" className="btn" onClick={() => fileRef.current?.click()}>浏览…</button>
+      <input ref={fileRef} aria-label="浏览程序" className="file-input" type="file" accept=".exe,.app,application/octet-stream" onChange={(event) => {
+        const file = event.target.files?.[0];
+        const next = file ? appFromFileName(file.name) : null;
+        if (next) onChoose(next);
+      }} />
+      <h3>最近用过的</h3>
+      <ul className="app-grid" aria-label="最近用过的程序">
+        {recent.map((app) => <AppButton key={app.id} app={app} selected={picked?.id === app.id} onChoose={onChoose} />)}
       </ul>
-      <p role="status">{status}。{hint}</p>
-      {!connected && appName ? <button type="button" className="btn" onClick={() => onChoose("")}>重新选择</button> : null}
+      <h3>这台电脑上的程序</h3>
+      <ul className="app-grid" aria-label="已安装的程序">
+        {installed.map((app) => <AppButton key={app.id} app={app} selected={picked?.id === app.id} onChoose={onChoose} />)}
+      </ul>
+      <p role="status">{connection.status}</p>
+      {connection.detail ? <p>{connection.detail}</p> : null}
+      {connected ? <WindowPreview objects={connection.objects} /> : null}
+      {connection.state === "busy" && picked ? (
+        <button type="button" className="btn" onClick={() => setConfirm(true)}>关掉并重新打开</button>
+      ) : null}
+      {connection.state === "timeout" && picked ? (
+        <button type="button" className="btn" onClick={() => onChoose(picked, { attempt: 2 })}>再试一次</button>
+      ) : null}
+      {connection.state === "unsupported" ? <button type="button" className="btn" onClick={() => onChoose(null)}>重新选择</button> : null}
+      {confirm && picked ? (
+        <div role="dialog" aria-label="确认重新打开">
+          <p>关掉并重新打开「{picked.name}」？正在用的窗口会关掉。</p>
+          <div className="wizard-actions">
+            <button type="button" className="btn" onClick={() => setConfirm(false)}>取消</button>
+            <button type="button" className="btn-accent" onClick={() => { setConfirm(false); onChoose(picked, { relaunch: true }); }}>关掉并重新打开</button>
+          </div>
+        </div>
+      ) : null}
       <div className="wizard-actions">
         <button type="button" className="btn-accent" disabled={!connected} onClick={onNext}>下一步</button>
       </div>
+    </div>
+  );
+}
+
+function AppButton({ app, selected, onChoose }: { app: TestApp; selected: boolean; onChoose: (app: TestApp) => void }) {
+  return (
+    <li>
+      <button type="button" className={selected ? "is-on" : ""} onClick={() => onChoose(app)}>
+        <span className="app-icon" aria-hidden="true">{app.name.slice(0, 1)}</span>
+        <span>{app.name}</span>
+      </button>
+    </li>
+  );
+}
+
+function WindowPreview({ objects }: { objects: number | null }) {
+  return (
+    <div className="app-preview">
+      <svg viewBox="0 0 220 124" role="img" aria-label="程序画面">
+        <rect className="frame-bg" width="220" height="124" />
+        {objects !== null && objects > 0 ? (
+          <>
+            <rect className="piece" x="36" y="28" width="70" height="68" />
+            <circle className="piece" cx="150" cy="62" r="22" />
+          </>
+        ) : <rect className="piece" x="24" y="36" width="172" height="12" />}
+      </svg>
     </div>
   );
 }
@@ -376,16 +484,18 @@ function GoalStep({ goal, onGoal, onBack, onNext }: { goal: string; onGoal: (val
   );
 }
 
-function DraftStep({ left, keyReady, draft, notice, correction, onCorrection, onRetry, onDemo, onBack }: {
+const aiSettingsHref = "/settings/ai?return=/plugin/runner";
+
+function DraftStep({ left, keyReady, draft, notice, correction, onCorrection, onRetry, onDemo, onBack, onLeave }: {
   left: number; keyReady: boolean; draft: ExecutorCase | null; notice: string; correction: string;
-  onCorrection: (value: string) => void; onRetry: () => void; onDemo: () => void; onBack: () => void;
+  onCorrection: (value: string) => void; onRetry: () => void; onDemo: () => void; onBack: () => void; onLeave: () => void;
 }) {
   const plan = draft ? plainPlan(draft) : null;
   return (
     <div className="wizard-card" aria-label="看一遍">
       <h2>看它准备做什么</h2>
-      <p className="tiny">今天还能生成 {left} 次。{keyReady ? <a href="/settings">去设置</a> : null}</p>
-      {!keyReady ? <p role="status">{authorMessages.missingKey}<a href="/settings">去设置</a></p> : null}
+      <p className="tiny">今天还能生成 {left} 次。{keyReady ? <a href={aiSettingsHref} onClick={onLeave}>去设置</a> : null}</p>
+      {!keyReady ? <p role="status">{authorMessages.missingKey}<a href={aiSettingsHref} onClick={onLeave}>去设置</a></p> : null}
       {notice ? <p role="status">{notice}</p> : null}
       {plan ? (
         <div className="plan" aria-label="检查清单">
@@ -463,13 +573,14 @@ function ScheduleStep({ dailyAt, scheduled, onTime, onSave, onHome }: {
   );
 }
 
-function ResultPage({ passed, findings, onSave, saveLabel, onAgain, onEdit }: {
-  passed: boolean; findings: Finding[]; onSave: () => void; saveLabel: string; onAgain: () => void; onEdit: () => void;
+function ResultPage({ passed, findings, onSave, saveLabel, onAgain, onEdit, note }: {
+  passed: boolean; findings: Finding[]; onSave: () => void; saveLabel: string; onAgain: () => void; onEdit: () => void; note?: string;
 }) {
   return (
     <div className="wizard-card result-page" aria-label="结果">
       <p className={passed ? "result-mark pass" : "result-mark fail"}>{passed ? "通过" : "没通过"}</p>
       <p role="status">{resultSentence(passed)}</p>
+      {note ? <p>{note}</p> : null}
       <div className="frames" aria-label="前后画面">
         <figure>
           <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="之前">

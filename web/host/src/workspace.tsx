@@ -1,5 +1,5 @@
-import { useCallback } from "react";
-import { NavLink, useNavigate, useParams } from "react-router-dom";
+import { useCallback, useState } from "react";
+import { NavLink, useLocation, useNavigate, useParams } from "react-router-dom";
 import type { ApiClient } from "./api";
 import { pinnedPlugins, type PluginId } from "./catalog";
 import { Icon } from "./icons";
@@ -7,7 +7,7 @@ import { DingPanel } from "../../../plugins/v2/Workbench.DingTalkInsights.V2/ui/
 import { TestCasesPanel } from "../../../plugins/v2/Workbench.TestCases.V2/ui/TestCasesPanel";
 import { TestingPanel } from "../../../plugins/v2/Workbench.TestingDesign.V2/ui/TestingPanel";
 import { UpcamPanel } from "../../../plugins/v2/Workbench.UpcamStandup.V2/ui/UpcamPanel";
-import { readDailyCap, writeDailyCap } from "./executor/model";
+import { probeAi, readAiSettings, readAuthorFake, readDailyCap, writeAiSettings, writeDailyCap, type AiProvider } from "./executor/model";
 import { ExecutorStudio } from "./executor/studio";
 
 const tabs: PluginId[] = ["upcam", "ding", "test", "runner"];
@@ -133,7 +133,7 @@ function RunnerCanvas({ empty }: { empty: "none" | "suite" | "target" | "agent" 
         rows={[["询问", "先去设置"], ["重跑", "不用再问"]]}
         primary="去设置"
         secondary="先用已保存的检查"
-        onPrimary={() => void navigate("/settings")}
+        onPrimary={() => void navigate("/settings/ai?return=/plugin/runner")}
       />
     );
   }
@@ -311,6 +311,7 @@ export function SettingsPage({
         ))}
       </fieldset>
       <h2>自动测试</h2>
+      <p className="sub"><a href="/settings/ai">AI 设置</a></p>
       <label className="setting-cap">
         每天最多生成几次
         <input
@@ -339,6 +340,68 @@ export function SettingsPage({
         </li>
       </ul>
       <p className="sub">关于 · 版本 0.9.2-preview · 构建 2026.11.11</p>
+    </div>
+  );
+}
+
+export function AiSettingsPage() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const initial = readAiSettings();
+  const [provider, setProvider] = useState<AiProvider>(initial.provider);
+  const [secret, setSecret] = useState(initial.key);
+  const [base, setBase] = useState(initial.base);
+  const [cap, setCap] = useState(initial.cap);
+  const [notice, setNotice] = useState("");
+
+  const save = () => {
+    writeAiSettings({ provider, key: secret, base, cap });
+    const back = new URLSearchParams(location.search).get("return");
+    if (back && back.startsWith("/") && !back.startsWith("//") && !back.includes("\\")) {
+      window.sessionStorage.setItem("workbench.wizard.resume", "1");
+      void navigate(back);
+      return;
+    }
+    setNotice("已保存。密钥只留在这台电脑上。");
+  };
+
+  return (
+    <div className="page narrow-page">
+      <header className="page-head">
+        <h1>AI 设置</h1>
+        <p>密钥只留在这台电脑上，页面上会遮住。每天重跑不会再用 AI。</p>
+      </header>
+      <fieldset className="theme-list">
+        <legend>提供方</legend>
+        <label className={provider === "openai" ? "is-on" : ""}>
+          <input type="radio" name="provider" aria-label="OpenAI" value="openai" checked={provider === "openai"} onChange={() => setProvider("openai")} />
+          <span><strong>OpenAI</strong><small>用这家的接口生成检查</small></span>
+        </label>
+        <label className={provider === "compatible" ? "is-on" : ""}>
+          <input type="radio" name="provider" aria-label="兼容接口" value="compatible" checked={provider === "compatible"} onChange={() => setProvider("compatible")} />
+          <span><strong>兼容接口</strong><small>填写你自己的接口地址</small></span>
+        </label>
+      </fieldset>
+      {provider === "compatible" ? (
+        <label className="setting-cap">
+          接口地址
+          <input aria-label="接口地址" value={base} onChange={(event) => setBase(event.target.value)} />
+        </label>
+      ) : null}
+      <label className="setting-cap">
+        密钥
+        <input aria-label="密钥" type="password" autoComplete="off" value={secret} onChange={(event) => setSecret(event.target.value)} />
+      </label>
+      <label className="setting-cap">
+        每天最多生成几次
+        <input aria-label="每天最多生成几次" type="number" min={0} max={100} value={cap} onChange={(event) => setCap(Number(event.target.value))} />
+      </label>
+      <p className="sub">到次数就不再生成。已经保存的测试照常重跑。这里不写金额。每天重跑不会再用 AI。</p>
+      {notice ? <p role="status">{notice}</p> : null}
+      <p className="ai-actions">
+        <button type="button" className="btn" onClick={() => void probeAi({ key: secret, fake: readAuthorFake() !== "off" }).then((result) => setNotice(result.message))}>测试一下</button>
+        <button type="button" className="btn-accent" onClick={save}>保存</button>
+      </p>
     </div>
   );
 }

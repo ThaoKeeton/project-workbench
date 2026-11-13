@@ -1,13 +1,15 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { authorPrompt, capStorageKey, caseFromScript, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatWhen, humanFindings, mismatch, nextDailyInstant, plainPlan, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleDom, sampleLibrary, sceneSnapshotText, seedCases, writeDailyCap } from "./model";
+import { aiKeyStorageKey, appFromFileName, authorPrompt, capStorageKey, caseFromScript, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatWhen, hintDismissedKey, humanFindings, mismatch, nextDailyInstant, plainPlan, probeAi, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, writeDailyCap } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => {
   cleanup();
   sessionStorage.clear();
   localStorage.removeItem(capStorageKey);
+  localStorage.removeItem(hintDismissedKey);
+  localStorage.removeItem(aiKeyStorageKey);
 });
 
 async function openSample(user: ReturnType<typeof userEvent.setup>, start = "选择程序") {
@@ -24,19 +26,26 @@ describe("executor wizard", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio stepDelay={10000} />);
     expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
+    expect(screen.getByRole("note", { name: "第一次使用" }).textContent).toContain("先选一个程序。");
+    expect(screen.getByText("用一句话说明要检查什么。")).toBeTruthy();
+    expect(screen.getByText("看它做一遍，对了再保存。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "知道了" }));
+    expect(screen.queryByRole("note", { name: "第一次使用" })).toBeNull();
     const file = new File(["x"], "notes.txt", { type: "text/plain" });
     await user.click(screen.getByRole("button", { name: "选择程序" }));
     fireEvent.change(screen.getByLabelText("浏览程序"), { target: { files: [file] } });
-    expect(screen.getByRole("status").textContent).toContain("没连上");
+    expect(screen.getByRole("status").textContent).toContain("还不能自动测试");
     await user.click(screen.getByRole("button", { name: "重新选择" }));
     await user.click(screen.getByRole("button", { name: sampleAppName }));
-    expect(screen.getByRole("status").textContent).toContain("已连接");
+    expect(screen.getByRole("status").textContent).toContain("已连接：合成电子样品");
+    expect(screen.getByText("认出了 3D 画面，里面有 2 个物体")).toBeTruthy();
+    expect(screen.getByRole("img", { name: "程序画面" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect((screen.getByRole("button", { name: "下一步" }) as HTMLButtonElement).disabled).toBe(true);
     await user.type(screen.getByLabelText("要测什么"), "切削工件后，工件变小，旁边的牙不变");
     await user.click(screen.getByRole("button", { name: "下一步" }));
     expect(screen.getByText(/需要先设置 AI 密钥/)).toBeTruthy();
-    expect(screen.getByRole("link", { name: "去设置" }).getAttribute("href")).toBe("/settings");
+    expect(screen.getByRole("link", { name: "去设置" }).getAttribute("href")).toBe("/settings/ai?return=/plugin/runner");
     expect(screen.getByText(/今天还能生成/)).toBeTruthy();
     expect(screen.queryByLabelText("每天最多问几次")).toBeNull();
   });
@@ -85,6 +94,29 @@ describe("executor wizard", () => {
     expect(screen.getByRole("button", { name: "新建一个测试" })).toBeTruthy();
     expect(screen.getByText("通过")).toBeTruthy();
     expect(screen.getByText(/下次 (今天|明天) 07:30/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "现在跑一次" }));
+    expect(await screen.findByText("已重新打开「合成电子样品」。")).toBeTruthy();
+  });
+
+  it("explains an open app, a non-electron app, and a slow connection", async () => {
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    await user.click(screen.getByRole("button", { name: "知道了" }));
+    await user.click(screen.getByRole("button", { name: "选择程序" }));
+    await user.click(screen.getByRole("button", { name: "已经开着的样品" }));
+    expect(screen.getByRole("status").textContent).toBe("这个程序已经开着，需要由工作台重新打开它");
+    await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
+    expect(screen.getByRole("dialog", { name: "确认重新打开" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
+    await user.click(screen.getAllByRole("button", { name: "关掉并重新打开" })[1]);
+    expect(screen.getByRole("status").textContent).toContain("已连接：已经开着的样品");
+    await user.click(screen.getByRole("button", { name: "记事本" }));
+    expect(screen.getByRole("status").textContent).toContain("还不能自动测试");
+    fireEvent.change(screen.getByLabelText("浏览程序"), { target: { files: [new File(["x"], "连不上的样品.exe")] } });
+    expect(screen.getByRole("status").textContent).toContain("连上用的时间太长了");
+    await user.click(screen.getByRole("button", { name: "再试一次" }));
+    expect(screen.getByRole("status").textContent).toContain("已连接：连不上的样品");
   });
 
   it("filters, renames, pauses, and deletes a longer list", async () => {
@@ -148,7 +180,7 @@ function authorMessagesOver(): string {
 }
 
 describe("executor script", () => {
-  it("keeps screenshots out of the recorded script and diffs pixels locally", () => {
+  it("keeps screenshots out of the recorded script and diffs pixels locally", async () => {
     const steps = recordFromDom(sampleDom);
     expect(steps.some((item) => item.action === "click" && item.selector === "#start")).toBe(true);
     expect(JSON.stringify(steps)).not.toContain("data:image");
@@ -170,6 +202,15 @@ describe("executor script", () => {
     expect(replay(caseFromScript(failingReplayScript)!, sampleDom).passed).toBe(false);
     expect(connectChoice("Cutter.exe").ok).toBe(true);
     expect(connectChoice("notes.txt").ok).toBe(false);
+    expect(connectChoice("记事本.exe").ok).toBe(false);
+    expect(connectApp(sampleApps().find((item) => item.id === "busy") ?? null).state).toBe("busy");
+    expect(connectApp(appFromFileName("连不上的样品.exe"), { attempt: 2 }).state).toBe("connected");
+    expect(sceneObjectCount(sceneSnapshotText)).toBe(2);
+    expect(await probeAi({ key: "short", fake: true })).toMatchObject({ ok: false });
+    expect(await probeAi({ key: "sample-key-0001", fake: true })).toMatchObject({ ok: true, message: "试过了。可以开始生成。" });
+    expect(await probeAi({ key: "sample-key-0001", fake: false }, async () => false)).toMatchObject({ ok: false });
+    expect(await probeAi({ key: "sample-key-0001", fake: false }, async () => { throw new Error("down"); })).toMatchObject({ ok: false });
+    expect((await probeAi({ key: "sample-key-0001", fake: false }, async () => true)).message).not.toContain("sample-key");
     expect(describeStep(saved!.steps[1]).will).toContain("点击");
     expect(resultSentence(false)).toContain("没有达到预期");
     writeDailyCap(3);

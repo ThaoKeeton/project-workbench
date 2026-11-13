@@ -1,11 +1,11 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ApiClient } from "./api";
 import { HomePage } from "./launcher";
 import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
-import { DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SampleCasesPage, SettingsPage } from "./workspace";
+import { AiSettingsPage, DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SampleCasesPage, SettingsPage } from "./workspace";
 
 afterEach(() => cleanup());
 
@@ -114,6 +114,34 @@ describe("launcher pages", () => {
     render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} empty="key" />} /></Routes></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "需要先设置 AI 密钥" })).toBeTruthy();
     cleanup();
+    sessionStorage.setItem("workbench.author.fake", "1");
+    render(<MemoryRouter initialEntries={["/settings/ai?return=/plugin/runner"]}><Routes><Route path="/settings/ai" element={<AiSettingsPage />} /><Route path="/plugin/:id" element={<p>回到向导</p>} /></Routes></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "AI 设置" })).toBeTruthy();
+    expect(screen.getAllByText(/每天重跑不会再用 AI/).length).toBeGreaterThan(0);
+    fireEvent.change(screen.getByLabelText("密钥"), { target: { value: "sample-key-0001" } });
+    expect((screen.getByLabelText("密钥") as HTMLInputElement).type).toBe("password");
+    await user.click(screen.getByRole("button", { name: "测试一下" }));
+    expect((await screen.findByRole("status")).textContent).toContain("试过了");
+    expect(screen.getByRole("status").textContent).not.toContain("sample-key");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(screen.getByText("回到向导")).toBeTruthy();
+    expect(sessionStorage.getItem("workbench.wizard.resume")).toBe("1");
+    cleanup();
+    sessionStorage.removeItem("workbench.author.fake");
+    localStorage.clear();
+    render(<MemoryRouter><AiSettingsPage /></MemoryRouter>);
+    await user.click(screen.getByRole("radio", { name: "兼容接口" }));
+    fireEvent.change(screen.getByLabelText("接口地址"), { target: { value: "http://127.0.0.1:9" } });
+    await user.click(screen.getByRole("button", { name: "测试一下" }));
+    expect((await screen.findByRole("status")).textContent).toContain("先填写密钥");
+    fireEvent.change(screen.getByLabelText("密钥"), { target: { value: "sample-key-0001" } });
+    await user.click(screen.getByRole("button", { name: "测试一下" }));
+    expect((await screen.findByRole("status")).textContent).toContain("没有连上");
+    await user.click(screen.getByRole("button", { name: "保存" }));
+    expect(screen.getByRole("status").textContent).toContain("已保存");
+    expect(screen.getByRole("status").textContent).not.toContain("sample-key");
+    cleanup();
+    sessionStorage.clear();
     render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "选择程序" }));

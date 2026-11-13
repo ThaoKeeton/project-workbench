@@ -189,6 +189,56 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.locator(".row-open", { hasText: "旁边的牙变了" })).toBeVisible();
     });
 
+    test("app picker, a live connection, an already-open app, and AI settings", async ({ page }) => {
+      await page.goto("/plugin/runner");
+      await expect(page.getByRole("note", { name: "第一次使用" })).toBeVisible();
+      await expect(page.getByText("先选一个程序。")).toBeVisible();
+      await expect(page.getByText("用一句话说明要检查什么。")).toBeVisible();
+      await expect(page.getByText("看它做一遍，对了再保存。")).toBeVisible();
+      await page.getByRole("button", { name: "知道了" }).click();
+      await expect(page.getByRole("note", { name: "第一次使用" })).toHaveCount(0);
+      await page.getByRole("button", { name: "选择程序" }).click();
+      await expect(page.getByRole("heading", { name: "最近用过的" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "这台电脑上的程序" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "浏览…" })).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `wizard-apps-${theme}`);
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：合成电子样品");
+      await expect(page.getByText("认出了 3D 画面，里面有 2 个物体")).toBeVisible();
+      await expect(page.getByRole("img", { name: "程序画面" })).toBeVisible();
+      await shot(page, `wizard-connected-${theme}`);
+      await page.getByRole("button", { name: "已经开着的样品" }).click();
+      await expect(page.getByRole("status")).toHaveText("这个程序已经开着，需要由工作台重新打开它");
+      await expect(page.getByRole("button", { name: "关掉并重新打开" })).toBeVisible();
+      await shot(page, `wizard-busy-${theme}`);
+      await page.getByRole("button", { name: "关掉并重新打开" }).click();
+      await page.getByRole("dialog", { name: "确认重新打开" }).getByRole("button", { name: "关掉并重新打开" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：已经开着的样品");
+      await page.getByRole("button", { name: "记事本" }).click();
+      await expect(page.getByRole("status")).toHaveText("这个程序还不能自动测试。");
+      await page.getByLabel("浏览程序").setInputFiles({ name: "连不上的样品.exe", mimeType: "application/octet-stream", buffer: Buffer.from("x") });
+      await expect(page.getByRole("status")).toHaveText("连上用的时间太长了。");
+      await page.getByRole("button", { name: "再试一次" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：连不上的样品");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("link", { name: "去设置" }).click();
+      await expect(page.getByRole("heading", { name: "AI 设置" })).toBeVisible();
+      await expect(page.getByText("每天重跑不会再用 AI。").first()).toBeVisible();
+      await expect(page.getByLabel("密钥")).toHaveAttribute("type", "password");
+      await shot(page, `wizard-ai-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "1"));
+      await page.getByLabel("密钥").fill("sample-key-0001");
+      await page.getByRole("button", { name: "测试一下" }).click();
+      await expect(page.getByRole("status")).toHaveText("试过了。可以开始生成。");
+      await expect(page.getByRole("status")).not.toContainText("sample-key");
+      await page.getByRole("button", { name: "保存" }).click();
+      await expect(page.getByRole("heading", { name: "看它准备做什么" })).toBeVisible();
+    });
+
     test("wizard explains a failed check in plain words", async ({ page }) => {
       await page.addInitScript(() => sessionStorage.setItem("workbench.author.fake", "fail"));
       await page.goto("/plugin/runner");

@@ -45,6 +45,7 @@
   background: var(--surface-2);
 }
 .wizard-card label { display: grid; gap: 8px; width: 100%; color: var(--text-secondary); font-size: 12px; }
+.wizard-card label.btn { position: relative; display: inline-flex; width: auto; align-items: center; color: var(--text-primary); font-size: 14px; cursor: pointer; }
 .wizard-card input, .wizard-card textarea {
   min-height: 36px;
   border: 1px solid var(--border);
@@ -58,7 +59,51 @@
   font-size: 14px;
 }
 .wizard-card textarea { min-height: 72px; width: 100%; resize: vertical; }
-.file-input { width: auto; }
+.file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  border: 0;
+}
+.app-grid { display: grid; gap: 8px; width: 100%; margin: 0; padding: 0; list-style: none; }
+.app-grid button {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font: inherit;
+}
+.app-grid button.is-on { background: var(--accent); color: var(--accent-on); border-color: transparent; }
+.app-icon {
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 6px;
+  background: var(--surface-3);
+  font-size: 14px;
+}
+.app-grid button.is-on .app-icon { background: transparent; }
+.app-preview svg { width: 220px; height: 124px; display: block; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+.first-hint {
+  display: grid;
+  gap: 4px;
+  width: min(100%, 420px);
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+}
 .wizard-card a { margin-left: 8px; color: var(--accent); }
 .wizard-actions {
   display: flex;
