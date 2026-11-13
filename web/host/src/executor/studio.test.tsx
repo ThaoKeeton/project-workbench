@@ -26,6 +26,7 @@ describe("executor wizard", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio stepDelay={10000} />);
     expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
+    expect(screen.getByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeTruthy();
     expect(screen.getByRole("note", { name: "第一次使用" }).textContent).toContain("先选一个程序。");
     expect(screen.getByText("用一句话说明要检查什么。")).toBeTruthy();
     expect(screen.getByText("看它做一遍，对了再保存。")).toBeTruthy();
@@ -80,6 +81,7 @@ describe("executor wizard", () => {
     await openSample(user);
     await user.click(screen.getByRole("button", { name: "演示一遍" }));
     expect(await screen.findByRole("button", { name: "保存并设置每天重跑" })).toBeTruthy();
+    expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     expect(screen.getAllByText("通过").length).toBeGreaterThan(0);
     expect(screen.getByText("工件体积从 8 变成 4，小了 50%")).toBeTruthy();
     expect(screen.getByText("旁边的牙没有变化")).toBeTruthy();
@@ -157,6 +159,7 @@ describe("executor wizard", () => {
     await openSample(user);
     await user.click(screen.getByRole("button", { name: "演示一遍" }));
     expect(await screen.findByRole("button", { name: "重新演示" })).toBeTruthy();
+    expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
     expect(screen.getByText("画面上的文字不对。")).toBeTruthy();
     expect(screen.getByText("期望看到「不会出现」")).toBeTruthy();
@@ -179,6 +182,8 @@ describe("executor wizard", () => {
     expect(screen.getByText("需要先设置 AI 密钥")).toBeTruthy();
     expect(screen.getByRole("link", { name: "去设置" }).getAttribute("href")).toBe("/settings/ai?return=/plugin/runner");
     expect(screen.getByRole("img", { name: "停在这里" })).toBeTruthy();
+    expect(screen.getByText("停在这一步。这张画面只留在这台电脑上。")).toBeTruthy();
+    expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "用 AI 修一下" }));
     expect(screen.getByRole("status").textContent).toBe("第 2 步找不到「开始」按钮");
     await user.click(screen.getByRole("button", { name: "重新演示并更新" }));
@@ -332,6 +337,8 @@ describe("executor script", () => {
     expect(missedBecauseOff(new Date(2026, 10, 13, 3, 26, 0), "07:30", [1, 2, 3, 4, 5, 6, 7], noon)).toBe(true);
     expect(missedBecauseOff(new Date(2026, 10, 13, 8, 0, 0), "07:30", [1, 2, 3, 4, 5, 6, 7], noon)).toBe(false);
     expect(formatDailySummary({ ran: 8, passed: 7, failed: 1, needsUpdate: 0 })).toBe("今天跑了 8 个，7 个通过，1 个没通过");
+    expect(formatDailySummary({ ran: 8, passed: 7, failed: 0, needsUpdate: 1 })).toBe("今天跑了 8 个，7 个通过，1 个需要更新");
+    expect(formatDailySummary({ ran: 8, passed: 6, failed: 1, needsUpdate: 1 })).toBe("今天跑了 8 个，6 个通过，1 个没通过，1 个需要更新");
     expect(outcomeOf([{ ok: false, kind: "missing" }])).toBe("needs-update");
     expect(outcomeOf([{ ok: false }])).toBe("fail");
     expect(keepRecentImages(Array.from({ length: 31 }, () => ({ image: true }))).filter((item) => item.image)).toHaveLength(30);

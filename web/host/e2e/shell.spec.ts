@@ -289,6 +289,14 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.reload();
       await expect(page.getByRole("link", { name: /今天跑了 8 个，7 个通过，1 个没通过/ })).toBeVisible();
       await shot(page, `launcher-summary-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.summary", JSON.stringify({ ran: 8, passed: 7, failed: 0, needsUpdate: 1 })));
+      await page.reload();
+      await expect(page.getByRole("link", { name: "今天跑了 8 个，7 个通过，1 个需要更新" })).toBeVisible();
+      await shot(page, `launcher-summary-update-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.summary", JSON.stringify({ ran: 8, passed: 6, failed: 1, needsUpdate: 1 })));
+      await page.reload();
+      await expect(page.getByRole("link", { name: "今天跑了 8 个，6 个通过，1 个没通过，1 个需要更新" })).toBeVisible();
+      await shot(page, `launcher-summary-mixed-${theme}`);
       await page.evaluate(() => sessionStorage.setItem("workbench.author.samples", "1"));
       await page.getByRole("link", { name: /今天跑了 8 个/ }).click();
       await expect(page).toHaveURL(/filter=fail/);
@@ -306,6 +314,8 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByRole("status")).toHaveText("上次到点时电脑关着，刚补跑了一次。");
       await page.getByRole("button", { name: "现在跑一次" }).first().click();
       await expect(page.getByRole("status").first()).toHaveText("第 2 步找不到「开始」按钮");
+      await expect(page.getByText("停在这一步。这张画面只留在这台电脑上。")).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toHaveCount(0);
       await expect(page.getByText("需要更新", { exact: true }).first()).toBeVisible();
       await expect(page.getByText("找不到", { exact: true })).toBeVisible();
       await expect(page.getByRole("button", { name: "用 AI 修一下" })).toBeDisabled();

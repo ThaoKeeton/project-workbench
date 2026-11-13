@@ -198,7 +198,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       <header className="executor-head">
         <div>
           <h1>自动测试</h1>
-          <p>选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。</p>
+          {phase === "result" ? null : <p>选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。</p>}
         </div>
       </header>
       {phase === "home" ? (
@@ -799,7 +799,7 @@ function ResultFrames({ stuck }: { stuck: boolean }) {
             <rect className="frame-bg" width="320" height="200" />
             <rect className="stuck-target" x="70" y="78" width="180" height="44" rx="6" />
           </svg>
-          <figcaption>停在这一步。只留在这台电脑上。</figcaption>
+          <figcaption>停在这一步。这张画面只留在这台电脑上。</figcaption>
         </figure>
       </div>
     );

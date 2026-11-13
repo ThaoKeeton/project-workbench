@@ -14,6 +14,15 @@ public static class DailyRerun
 
     public static bool ShouldToast(string outcome) => outcome is "fail" or "needs-update";
 
+    /// <summary>A local recap names a failed check and a page that needs updating separately.</summary>
+    public static string Recap(int ran, int passed, int failed, int needsUpdate)
+    {
+        var text = $"今天跑了 {ran} 个，{passed} 个通过";
+        if (failed > 0) text += $"，{failed} 个没通过";
+        if (needsUpdate > 0) text += $"，{needsUpdate} 个需要更新";
+        return text;
+    }
+
     /// <summary>
     /// Per-user Startup folder. No administrator rights. Off deletes the file.
     /// </summary>

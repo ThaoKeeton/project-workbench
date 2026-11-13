@@ -16,6 +16,8 @@ public sealed class DailyRerunTests
         Assert.False(DailyRerun.ShouldToast("pass"));
         Assert.True(DailyRerun.ShouldToast("fail"));
         Assert.True(DailyRerun.ShouldToast("needs-update"));
+        Assert.Equal("今天跑了 8 个，7 个通过，1 个需要更新", DailyRerun.Recap(8, 7, 0, 1));
+        Assert.Equal("今天跑了 8 个，6 个通过，1 个没通过，1 个需要更新", DailyRerun.Recap(8, 6, 1, 1));
         Assert.False(DailyRerun.SetStartWithWindows(startup, app, false));
         Assert.False(File.Exists(Path.Combine(startup, DailyRerun.StartupFileName)));
         Assert.True(DailyRerun.SetStartWithWindows(startup, app, true));

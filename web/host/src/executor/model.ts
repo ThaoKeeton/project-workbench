@@ -233,7 +233,7 @@ export function missedBecauseOff(lastRun: Date, clock: string, weekdays: number[
 export function formatDailySummary(counts: { ran: number; passed: number; failed: number; needsUpdate: number }): string {
   const parts = [`今天跑了 ${counts.ran} 个`, `${counts.passed} 个通过`];
   if (counts.failed > 0) parts.push(`${counts.failed} 个没通过`);
-  if (counts.needsUpdate > 0) parts.push(`${counts.needsUpdate} 个要更新`);
+  if (counts.needsUpdate > 0) parts.push(`${counts.needsUpdate} 个需要更新`);
   return parts.join("，");
 }
 
