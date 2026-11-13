@@ -201,12 +201,59 @@ export function formatWhen(when: Date, now = new Date()): string {
   return `${when.getMonth() + 1}月${when.getDate()}日 ${time}`;
 }
 
-export function nextDailyInstant(clock: string, now = new Date()): Date {
+export const allWeekdays = [1, 2, 3, 4, 5, 6, 7];
+
+export function weekdayIndex(day: Date): number {
+  return day.getDay() === 0 ? 7 : day.getDay();
+}
+
+export function nextDailyInstant(clock: string, now = new Date(), weekdays: number[] = allWeekdays): Date {
   const [hour, minute] = clock.split(":").map((part) => Number(part));
   const next = new Date(now);
   next.setHours(hour || 0, minute || 0, 0, 0);
   if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+  const allowed = weekdays.length > 0 ? weekdays : allWeekdays;
+  for (let step = 0; step < 8; step += 1) {
+    if (allowed.includes(weekdayIndex(next))) return next;
+    next.setDate(next.getDate() + 1);
+  }
   return next;
+}
+
+/** A scheduled time passed while this computer was off, so the next start runs it once. */
+export function missedBecauseOff(lastRun: Date, clock: string, weekdays: number[], now: Date): boolean {
+  const [hour, minute] = clock.split(":").map((part) => Number(part));
+  const due = new Date(now);
+  due.setHours(hour || 0, minute || 0, 0, 0);
+  if (!weekdays.includes(weekdayIndex(now))) return false;
+  if (now.getTime() < due.getTime()) return false;
+  return lastRun.getTime() < due.getTime();
+}
+
+export function formatDailySummary(counts: { ran: number; passed: number; failed: number; needsUpdate: number }): string {
+  const parts = [`今天跑了 ${counts.ran} 个`, `${counts.passed} 个通过`];
+  if (counts.failed > 0) parts.push(`${counts.failed} 个没通过`);
+  if (counts.needsUpdate > 0) parts.push(`${counts.needsUpdate} 个要更新`);
+  return parts.join("，");
+}
+
+export type RunOutcome = "pass" | "fail" | "needs-update";
+export type RunRecord = { at: string; outcome: RunOutcome; reason: string; image: boolean };
+
+export function outcomeOf(findings: Array<{ ok: boolean; kind?: string }>): RunOutcome {
+  if (findings.some((item) => item.kind === "missing")) return "needs-update";
+  return findings.every((item) => item.ok) ? "pass" : "fail";
+}
+
+/** Images stay for the newest runs. Older pictures go; the result line stays. */
+export function keepRecentImages<T extends { image: boolean }>(records: T[], limit = 30): T[] {
+  const newestFirst = records.map((item, index) => ({ item, index })).reverse();
+  const kept = new Set(newestFirst.slice(0, limit).map((entry) => entry.index));
+  return records.map((item, index) => ({ ...item, image: item.image && kept.has(index) }));
+}
+
+export function shouldToast(outcome: RunOutcome): boolean {
+  return outcome !== "pass";
 }
 
 export type SavedTestRecord = {
@@ -219,6 +266,8 @@ export type SavedTestRecord = {
   script: string;
   appId: string;
   appName: string;
+  weekdays: number[];
+  history: RunRecord[];
 };
 
 /** A clock already reached today, so the next daily run is tomorrow. */
@@ -251,6 +300,12 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
     script: passed ? fixedReplayScript : failingReplayScript,
     appId: "sample",
     appName: sampleAppName,
+    weekdays: allWeekdays,
+    history: id === "cut" ? [
+      { at: last(3, 9, 0), outcome: "pass", reason: "通过", image: false },
+      { at: last(1, 9, 0), outcome: "needs-update", reason: "页面变了，需要更新这个测试", image: true },
+      { at: last(0, 3, 26), outcome: "pass", reason: "通过", image: true },
+    ] : [{ at: last(daysAgo, hour, minute), outcome: passed ? "pass" : "fail", reason: passed ? "通过" : "没通过", image: true }],
   }));
 }
 
@@ -354,11 +409,12 @@ export const compatiblePresets: Array<{ id: CompatiblePresetId; label: string; b
   { id: "custom", label: "自定义", base: "", model: "" },
 ];
 
-export function readAuthorFake(): "off" | "pass" | "fail" {
+export function readAuthorFake(): "off" | "pass" | "fail" | "changed" {
   try {
     const value = window.sessionStorage.getItem("workbench.author.fake");
     if (value === "1" || value === "pass") return "pass";
     if (value === "fail") return "fail";
+    if (value === "changed") return "changed";
   } catch {
     return "off";
   }
@@ -468,7 +524,11 @@ export function plainPlan(testCase: ExecutorCase): PlainPlan {
   return { does, checks };
 }
 
-export type Finding = { ok: boolean; sentence: string; expected?: string; seen?: string };
+export type Finding = { ok: boolean; sentence: string; expected?: string; seen?: string; kind?: "check" | "missing" };
+
+export function pageChangedFindings(): Finding[] {
+  return [{ ok: false, kind: "missing", sentence: "页面变了，需要更新这个测试" }];
+}
 
 /** Numbers come from the script that actually ran. */
 export function humanFindings(testCase: ExecutorCase, run: ExecutorRun): Finding[] {

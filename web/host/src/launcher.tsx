@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router-dom";
 import { devices, pinnedPlugins, recentPlugins, todayItems, type DeviceId, type IconName } from "./catalog";
+import { formatDailySummary } from "./executor/model";
 import { Icon } from "./icons";
 import { Keycap } from "./shell";
 
@@ -26,6 +27,7 @@ export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void
         <>
           <section className="column">
             <h2 className="section">今日</h2>
+            {dailySummary() ? <p className="sub" role="status">{dailySummary()}</p> : null}
             <ul className="today">
               {todayItems.map((item) => (
                 <li key={item.time}>
@@ -48,6 +50,18 @@ export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void
       )}
     </div>
   );
+}
+
+function dailySummary(): string | null {
+  try {
+    const raw = window.sessionStorage.getItem("workbench.author.summary");
+    if (!raw) return null;
+    const counts = JSON.parse(raw) as { ran?: number; passed?: number; failed?: number; needsUpdate?: number };
+    if (!Number.isFinite(counts.ran)) return null;
+    return formatDailySummary({ ran: counts.ran ?? 0, passed: counts.passed ?? 0, failed: counts.failed ?? 0, needsUpdate: counts.needsUpdate ?? 0 });
+  } catch {
+    return null;
+  }
 }
 
 function PluginTile({ id, name, hint, icon }: { id: string; name: string; hint: string; icon: IconName }) {

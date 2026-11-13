@@ -265,6 +265,57 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await shot(page, `wizard-ai-saved-${theme}`);
     });
 
+    test("schedule, missed start, a changed page, and past results", async ({ page }) => {
+      test.setTimeout(60_000);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.fake", "pass");
+        sessionStorage.setItem("workbench.author.pace", "0");
+      });
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "知道了" }).click();
+      await page.getByRole("button", { name: "选择程序" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await page.getByRole("button", { name: "保存并设置每天重跑" }).click();
+      await expect(page.getByText("到点时这台电脑要开着，工作台也要开着。")).toBeVisible();
+      await expect(page.getByRole("button", { name: "周一" })).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByRole("button", { name: "开机时自动启动工作台：关" })).toBeVisible();
+      await shot(page, `wizard-schedule-days-${theme}`);
+      await page.goto("/");
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.summary", JSON.stringify({ ran: 8, passed: 7, failed: 1, needsUpdate: 0 })));
+      await page.reload();
+      await expect(page.getByRole("status")).toHaveText("今天跑了 8 个，7 个通过，1 个没通过");
+      await shot(page, `launcher-summary-${theme}`);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.samples", "1");
+        sessionStorage.setItem("workbench.author.fake", "changed");
+        sessionStorage.setItem("workbench.author.boot", "1");
+        sessionStorage.setItem("workbench.author.now", "2026-11-13T12:00:00");
+      });
+      await page.goto("/plugin/runner");
+      await expect(page.getByRole("status")).toHaveText("上次到点时电脑关着，刚补跑了一次。");
+      await page.getByRole("button", { name: "现在跑一次" }).first().click();
+      await expect(page.getByRole("status").first()).toHaveText("页面变了，需要更新这个测试");
+      await expect(page.getByRole("button", { name: "用 AI 修一下" })).toBeVisible();
+      await page.getByRole("button", { name: "用 AI 修一下" }).click();
+      await expect(page.getByText("需要先设置 AI 密钥")).toBeVisible();
+      await shot(page, `wizard-stale-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "pass"));
+      await page.getByRole("button", { name: "用 AI 修一下" }).click();
+      await expect(page.getByText("这是建议的修改，还没保存。")).toBeVisible();
+      await page.goto("/plugin/runner");
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "off"));
+      await page.locator(".row-open", { hasText: "切削后体积减小" }).click();
+      await expect(page.getByRole("list", { name: "以前的结果" })).toBeVisible();
+      await expect(page.getByText("前后画面只留最近 30 次")).toBeVisible();
+      await page.getByRole("button", { name: /页面变了，需要更新这个测试/ }).click();
+      await expect(page.getByRole("status").first()).toHaveText("页面变了，需要更新这个测试");
+      await shot(page, `wizard-history-${theme}`);
+    });
+
     test("wizard explains a failed check in plain words", async ({ page }) => {
       await page.addInitScript(() => sessionStorage.setItem("workbench.author.fake", "fail"));
       await page.goto("/plugin/runner");

@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatWhen, hintDismissedKey, humanFindings, mismatch, nextDailyInstant, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, writeAiSettings, writeDailyCap } from "./model";
+import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatDailySummary, formatWhen, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, writeAiSettings, writeDailyCap } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => {
@@ -95,7 +95,7 @@ describe("executor wizard", () => {
     expect(screen.getByText("通过")).toBeTruthy();
     expect(screen.getByText(/下次 (今天|明天) 07:30/)).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "现在跑一次" }));
-    expect(await screen.findByText("已重新打开「合成电子样品」。")).toBeTruthy();
+    expect(await screen.findByText("已重新打开「合成电子样品」，跑完后已关掉。")).toBeTruthy();
   });
 
   it("explains an open app, a non-electron app, and a slow connection", async () => {
@@ -253,6 +253,16 @@ describe("executor script", () => {
     const older = new Date(2026, 10, 12, 3, 26, 0);
     expect(formatWhen(older, now)).toMatch(/^11月12日 /);
     expect(nextDailyInstant("07:30", now).getDate()).toBe(13);
+    expect(nextDailyInstant("07:30", now, [1]).getDay()).not.toBe(5);
+    const noon = new Date(2026, 10, 13, 12, 0, 0);
+    expect(missedBecauseOff(new Date(2026, 10, 13, 3, 26, 0), "07:30", [1, 2, 3, 4, 5, 6, 7], noon)).toBe(true);
+    expect(missedBecauseOff(new Date(2026, 10, 13, 8, 0, 0), "07:30", [1, 2, 3, 4, 5, 6, 7], noon)).toBe(false);
+    expect(formatDailySummary({ ran: 8, passed: 7, failed: 1, needsUpdate: 0 })).toBe("今天跑了 8 个，7 个通过，1 个没通过");
+    expect(outcomeOf([{ ok: false, kind: "missing" }])).toBe("needs-update");
+    expect(outcomeOf([{ ok: false }])).toBe("fail");
+    expect(keepRecentImages(Array.from({ length: 31 }, () => ({ image: true }))).filter((item) => item.image)).toHaveLength(30);
+    expect(shouldToast("pass")).toBe(false);
+    expect(shouldToast("needs-update")).toBe(true);
     expect(sampleLibrary(now)).toHaveLength(8);
     expect(sampleLibrary(now).some((item) => !item.passed)).toBe(true);
   });

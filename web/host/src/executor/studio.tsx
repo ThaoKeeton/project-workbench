@@ -9,10 +9,14 @@ import {
   dismissHint,
   failingReplayScript,
   fixedReplayScript,
+  allWeekdays,
   formatWhen,
   hintDismissed,
   humanFindings,
+  missedBecauseOff,
   nextDailyInstant,
+  outcomeOf,
+  pageChangedFindings,
   plainPlan,
   readAuthorFake,
   readDailyCap,
@@ -27,6 +31,7 @@ import {
   type ExecutorCase,
   type ExecutorRun,
   type Finding,
+  type RunRecord,
   type SavedTestRecord,
   type TestApp,
 } from "./model";
@@ -60,8 +65,13 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [opened, setOpened] = useState<SavedTest | null>(null);
   const [relaunchNote, setRelaunchNote] = useState("");
   const [dailyAt, setDailyAt] = useState("09:00");
+  const [weekdays, setWeekdays] = useState<number[]>(allWeekdays);
+  const [autostart, setAutostart] = useState(readAutostart);
+  const [missedNote, setMissedNote] = useState("");
+  const [repairNote, setRepairNote] = useState("");
   const [scheduled, setScheduled] = useState(false);
-  const keyReady = Boolean(complete) || readAuthorFake() !== "off";
+  const fakeMode = readAuthorFake();
+  const keyReady = Boolean(complete) || fakeMode === "pass" || fakeMode === "fail";
   const connection = connectApp(picked, { attempt, relaunch });
   const pace = readPace(stepDelay);
   const left = Math.max(0, cap - spent);
@@ -69,6 +79,13 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   useEffect(() => {
     rememberWizard(stepIndex, picked?.id ?? "", goal);
   }, [stepIndex, picked, goal]);
+
+  useEffect(() => {
+    if (!readBoot()) return;
+    const now = readClock();
+    const due = library.some((item) => !item.paused && missedBecauseOff(new Date(item.lastRun), item.dailyAt, item.weekdays ?? allWeekdays, now));
+    if (due) setMissedNote("上次到点时电脑关着，刚补跑了一次。");
+  }, [library]);
 
   useEffect(() => {
     if (phase !== "demo" || stopped || !demo) return;
@@ -97,10 +114,10 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
     }
   };
 
-  const draftCase = async (note = correction) => {
+  const draftCase = async (note = correction, goalText = goal) => {
     setDraft(null);
     setDemo(null);
-    if (goal.trim().length === 0) {
+    if (goalText.trim().length === 0) {
       setNotice(authorMessages.empty);
       return;
     }
@@ -109,7 +126,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       setNotice(authorMessages.overBudget);
       return;
     }
-    const prompt = authorPrompt([goal, note].filter((part) => part.trim()).join("\n"), sampleDom, sceneSnapshotText);
+    const prompt = authorPrompt([goalText, note].filter((part) => part.trim()).join("\n"), sampleDom, sceneSnapshotText);
     const result = complete ? await complete(prompt) : { text: readAuthorFake() === "fail" ? failingReplayScript : fixedReplayScript, cost: 0 };
     setSpent((value) => value + result.cost);
     const authored = caseFromScript(result.text);
@@ -143,6 +160,8 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       script: draft.script ?? "",
       appId: picked?.id ?? "sample",
       appName: picked?.name ?? sampleAppName,
+      weekdays,
+      history: [{ at: new Date().toISOString(), outcome: demo.passed ? "pass" : "fail", reason: demo.passed ? "通过" : "没通过", image: true }],
     }, ...library.filter((item) => item.id !== draft.id)]);
     setScheduled(false);
     setStepIndex(3);
@@ -152,13 +171,21 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const openSaved = (item: SavedTest, rerun: boolean) => {
     const saved = caseFromScript(item.script);
     if (!saved) return;
+    const changed = readAuthorFake() === "changed";
     const result = replay(saved, sampleDom);
-    const next = rerun ? { ...item, passed: result.passed, lastRun: new Date().toISOString() } : item;
+    const findingsForRun = changed ? pageChangedFindings() : humanFindings(saved, result);
+    const outcome = changed ? "needs-update" as const : outcomeOf(findingsForRun);
+    const next = rerun ? {
+      ...item,
+      passed: outcome === "pass",
+      lastRun: new Date().toISOString(),
+      history: [...(item.history ?? []), { at: new Date().toISOString(), outcome, reason: findingsForRun[0]?.sentence ?? "", image: true }],
+    } : item;
     if (rerun) setLibrary((items) => items.map((entry) => entry.id === item.id ? next : entry));
-    setRelaunchNote(rerun ? `已重新打开「${item.appName || sampleAppName}」。` : "");
+    setRelaunchNote(rerun ? `已重新打开「${item.appName || sampleAppName}」，跑完后已关掉。` : "");
     setDraft(saved);
-    setDemo(result);
-    setFindings(humanFindings(saved, result));
+    setDemo(changed ? { ...result, passed: false } : result);
+    setFindings(rerun ? findingsForRun : humanFindings(saved, result));
     setOpened(next);
     setPhase("result");
   };
@@ -174,6 +201,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       {phase === "home" ? (
         <Home
           library={library}
+          missedNote={missedNote}
           onNew={() => { setOpened(null); setStepIndex(0); setPhase("wizard"); }}
           onOpen={(item) => openSaved(item, false)}
           onRun={(item) => openSaved(item, true)}
@@ -211,7 +239,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               left={left}
               keyReady={keyReady}
               draft={draft}
-              notice={notice}
+              notice={repairNote || notice}
               correction={correction}
               onCorrection={setCorrection}
               onRetry={() => void draftCase(correction)}
@@ -221,9 +249,9 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
             />
           ) : null}
           {stepIndex === 3 ? (
-            <ScheduleStep dailyAt={dailyAt} scheduled={scheduled} onTime={setDailyAt} onSave={() => {
+            <ScheduleStep dailyAt={dailyAt} weekdays={weekdays} autostart={autostart} scheduled={scheduled} onTime={setDailyAt} onWeekdays={setWeekdays} onAutostart={(value) => { setAutostart(value); writeAutostart(value); }} onSave={() => {
               setScheduled(true);
-              setLibrary((items) => items.map((item, index) => index === 0 ? { ...item, dailyAt } : item));
+              setLibrary((items) => items.map((item, index) => index === 0 ? { ...item, dailyAt, weekdays } : item));
             }} onHome={() => setPhase("home")} />
           ) : null}
         </div>
@@ -238,6 +266,16 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
           onSave={opened ? () => setPhase("home") : saveAndSchedule}
           saveLabel={opened ? "返回首页" : "保存并设置每天重跑"}
           note={relaunchNote}
+          history={opened?.history ?? []}
+          keyReady={keyReady}
+          canRepair={left > 0}
+          onRepair={() => { const text = goal || draft.name; setRepairNote("这是建议的修改，还没保存。"); setGoal(text); setStepIndex(2); setPhase("wizard"); void draftCase("", text); }}
+          onClearImages={() => {
+            if (!opened) return;
+            const history = (opened.history ?? []).map((entry) => ({ ...entry, image: false }));
+            setOpened({ ...opened, history });
+            setLibrary((items) => items.map((item) => item.id === opened.id ? { ...item, history } : item));
+          }}
           onAgain={opened ? () => openSaved(opened, true) : showDemo}
           onEdit={() => { setOpened(null); setPhase("wizard"); setStepIndex(2); }}
         />
@@ -264,6 +302,39 @@ function readSamples(): boolean {
   }
 }
 
+function readClock(): Date {
+  try {
+    const raw = window.sessionStorage.getItem("workbench.author.now");
+    if (raw) {
+      const date = new Date(raw);
+      if (!Number.isNaN(date.getTime())) return date;
+    }
+  } catch {
+    return new Date();
+  }
+  return new Date();
+}
+
+function readBoot(): boolean {
+  try {
+    return window.sessionStorage.getItem("workbench.author.boot") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function readAutostart(): boolean {
+  try {
+    return window.localStorage.getItem("workbench.author.autostart") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function writeAutostart(enabled: boolean) {
+  window.localStorage.setItem("workbench.author.autostart", enabled ? "1" : "0");
+}
+
 function readWizardDraft(): { resume: boolean; step: number; appId: string; goal: string } {
   try {
     const resume = window.sessionStorage.getItem("workbench.wizard.resume") === "1";
@@ -287,8 +358,9 @@ function rememberWizard(step: number, appId: string, goal: string) {
   }
 }
 
-function Home({ library, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
+function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
   library: SavedTest[];
+  missedNote: string;
   onNew: () => void;
   onOpen: (item: SavedTest) => void;
   onRun: (item: SavedTest) => void;
@@ -334,9 +406,10 @@ function Home({ library, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
           ))}
         </div>
       ) : null}
+      {missedNote ? <p role="status">{missedNote}</p> : null}
       <ul className="saved-list">
         {visible.map((item) => {
-          const next = item.paused ? "每天重跑已暂停" : `下次 ${formatWhen(nextDailyInstant(item.dailyAt))}`;
+          const next = item.paused ? "每天重跑已暂停" : `下次 ${formatWhen(nextDailyInstant(item.dailyAt, readClock(), item.weekdays ?? allWeekdays), readClock())}`;
           return (
             <li key={item.id} className={item.passed ? "" : "is-fail"}>
               <button type="button" className="row-open" onClick={() => onOpen(item)}>
@@ -553,17 +626,31 @@ function DemoRun({ findings, shown, stopped, onStop, onBack }: {
   );
 }
 
-function ScheduleStep({ dailyAt, scheduled, onTime, onSave, onHome }: {
-  dailyAt: string; scheduled: boolean; onTime: (value: string) => void; onSave: () => void; onHome: () => void;
+const weekdayLabels: Array<[number, string]> = [[1, "周一"], [2, "周二"], [3, "周三"], [4, "周四"], [5, "周五"], [6, "周六"], [7, "周日"]];
+
+function ScheduleStep({ dailyAt, weekdays, autostart, scheduled, onTime, onWeekdays, onAutostart, onSave, onHome }: {
+  dailyAt: string; weekdays: number[]; autostart: boolean; scheduled: boolean;
+  onTime: (value: string) => void; onWeekdays: (value: number[]) => void; onAutostart: (value: boolean) => void;
+  onSave: () => void; onHome: () => void;
 }) {
+  const toggleDay = (day: number) => {
+    const next = weekdays.includes(day) ? weekdays.filter((item) => item !== day) : [...weekdays, day];
+    onWeekdays(next.length > 0 ? next : [day]);
+  };
   return (
     <div className="wizard-card" aria-label="每天重跑">
       <h2>每天自动再跑一遍</h2>
-      <p>到点只重跑这一份，不会再问。</p>
+      <p>到点只重跑这一份，不会再问。到点时这台电脑要开着，工作台也要开着。关着就不会跑。</p>
       <label>
         每天重跑的时间
         <input aria-label="每天重跑的时间" type="time" value={dailyAt} onChange={(event) => onTime(event.target.value)} />
       </label>
+      <div className="filter-row" role="group" aria-label="哪些天重跑">
+        {weekdayLabels.map(([day, label]) => (
+          <button key={day} type="button" className={weekdays.includes(day) ? "is-on" : ""} aria-pressed={weekdays.includes(day)} onClick={() => toggleDay(day)}>{label}</button>
+        ))}
+      </div>
+      <button type="button" className="btn" aria-pressed={autostart} onClick={() => onAutostart(!autostart)}>{autostart ? "开机时自动启动工作台：开" : "开机时自动启动工作台：关"}</button>
       <div className="wizard-actions">
         <button type="button" className="btn" onClick={onHome}>回到首页</button>
         <button type="button" className="btn-accent" onClick={onSave}>保存安排</button>
@@ -573,13 +660,30 @@ function ScheduleStep({ dailyAt, scheduled, onTime, onSave, onHome }: {
   );
 }
 
-function ResultPage({ passed, findings, onSave, saveLabel, onAgain, onEdit, note }: {
+function ResultPage({ passed, findings, onSave, saveLabel, onAgain, onEdit, note, history, keyReady, canRepair, onRepair, onClearImages }: {
   passed: boolean; findings: Finding[]; onSave: () => void; saveLabel: string; onAgain: () => void; onEdit: () => void; note?: string;
+  history: RunRecord[]; keyReady: boolean; canRepair: boolean; onRepair: () => void; onClearImages: () => void;
 }) {
+  const [picked, setPicked] = useState<RunRecord | null>(null);
+  const [repairHint, setRepairHint] = useState("");
+  const outcome = picked?.outcome ?? outcomeOf(findings);
+  const headline = outcome === "pass" ? "通过" : outcome === "needs-update" ? "页面变了，需要更新这个测试" : "没通过";
+  const repair = () => {
+    const ready = keyReady || readAuthorFake() === "pass" || readAuthorFake() === "fail";
+    if (!ready) {
+      setRepairHint("需要先设置 AI 密钥");
+      return;
+    }
+    if (!canRepair) {
+      setRepairHint("今天已经问得够多了。先用保存好的检查，或把每天的次数调大。");
+      return;
+    }
+    onRepair();
+  };
   return (
     <div className="wizard-card result-page" aria-label="结果">
-      <p className={passed ? "result-mark pass" : "result-mark fail"}>{passed ? "通过" : "没通过"}</p>
-      <p role="status">{resultSentence(passed)}</p>
+      <p className={outcome === "pass" ? "result-mark pass" : "result-mark fail"}>{headline}</p>
+      <p role="status">{outcome === "needs-update" ? "页面变了，需要更新这个测试" : resultSentence(outcome === "pass")}</p>
       {note ? <p>{note}</p> : null}
       <div className="frames" aria-label="前后画面">
         <figure>
@@ -612,13 +716,31 @@ function ResultPage({ passed, findings, onSave, saveLabel, onAgain, onEdit, note
         <summary>详情</summary>
         <pre>{findings.map((item) => `${item.ok ? "ok" : "bad"} ${item.sentence}`).join("\n")}</pre>
       </details>
+      {history.length > 0 ? (
+        <div>
+          <h3>以前的结果</h3>
+          <p className="tiny">前后画面只留最近 30 次，免得占太多磁盘。</p>
+          <ol className="timeline" aria-label="以前的结果">
+            {history.map((entry) => (
+              <li key={entry.at + entry.outcome}>
+                <button type="button" onClick={() => setPicked(entry)}>
+                  {formatWhen(new Date(entry.at), readClock())} {entry.outcome === "pass" ? "通过" : entry.outcome === "fail" ? "没通过" : "页面变了，需要更新这个测试"}
+                </button>
+              </li>
+            ))}
+          </ol>
+          <button type="button" className="btn" onClick={onClearImages}>清理</button>
+        </div>
+      ) : null}
+      {repairHint ? <p role="status">{repairHint}{repairHint.startsWith("需要先设置") ? <a href="/settings/ai?return=/plugin/runner">去设置</a> : null}</p> : null}
       <div className="wizard-actions">
-        {passed ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : (
+        {outcome === "needs-update" ? <button type="button" className="btn-accent" onClick={repair}>用 AI 修一下</button> : null}
+        {outcome === "pass" ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : outcome === "fail" ? (
           <>
             <button type="button" className="btn" onClick={onEdit}>修改检查</button>
             <button type="button" className="btn-accent" onClick={onAgain}>重新演示</button>
           </>
-        )}
+        ) : null}
       </div>
     </div>
   );

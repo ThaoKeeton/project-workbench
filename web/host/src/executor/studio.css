@@ -159,6 +159,8 @@
   font: inherit;
 }
 .saved-list .is-fail .result-label { color: var(--danger); font-weight: 500; }
+.timeline { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
+.timeline button { width: auto; min-height: 36px; padding: 0 12px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--text-primary); font: inherit; text-align: left; }
 .filter-row { display: flex; gap: 8px; }
 .filter-row button {
   width: auto;
