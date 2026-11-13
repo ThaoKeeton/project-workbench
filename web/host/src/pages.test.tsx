@@ -44,7 +44,7 @@ describe("launcher pages", () => {
     render(<MemoryRouter><HomePage onOpenPalette={vi.fn()} /></MemoryRouter>);
     expect(screen.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeTruthy();
     expect(screen.getByText("合成检查 6 / 6 通过，不替代人工验收")).toBeTruthy();
-    expect(screen.getByRole("button", { name: /自动化测试执行器/ })).toBeTruthy();
+    expect(screen.getByRole("button", { name: /自动测试/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /UPCAM 站会日报/ }));
   });
 
@@ -115,7 +115,7 @@ describe("launcher pages", () => {
     expect(screen.getByRole("heading", { name: "需要先设置 AI 密钥" })).toBeTruthy();
     cleanup();
     render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "还没有开始" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "选择程序" }));
     await user.click(screen.getByRole("button", { name: "合成电子样品" }));
     expect(screen.getByRole("status").textContent).toContain("已连接");

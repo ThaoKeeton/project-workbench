@@ -7,6 +7,7 @@ import { DingPanel } from "../../../plugins/v2/Workbench.DingTalkInsights.V2/ui/
 import { TestCasesPanel } from "../../../plugins/v2/Workbench.TestCases.V2/ui/TestCasesPanel";
 import { TestingPanel } from "../../../plugins/v2/Workbench.TestingDesign.V2/ui/TestingPanel";
 import { UpcamPanel } from "../../../plugins/v2/Workbench.UpcamStandup.V2/ui/UpcamPanel";
+import { readDailyCap, writeDailyCap } from "./executor/model";
 import { ExecutorStudio } from "./executor/studio";
 
 const tabs: PluginId[] = ["upcam", "ding", "test", "runner"];
@@ -309,6 +310,19 @@ export function SettingsPage({
           </label>
         ))}
       </fieldset>
+      <h2>自动测试</h2>
+      <label className="setting-cap">
+        每天最多生成几次
+        <input
+          aria-label="每天最多生成几次"
+          type="number"
+          min={0}
+          max={100}
+          defaultValue={readDailyCap()}
+          onChange={(event) => writeDailyCap(Number(event.target.value))}
+        />
+      </label>
+      <p className="sub">到次数就不再生成。已经保存的测试照常重跑。这里不写金额。</p>
       <h2>通用</h2>
       <ul className="status-rows">
         <li>

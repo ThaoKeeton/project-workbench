@@ -155,6 +155,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 }
 .column { width: min(720px, 100%); }
 .greet .date, .section, .sub, .crumb { color: var(--text-muted); }
+.setting-cap { display: grid; gap: 8px; max-width: 240px; margin: 12px 0; color: var(--text-secondary); font-size: 12px; }
+.setting-cap input { min-height: 36px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-1); color: var(--text-primary); padding: 8px 12px; font: inherit; }
 .greet h1, .page h1, .doc h1, .empty-block h1, .crash h1, .offline h1, .pairing h1 { margin: 0; font-size: 28px; font-weight: 500; letter-spacing: -0.02em; }
 .command-bar, .palette-input {
   width: min(720px, 100%);

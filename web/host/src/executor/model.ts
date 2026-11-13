@@ -172,6 +172,24 @@ export const authorMessages = {
 } as const;
 
 export const sampleAppName = "合成电子样品";
+export const capStorageKey = "workbench.author.cap";
+
+export function readDailyCap(): number {
+  try {
+    const raw = localStorage.getItem(capStorageKey);
+    if (raw === null || raw === "") return 20;
+    const value = Number(raw);
+    if (Number.isFinite(value) && value >= 0 && value <= 100) return value;
+  } catch {
+    return 20;
+  }
+  return 20;
+}
+
+export function writeDailyCap(value: number) {
+  const next = Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 20;
+  localStorage.setItem(capStorageKey, String(next));
+}
 
 export type ConnectResult = { ok: boolean; status: string; hint: string };
 
@@ -200,7 +218,68 @@ export function describeStep(item: ExecutorStep): { will: string; check: string 
 }
 
 export function resultSentence(passed: boolean): string {
-  return passed ? "做完了你说的检查，结果和预期一致。" : "这一遍没有达到你说的结果。可以再演示一遍，或改一句说明。";
+  return passed ? "做完了你说的检查，结果和预期一致。" : "有一项没有达到预期。";
+}
+
+export type PlainPlan = { does: string[]; checks: string[] };
+
+/** Short lists a tester can read. Mechanical repeats stay out. */
+export function plainPlan(testCase: ExecutorCase): PlainPlan {
+  const does: string[] = [];
+  const checks: string[] = [];
+  const push = (list: string[], line: string) => {
+    if (list.length < 4 && !list.includes(line)) list.push(line);
+  };
+  for (const item of testCase.steps) {
+    if (item.action === "click") push(does, `点击「${item.text || "按钮"}」`);
+    if (item.action === "drag-path") push(does, "沿着路径切一刀");
+    if (item.action === "wait-for" && does.length === 0) push(does, `等到出现「${item.text || "开始"}」`);
+    if (item.action === "assert-text" && item.expected) push(checks, `画面显示「${item.expected}」`);
+    if (item.action === "drag-path") push(checks, "工件变小");
+    if (item.action === "assert-mesh" && item.text.includes("sphere")) push(checks, "旁边的牙保持原样");
+    if (item.action === "diff-scene") push(checks, "只有工件变了");
+  }
+  if (does.length === 0) does.push("按你说的做一遍");
+  if (checks.length === 0) checks.push("结果和你说的一致");
+  return { does, checks };
+}
+
+export type Finding = { ok: boolean; sentence: string; expected?: string; seen?: string };
+
+/** Numbers come from the script that actually ran. */
+export function humanFindings(testCase: ExecutorCase, run: ExecutorRun): Finding[] {
+  const findings: Finding[] = [];
+  const text = testCase.steps.find((item) => item.action === "assert-text");
+  const textResult = run.steps.find((item) => item.id === text?.id);
+  if (text && textResult) {
+    if (textResult.status === "passed") findings.push({ ok: true, sentence: `画面显示「${text.expected}」` });
+    else findings.push({
+      ok: false,
+      sentence: "画面上的文字不对。",
+      expected: `期望看到「${text.expected}」`,
+      seen: `实际看到「${textResult.detail || "别的内容"}」`,
+    });
+  }
+  const before = testCase.steps.find((item) => item.action === "assert-mesh" && item.text === "stock.volume");
+  const cut = testCase.steps.find((item) => item.action === "drag-path");
+  if (before && cut) {
+    const from = Number(before.expected);
+    const to = Number(cut.expected);
+    const cutResult = run.steps.find((item) => item.id === cut.id);
+    const ok = cutResult?.status !== "failed";
+    const pct = from > 0 ? Math.round(((from - to) / from) * 100) : 0;
+    findings.push({
+      ok,
+      sentence: ok ? `工件体积从 ${from} 变成 ${to}，小了 ${pct}%` : `工件体积没有变成 ${to}。`,
+      expected: ok ? undefined : `期望变成 ${to}`,
+      seen: ok ? undefined : `实际仍是 ${from}`,
+    });
+  }
+  if (testCase.steps.some((item) => item.action === "assert-mesh" && item.text.includes("sphere"))) {
+    findings.push({ ok: true, sentence: "旁边的牙没有变化" });
+  }
+  if (findings.length === 0) findings.push({ ok: run.passed, sentence: resultSentence(run.passed) });
+  return findings.slice(0, 4);
 }
 
 export function authorPrompt(goal: string, dom: string, scene: string): string {
@@ -231,6 +310,11 @@ export const fixedReplayScript = [
   '{"id":"cut-drag","type":"scene3d","action":"drag","target":{"selector":"#view","object":"stock"},"input":"world-path:0,2,0;0.4,2,0","expected":"mesh.stock.volume=4±0.3;mesh.sphere.vertexCount=117","allowFallback":false},',
   '{"id":"cut-diff","type":"scene3d","action":"diff","target":{"selector":"#view"},"expected":"counts.deformed=1±0;counts.moved=0±0","allowFallback":false}]}',
 ].join("");
+
+export const failingReplayScript = fixedReplayScript.replace(
+  '{"id":"status","type":"web","action":"assert-text","target":{"selector":"#status"},"expected":"已开始"',
+  '{"id":"status","type":"web","action":"assert-text","target":{"selector":"#status"},"expected":"不会出现"',
+);
 
 const scriptActions = new Set([
   "click", "type", "set-value", "invoke", "expand", "wait-for", "read", "assert-text", "assert-visible", "assert-network",

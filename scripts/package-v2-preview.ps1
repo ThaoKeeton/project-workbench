@@ -133,7 +133,7 @@ $readme = @"
 2. 双击 ProjectWorkbench.exe。
 3. 草稿和插件数据只写在 %LOCALAPPDATA%\ProjectWorkbench-v2-preview。
    不会写入 %LOCALAPPDATA%\ProjectWorkbench。
-4. 启动器里可以打开 UPCAM 站会日报、钉钉 Insights、测试设计，以及自动化测试执行器（含 3D 场景识别和路径切削）。
+4. 启动器里可以打开 UPCAM 站会日报、钉钉 Insights、测试设计，以及自动测试。
 5. 窗口标题是「项目工作台」。最小宽度 1100，最小高度 640。
 6. 用 --allow-lan 启动会直接退出。服务只听 127.0.0.1。
 7. 钉钉 Insights 的「发送已关闭」按钮不能发送。autoSend 保持关闭。
