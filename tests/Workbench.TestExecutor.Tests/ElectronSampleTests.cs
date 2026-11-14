@@ -42,7 +42,7 @@ public sealed class ElectronSampleTests
     [Fact]
     public void Web_steps_wait_long_enough_for_a_blocked_renderer()
     {
-        var suite = new SuiteLoader().Load("""
+        var suite = SuiteLoader.Load("""
             {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"blocked","name":"阻塞","popupSelector":".ant-modal","cases":[{"id":"CASE-1","name":"等待","steps":[{"id":"wait","type":"web","action":"wait-for","target":{"selector":"#status"}},{"id":"orbit","type":"scene3d","action":"orbit","target":{"selector":"#view","object":"cube"}}]}]}
             """);
         Assert.Equal(".ant-modal", suite.PopupSelector);
@@ -50,13 +50,13 @@ public sealed class ElectronSampleTests
         Assert.Equal(StepKind.Scene3d, suite.Cases[0].Steps[1].Kind);
         Assert.Equal("cube", suite.Cases[0].Steps[1].Target!.ObjectName);
         Assert.Equal(ExecutorSchemas.RendererBlockSeconds, suite.Cases[0].Steps[1].TimeoutSeconds);
-        Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load("""
+        Assert.Throws<ExecutorDataException>(() => SuiteLoader.Load("""
             {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"bad","name":"坏","cases":[{"id":"c","name":"n","steps":[{"id":"s","type":"scene3d","action":"click","target":{"selector":"#view"}}]}]}
             """));
-        Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load("""
+        Assert.Throws<ExecutorDataException>(() => SuiteLoader.Load("""
             {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"bad2","name":"坏","cases":[{"id":"c","name":"n","steps":[{"id":"s","type":"web","action":"switch-window"}]}]}
             """));
-        Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load("""
+        Assert.Throws<ExecutorDataException>(() => SuiteLoader.Load("""
             {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"bad3","name":"坏","cases":[{"id":"c","name":"n","steps":[{"id":"s","type":"scene3d","action":"orbit","tolerance":-1,"target":{"object":"cube"}}]}]}
             """));
     }
@@ -169,7 +169,7 @@ public sealed class ElectronSampleTests
 
     private static async Task RunSampleAsync(ApplicationTarget application)
     {
-        var loaded = new SuiteLoader().Load(File.ReadAllText(Path.Combine(FixtureDirectory(), "suite.json")));
+        var loaded = SuiteLoader.Load(File.ReadAllText(Path.Combine(FixtureDirectory(), "suite.json")));
         var suite = loaded with { Application = application };
         var root = Fixtures.Temp();
         var reports = Path.Combine(root, "reports");

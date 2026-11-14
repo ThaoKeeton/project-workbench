@@ -12,7 +12,7 @@ public sealed class SuiteLoader
 
     public static string SchemaText { get; } = ReadResource("Workbench.TestExecutor.suite.v2.schema.json");
 
-    public TestSuite Load(string text)
+    public static TestSuite Load(string text)
     {
         if (string.IsNullOrWhiteSpace(text) || text.Length > MaxDocumentBytes)
             throw new ExecutorDataException(ExecutorError.InvalidSuite);
@@ -38,7 +38,7 @@ public sealed class SuiteLoader
         return Normalize(dto);
     }
 
-    public TestSuite LoadBuiltin() => Load(ReadResource("Workbench.TestExecutor.synthetic-suite.json"));
+    public static TestSuite LoadBuiltin() => Load(ReadResource("Workbench.TestExecutor.synthetic-suite.json"));
 
     private static bool LooksLikeJson(string text)
     {

@@ -59,7 +59,7 @@ public sealed class DingTalkInsightsModule : IWorkbenchPluginModule
         return PluginResponses.Ok(Validate(document));
     }
 
-    private async Task<PluginModuleResponse> ImportAsync(PluginModuleRequest request, string source, CancellationToken cancellationToken)
+    private static async Task<PluginModuleResponse> ImportAsync(PluginModuleRequest request, string source, CancellationToken cancellationToken)
     {
         RequireData(request.GrantedPermissions);
         var text = source == "synthetic-sample" ? SampleText() : ReadText(request.JsonBody);

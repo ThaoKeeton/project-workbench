@@ -129,7 +129,7 @@ public sealed partial class SuiteRunner
             if (after is not null) masked = after;
             if (!last.Succeeded) continue;
             Publish(sink, request, suite, testCase, step, "passed", "flaui", null, attempt, false, "passed");
-            await _deps.Artifacts.WriteEvidenceAsync(request.ReportDirectory, testCase.Id, step.Id, "passed", "flaui", log, masked, cancellationToken);
+            await RunArtifactStore.WriteEvidenceAsync(request.ReportDirectory, testCase.Id, step.Id, "passed", "flaui", log, masked, cancellationToken);
             return StepOutcome.Pass(masked);
         }
         if (last.FallbackEligible && step.AllowFallback && testCase.AllowFallback && request.Policy.CanUseComputer)
@@ -231,7 +231,7 @@ public sealed partial class SuiteRunner
                 {
                     await _deps.Originals.SaveAsync(png, cancellationToken);
                     var rectangles = suite.Masks.OfType<RectangleMask>().Select(mask => new PixelRect(mask.X, mask.Y, mask.Width, mask.Height)).ToArray();
-                    return _deps.Masker.Apply(png, rectangles);
+                    return ScreenshotMasker.Apply(png, rectangles);
                 }
             }
             catch (Exception error) when (error is ExecutorDataException or IOException)
@@ -263,7 +263,7 @@ public sealed partial class SuiteRunner
         var regions = Regions(suite, session, frame, log);
         try
         {
-            return _deps.Masker.Apply(frame.Png, regions);
+            return ScreenshotMasker.Apply(frame.Png, regions);
         }
         catch (ExecutorDataException)
         {
@@ -315,7 +315,7 @@ public sealed partial class SuiteRunner
             Log = log,
             Fingerprint = FailureReport.FingerprintFor(testCase.Id, step.Id, error)
         };
-        return await _deps.Artifacts.WriteFailureAsync(request.ReportDirectory, report, masked, cancellationToken);
+        return await RunArtifactStore.WriteFailureAsync(request.ReportDirectory, report, masked, cancellationToken);
     }
 
     private static void SkipCase(TestSuite suite, TestCase testCase, RunRequest request, IRunSink sink)

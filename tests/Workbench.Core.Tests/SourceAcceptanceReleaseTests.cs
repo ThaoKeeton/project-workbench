@@ -252,13 +252,13 @@ public sealed partial class SourceAcceptanceTests
         {
             await actualStop.Entered.Task.WaitAsync(Budget); actualStop.Release.TrySetResult();
             Assert.False(stop.IsCompleted); Assert.False(rig.Ledger.JoinReleaseMonitorsAsync().IsCompleted); Assert.Equal(0, disposals); Assert.False(File.Exists(disk.Held));
-            rig.Ledger.StartReleaseMonitor(ticket); await clock.NextObservation();
+            SourceAcceptanceScenarioLedger.StartReleaseMonitor(ticket); await clock.NextObservation();
             Assert.False(stop.IsCompleted); PublishRelease(disk, ReleaseRequest(disk)); clock.Advance();
             if (innerFails) Assert.Same(first, await Assert.ThrowsAsync<InvalidOperationException>(() => stop)); else await stop.WaitAsync(Budget);
             Assert.Equal(2, disposals); Assert.True(ticket.Release.Task.IsCompletedSuccessfully);
             rig.Ledger.Settle(ticket, "replied");
         }
-        finally { actualStop.Release.TrySetResult(); rig.Ledger.StartReleaseMonitor(ticket); ticket.Release.TrySetResult(); _ = await Record.ExceptionAsync(() => stop); }
+        finally { actualStop.Release.TrySetResult(); SourceAcceptanceScenarioLedger.StartReleaseMonitor(ticket); ticket.Release.TrySetResult(); _ = await Record.ExceptionAsync(() => stop); }
     }
 
     [Fact]
@@ -320,7 +320,7 @@ public sealed partial class SourceAcceptanceTests
         await Assert.ThrowsAsync<HttpRequestException>(() => client.SendAsync(wrong)); Assert.False(File.Exists(disk.Held));
         Assert.True(rig.Ledger.TryArm(SourceAcceptanceProvider.Figma, SourceAcceptanceScenario.Hold)); var ticket = rig.Ledger.Enter(SourceAcceptanceProvider.Figma);
         var owner = new SourceAcceptanceOwnership(rig.Ledger, rig.Figma, rig.Ai, rig.Life.StopAsync); await owner.StopAsync();
-        Assert.False(rig.Ledger.Accept(ticket)); rig.Ledger.StartReleaseMonitor(ticket);
+        Assert.False(rig.Ledger.Accept(ticket)); SourceAcceptanceScenarioLedger.StartReleaseMonitor(ticket);
         Assert.True(rig.Ledger.JoinReleaseMonitorsAsync().IsCompletedSuccessfully); Assert.False(File.Exists(disk.Held)); Assert.Equal(0, clock.Observations);
         rig.Ledger.Settle(ticket, "rejected");
     }

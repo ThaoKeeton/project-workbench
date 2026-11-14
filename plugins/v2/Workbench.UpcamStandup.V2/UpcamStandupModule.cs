@@ -42,7 +42,7 @@ public sealed class UpcamStandupModule : IWorkbenchPluginModule
         return PluginResponses.Ok(Validate(document));
     }
 
-    private async Task<PluginModuleResponse> ImportAsync(PluginModuleRequest request, string source, CancellationToken cancellationToken)
+    private static async Task<PluginModuleResponse> ImportAsync(PluginModuleRequest request, string source, CancellationToken cancellationToken)
     {
         RequireData(request.GrantedPermissions);
         var today = PreviewClock.Today();

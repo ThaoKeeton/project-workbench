@@ -8,11 +8,11 @@ public sealed class PluginCatalogTests
     [Fact]
     public async Task Load_rejects_invalid_packages_and_duplicate_ids()
     {
-        Assert.Empty(await PluginV2Catalog.LoadAsync(Path.Combine(Path.GetTempPath(), "wb-missing-" + Guid.NewGuid().ToString("N")), CancellationToken.None));
+        Assert.Empty(await PluginV2Catalog.LoadAsync(Path.Combine(Path.GetTempPath(), "wb-missing-" + Guid.NewGuid().ToString("N")), cancellationToken: CancellationToken.None));
         var root = NewRoot();
         try
         {
-            Assert.Empty(await PluginV2Catalog.LoadAsync(root, CancellationToken.None));
+            Assert.Empty(await PluginV2Catalog.LoadAsync(root, cancellationToken: CancellationToken.None));
             Write("no-manifest", null);
             Write("bad json", "{");
             Write("not-object", "[]");
@@ -40,7 +40,7 @@ public sealed class PluginCatalogTests
             Write("com.example.duplicate", Manifest(id: "com.example.duplicate", assembly: "Missing.dll"));
             Write("com.example.duplicate-copy", Manifest(id: "com.example.duplicate", assembly: "Missing.dll"));
 
-            var loaded = await PluginV2Catalog.LoadAsync(root, CancellationToken.None);
+            var loaded = await PluginV2Catalog.LoadAsync(root, cancellationToken: CancellationToken.None);
             Assert.Contains(loaded, package => package.Id == "invalid" && package.State == "Invalid");
             Assert.Contains("IncompatibleContract", ById(loaded, "com.example.contract").DiagnosticCodes);
             Assert.Contains("MissingAssembly", ById(loaded, "com.example.contract").DiagnosticCodes);
@@ -65,7 +65,7 @@ public sealed class PluginCatalogTests
 
             using var canceled = new CancellationTokenSource();
             canceled.Cancel();
-            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => PluginV2Catalog.LoadAsync(root, canceled.Token));
+            await Assert.ThrowsAnyAsync<OperationCanceledException>(() => PluginV2Catalog.LoadAsync(root, cancellationToken: canceled.Token));
         }
         finally
         {

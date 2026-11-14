@@ -394,7 +394,7 @@ public sealed class CdpWebSession : IWebSession
         return PngImage.Create(width, height, pixels).Encode();
     }
 
-    private Task WaitUntilResponsiveAsync(CancellationToken cancellationToken)
+    private Task<JsonElement> WaitUntilResponsiveAsync(CancellationToken cancellationToken)
         => EvaluateAsync(new { op = "ping", selector = "", text = "", role = "", name = "", value = "", expected = "", strategy = "element", popup = _popup, objectName = "", allowPopup = true }, cancellationToken);
 
     private async Task<WebResult> WaitForAsync(TestStep step, CancellationToken cancellationToken)
@@ -726,7 +726,7 @@ public sealed class CdpWebSession : IWebSession
                 break;
             }
             received = await pending;
-            message.Write(buffer, 0, received.Count);
+            await message.WriteAsync(buffer.AsMemory(0, received.Count), cancellationToken);
         }
         while (!received.EndOfMessage);
         return message.ToArray();

@@ -81,7 +81,7 @@ public sealed class FigmaFileReader(HttpMessageHandler? handler = null)
             var read = await stream.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (read == 0) return output.ToArray();
-            output.Write(buffer, 0, read);
+            await output.WriteAsync(buffer.AsMemory(0, read), cancellationToken).ConfigureAwait(false);
             if (output.Length > ByteLimit) throw new FigmaReadException(FigmaReadError.ResponseTooLarge);
         }
     }

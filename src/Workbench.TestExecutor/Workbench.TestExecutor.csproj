@@ -8,6 +8,7 @@
     <InformationalVersion>0.1.0-preview.1</InformationalVersion>
     <Description>Local test execution engine for the first-party preview plugin. No network on its own.</Description>
     <IsPackable>false</IsPackable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="Workbench.TestExecutor.Tests" />

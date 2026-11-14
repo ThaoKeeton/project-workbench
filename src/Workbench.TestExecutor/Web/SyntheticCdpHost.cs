@@ -50,7 +50,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        _shutdown.Cancel();
+        await _shutdown.CancelAsync();
         _listener.Stop();
         TcpClient[] clients;
         lock (_gate) clients = _clients.ToArray();
@@ -141,7 +141,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
         while (buffer.Length < 8192)
         {
             if (await stream.ReadAsync(one, cancellationToken) == 0) return null;
-            buffer.Write(one);
+            await buffer.WriteAsync(one, cancellationToken);
             if (buffer.Length >= 4)
             {
                 var tail = buffer.GetBuffer();
@@ -211,7 +211,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
             frame.WriteByte((byte)(payload.Length >> 8));
             frame.WriteByte((byte)payload.Length);
         }
-        frame.Write(payload);
+        await frame.WriteAsync(payload, cancellationToken);
         await stream.WriteAsync(frame.ToArray(), cancellationToken);
     }
 
@@ -241,6 +241,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
         private double _cubeX;
         private bool _cut;
         private string _dragMode = "camera";
+        private static readonly string[] SyntheticPageDiagnostics = ["synthetic page"];
 
         private SyntheticModel(List<Page> pages) => _pages = pages;
 
@@ -463,7 +464,7 @@ public sealed class SyntheticCdpHost : IAsyncDisposable
                 frames = 0,
                 globals
             };
-            return JsonSerializer.Serialize(new { signals, diagnostics = new[] { "synthetic page" } });
+            return JsonSerializer.Serialize(new { signals, diagnostics = SyntheticPageDiagnostics });
         }
 
         private string SceneJson()

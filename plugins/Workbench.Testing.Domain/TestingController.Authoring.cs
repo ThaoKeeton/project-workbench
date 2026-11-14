@@ -40,7 +40,7 @@ public sealed partial class TestingController
             await FlushIfSelectedAsync().ConfigureAwait(false);
             var sources=new List<TestSourceSnapshot>();
             foreach(var id in ids) sources.Add(await _testing.ReadSourceAsync(id,cancellationToken).ConfigureAwait(false));
-            ITestCaseGenerator generator=new RuleTestCaseGenerator();
+            var generator=new RuleTestCaseGenerator();
             var saved=await _testing.CreateCaseSetAsync(generator.Generate(sources),cancellationToken).ConfigureAwait(false);
             SelectDraft(saved);return ModelCopy.Set(saved);
         });
@@ -62,5 +62,5 @@ public sealed partial class TestingController
         var result=await SelectedDraft.PreserveAsNewAndReloadAsync(cancellationToken).ConfigureAwait(false);
         var sets=await _testing.ListCaseSetsAsync(cancellationToken).ConfigureAwait(false);lock(_sync) { _sets=ModelCopy.List(sets);_error=null; } Publish();return result;
     });
-    public Task<byte[]> ExportCsvAsync(CancellationToken cancellationToken=default)=>Admit(async()=>new CsvTestCaseExporter().Export(await FlushDraftAsync(cancellationToken).ConfigureAwait(false)));
+    public Task<byte[]> ExportCsvAsync(CancellationToken cancellationToken=default)=>Admit(async()=>CsvTestCaseExporter.Export(await FlushDraftAsync(cancellationToken).ConfigureAwait(false)));
 }

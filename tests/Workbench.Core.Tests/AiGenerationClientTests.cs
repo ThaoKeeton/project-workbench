@@ -85,7 +85,7 @@ public sealed class AiGenerationClientTests
         StringBounds(stepSchema.GetProperty("properties").GetProperty("instruction"), 1, 4096);
         StringBounds(stepSchema.GetProperty("properties").GetProperty("expected"), 1, 4096);
         Assert.Equal(new[] { new TestTrace(Id, Revision, "item/🧪", 0), new TestTrace(Id, Revision, "item/🧪", 1) }, capture.OriginalTraces);
-        Assert.All(capture.Cases, c => Assert.All(c.Steps, s => Assert.Null(s.Action)));
+        Assert.All(capture.Cases, c => Assert.All(c.Steps, s => Assert.Null(AiGeneratedStep.Action)));
         Assert.False(transport.Disposed);
         await client.GenerateAsync([Source() with { Items = [Item("item", "a", "b")] }], _ => Task.FromResult<string?>("other-synthetic-key"));
         Assert.Equal("Bearer other-synthetic-key", transport.Requests[1].Authorization);
@@ -117,7 +117,7 @@ public sealed class AiGenerationClientTests
         Assert.Throws<NotSupportedException>(() => ((IList<TestTrace>)capture.OriginalTraces).Clear());
         Assert.Throws<NotSupportedException>(() => ((IList<AiGeneratedCase>)capture.Cases).Clear());
         Assert.Throws<NotSupportedException>(() => ((IList<AiGeneratedStep>)capture.Cases[0].Steps).Clear());
-        Assert.All(capture.Cases, c => Assert.All(c.Steps, s => Assert.Null(s.Action)));
+        Assert.All(capture.Cases, c => Assert.All(c.Steps, s => Assert.Null(AiGeneratedStep.Action)));
     }
 
     [Fact]
@@ -244,7 +244,7 @@ public sealed class AiGenerationClientTests
         Assert.Equal(new string('d', 4096), item.GetProperty("description").GetString());
         Assert.Equal(new string('c', 4096), item.GetProperty("criteria")[0].GetProperty("text").GetString());
         Assert.DoesNotContain("Original", Encoding.UTF8.GetString(capture.InputJson), StringComparison.Ordinal);
-        Assert.Null(capture.Cases[0].Steps[0].Action);
+        Assert.Null(AiGeneratedStep.Action);
     }
 
     [Theory]

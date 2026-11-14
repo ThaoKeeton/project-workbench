@@ -7,7 +7,7 @@ public sealed class CsvTestCaseExporter
 {
     private static readonly string[] Headers=["caseId","caseTitle","prerequisites","stepId","stepOrdinal","instruction","expected","sourceId","sourceRevision","sourceLocator","criterionIndex","traceScope","traceOrdinal","automation","actionKind","elementId","actionValue"];
     /// <summary>Every text data cell gains an apostrophe; this intentionally changes CSV values, never stored text.</summary>
-    public byte[] Export(TestCaseSetSnapshot set)
+    public static byte[] Export(TestCaseSetSnapshot set)
     {
         var output=new StringBuilder();
         Row(output,Headers);

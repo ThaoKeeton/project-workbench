@@ -72,7 +72,7 @@ public sealed class ExecutorSettingsStore
     public const string FileName = "settings.v2.json";
     private static readonly JsonSchema Schema = JsonSchema.FromText(SuiteLoader.ReadResource("Workbench.TestExecutor.settings.v2.schema.json"));
 
-    public ExecutorSettings Load(string dataDirectory)
+    public static ExecutorSettings Load(string dataDirectory)
     {
         var path = Path.Combine(Path.GetFullPath(dataDirectory), FileName);
         if (!File.Exists(path)) return ExecutorSettings.Defaults;

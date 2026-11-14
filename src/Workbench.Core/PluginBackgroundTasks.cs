@@ -127,7 +127,7 @@ internal sealed class PluginBackgroundTasks(
                 if (!_active) return Unavailable();
                 task.Cancellation?.Dispose();
                 task.Cancellation = new();
-                task.Execution = new(task.Cancellation.Token, reason);
+                task.Execution = new(reason, task.Cancellation.Token);
                 task.Stop = null;
                 task.State = PluginBackgroundTaskState.Running;
                 task.ErrorCode = null;
@@ -321,7 +321,7 @@ internal sealed class PluginBackgroundTasks(
         public Task? Stop { get; set; }
     }
 
-    private sealed class Execution(CancellationToken token, PluginTaskStartReason startReason) : IPluginBackgroundExecution
+    private sealed class Execution(PluginTaskStartReason startReason, CancellationToken token) : IPluginBackgroundExecution
     {
         private int _stopReason;
         public CancellationToken CancellationToken { get; } = token;

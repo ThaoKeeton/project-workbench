@@ -10,7 +10,7 @@ internal sealed class SourceAcceptanceFigmaHandler(SourceAcceptanceScenarioLedge
     private int _disposed;
     internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        => SourceAcceptanceTransport.SendAsync(ledger, SourceAcceptanceProvider.Figma, request, cancellationToken, () => IsDisposed);
+        => SourceAcceptanceTransport.SendAsync(ledger, SourceAcceptanceProvider.Figma, request, () => IsDisposed, cancellationToken);
     protected override void Dispose(bool disposing) { Volatile.Write(ref _disposed, 1); base.Dispose(disposing); }
 }
 internal sealed class SourceAcceptanceAiHandler(SourceAcceptanceScenarioLedger ledger) : HttpMessageHandler
@@ -18,7 +18,7 @@ internal sealed class SourceAcceptanceAiHandler(SourceAcceptanceScenarioLedger l
     private int _disposed;
     internal bool IsDisposed => Volatile.Read(ref _disposed) != 0;
     protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
-        => SourceAcceptanceTransport.SendAsync(ledger, SourceAcceptanceProvider.Ai, request, cancellationToken, () => IsDisposed);
+        => SourceAcceptanceTransport.SendAsync(ledger, SourceAcceptanceProvider.Ai, request, () => IsDisposed, cancellationToken);
     protected override void Dispose(bool disposing) { Volatile.Write(ref _disposed, 1); base.Dispose(disposing); }
 }
 
@@ -28,15 +28,16 @@ internal static class SourceAcceptanceTransport
     private const string Model = "gpt-5.4-mini-2026-03-17";
     private const string FigmaUri = "https://api.figma.com/v1/files/SourceAcceptanceFile1/nodes?ids=2%3A3%2C1%3A2&depth=2&version=source-v1";
     private const string FigmaJson = "{\"name\":\"Synthetic source acceptance file\",\"version\":\"source-v1\",\"nodes\":{\"2:3\":{\"document\":{\"id\":\"2:3\",\"name\":\"Synthetic heading\",\"type\":\"TEXT\",\"characters\":\"Synthetic heading text\"}},\"1:2\":{\"document\":{\"id\":\"1:2\",\"name\":\"Synthetic confirmation\",\"type\":\"TEXT\",\"characters\":\"Synthetic confirmation text\"}}}}";
+    private static readonly int[] CriterionOrder = [2, 0, 1];
     internal static async Task<HttpResponseMessage> SendAsync(SourceAcceptanceScenarioLedger ledger, SourceAcceptanceProvider provider,
-        HttpRequestMessage request, CancellationToken token, Func<bool> isDisposed)
+        HttpRequestMessage request, Func<bool> isDisposed, CancellationToken token)
     {
         var ticket = ledger.Enter(provider); var outcome = "rejected";
         try
         {
             if (!ticket.Planned || isDisposed() || !(provider == SourceAcceptanceProvider.Figma ? ValidateFigma(request) : await ValidateAiAsync(request).ConfigureAwait(false))
                 || !ledger.Accept(ticket)) throw Refused();
-            ledger.StartReleaseMonitor(ticket);
+            SourceAcceptanceScenarioLedger.StartReleaseMonitor(ticket);
             using var cancellation = token.Register(() => ledger.ObserveCancellation(ticket));
             if (ticket.Scenario == SourceAcceptanceScenario.Hold) await ticket.Release.Task.ConfigureAwait(false);
             var bytes = ticket.Scenario == SourceAcceptanceScenario.Malformed ? Encoding.UTF8.GetBytes("{malformed synthetic JSON")
@@ -135,7 +136,7 @@ internal static class SourceAcceptanceTransport
     {
         id = "resp_source_acceptance_1", model = Model, status = "completed",
         output = new[] { new { type = "message", role = "assistant", status = "completed", content = new[] { new { type = "output_text",
-            text = JsonSerializer.Serialize(new { cases = new[] { 2, 0, 1 }.Select(index => new { criterionIndex = index, title = "Synthetic manual case " + index,
+            text = JsonSerializer.Serialize(new { cases = CriterionOrder.Select(index => new { criterionIndex = index, title = "Synthetic manual case " + index,
                 prerequisites = scenario == SourceAcceptanceScenario.Partial ? new string('p', 4096) : "Synthetic manual review only.",
                 steps = new[] { new { instruction = "Review synthetic criterion " + index + " manually.", expected = "Synthetic criterion " + index + " is satisfied." } } }) }) } } } }
     });

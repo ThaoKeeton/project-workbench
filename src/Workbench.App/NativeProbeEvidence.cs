@@ -96,6 +96,12 @@ internal sealed class NativeProbeEvidence(string? phase, IReadOnlyList<string> c
         "workspace-actual-dispose" => NativeProbePhase.WorkspaceActualDispose,
         _ => NativeProbePhase.Unknown
     };
+    private static readonly JsonSerializerOptions EvidenceJson = new()
+    {
+        WriteIndented = true,
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        Converters = { new JsonStringEnumConverter(JsonNamingPolicy.KebabCaseLower) }
+    };
     private NativeProbeCheckpoint _checkpoint = NativeProbeCheckpoint.Enter;
     internal NativeProbeObservations Observations { get; } = new();
     internal void At(NativeProbeCheckpoint checkpoint) => _checkpoint = checkpoint;
@@ -123,8 +129,6 @@ internal sealed class NativeProbeEvidence(string? phase, IReadOnlyList<string> c
                 {
                     var path = Path.GetFullPath(reportPath + ".evidence.json");
                     Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-                    var options = new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
-                    options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.KebabCaseLower));
                     File.WriteAllText(path, JsonSerializer.Serialize(new
                     {
                         schemaVersion = 1, processId = Environment.ProcessId, phase = _phase, checkpoint = _checkpoint,
@@ -132,7 +136,7 @@ internal sealed class NativeProbeEvidence(string? phase, IReadOnlyList<string> c
                         error = HostFailure.Describe("NativeProbeFailed", error),
                         exceptionType = error.GetType().FullName,
                         errorHResult = error.HResult
-                    }, options));
+                    }, EvidenceJson));
                 }
             }
             catch (Exception) { /* Diagnostic I/O/serialization must never replace the original failure. */ }

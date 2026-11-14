@@ -140,7 +140,7 @@ public sealed class TestExecutorModule : IWorkbenchPluginModule, IWorkbenchRunEv
         if (body.TryGetProperty("manualComputerUse", out var manualNode) && manualNode.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
             throw new JsonException();
         var manualComputerUse = body.TryGetProperty("manualComputerUse", out var manualFlag) && manualFlag.ValueKind == JsonValueKind.True;
-        var settings = _settings.Load(request.DataDirectory);
+        var settings = ExecutorSettingsStore.Load(request.DataDirectory);
         var policy = settings.ToPolicy(requestLocalOnly, manualComputerUse);
         var suite = _catalog.Require(request.DataDirectory, suiteId ?? "");
         var runner = _runner ?? throw new ExecutorDataException(ExecutorError.InvalidRun);
@@ -197,7 +197,7 @@ public sealed class TestExecutorModule : IWorkbenchPluginModule, IWorkbenchRunEv
         if (!TryOpenRun(runId)) throw new ExecutorDataException(ExecutorError.RunNotFound);
         var directory = ContainedPath.Combine(ContainedPath.Combine(request.DataDirectory, "runs"), runId);
         var (report, png) = RunArtifactStore.ReadFailure(directory, fingerprint);
-        var policy = _settings.Load(request.DataDirectory).ToPolicy(false).ForConfirmedExport();
+        var policy = ExecutorSettingsStore.Load(request.DataDirectory).ToPolicy(false).ForConfirmedExport();
         var result = await _exporter.ExportAsync(report, png, policy, cancellationToken);
         return JsonResponse(200, new
         {

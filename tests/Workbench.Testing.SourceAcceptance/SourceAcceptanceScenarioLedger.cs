@@ -148,6 +148,6 @@ internal sealed class SourceAcceptanceScenarioLedger
         lock (_sync) pending = _releaseMonitors.Select(monitor => monitor.Completion).ToArray();
         return Task.WhenAll(pending);
     }
-    internal void StartReleaseMonitor(Ticket ticket) => ticket.Monitor?.Start();
+    internal static void StartReleaseMonitor(Ticket ticket) => ticket.Monitor?.Start();
     internal void SealCommands() { lock (_sync) { _closed = true; _armed = false; _phase = "closed"; } }
 }

@@ -10,7 +10,7 @@ public sealed class MaskCredentialReportTests
     public void Rectangles_and_selector_regions_are_painted_before_the_image_can_leave()
     {
         var raw = SyntheticFrames.PasswordField();
-        var masked = new ScreenshotMasker().Apply(raw.Png, [new PixelRect(8, 8, 16, 8), new PixelRect(0, 0, 2, 2)]);
+        var masked = ScreenshotMasker.Apply(raw.Png, [new PixelRect(8, 8, 16, 8), new PixelRect(0, 0, 2, 2)]);
         var before = PngImage.Decode(raw.Png);
         var after = PngImage.Decode(masked.Png);
         Assert.Equal(new Rgba8(240, 20, 20, 255), before[10, 10]);
@@ -75,7 +75,7 @@ public sealed class MaskCredentialReportTests
     {
         var root = Fixtures.Temp();
         var raw = SyntheticFrames.PasswordField();
-        var masked = new ScreenshotMasker().Apply(raw.Png, [new PixelRect(8, 8, 16, 8)]);
+        var masked = ScreenshotMasker.Apply(raw.Png, [new PixelRect(8, 8, 16, 8)]);
         var report = new FailureReport
         {
             CaseId = "CASE-1",
@@ -90,7 +90,7 @@ public sealed class MaskCredentialReportTests
             Log = ["attempt=1 engine=flaui click"],
             Fingerprint = FailureReport.FingerprintFor("CASE-1", "step-1", ExecutorError.ControlNotFound)
         };
-        var stored = await new RunArtifactStore().WriteFailureAsync(root, report, masked, CancellationToken.None);
+        var stored = await RunArtifactStore.WriteFailureAsync(root, report, masked, CancellationToken.None);
         var json = File.ReadAllText(Directory.GetFiles(root, "*.json").Single(path => !path.EndsWith(".evidence.json", StringComparison.Ordinal)));
         var markdown = File.ReadAllText(Directory.GetFiles(root, "*.md").Single());
         Assert.Contains("\"schemaVersion\":2", json, StringComparison.Ordinal);

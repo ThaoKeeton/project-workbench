@@ -16,7 +16,7 @@ public static class TestSourceInput
                 var remaining=LocalSnapshotParser.ByteLimit+1-(int)output.Length;
                 var count=await content.ReadAsync(buffer.AsMemory(0,Math.Min(buffer.Length,remaining)),cancellationToken).ConfigureAwait(false);
                 if(count==0) return output.ToArray();
-                output.Write(buffer,0,count);
+                await output.WriteAsync(buffer.AsMemory(0,count),cancellationToken).ConfigureAwait(false);
                 if(output.Length>LocalSnapshotParser.ByteLimit) throw DomainErrors.Error("StoreLimitExceeded");
             }
         }

@@ -4,7 +4,7 @@ public sealed class ScreenshotMasker
 {
     public static readonly Rgba8 Ink = new(17, 17, 17, 255);
 
-    public MaskedImage Apply(byte[] png, IReadOnlyList<PixelRect> regions)
+    public static MaskedImage Apply(byte[] png, IReadOnlyList<PixelRect> regions)
     {
         var image = PngImage.Decode(png);
         foreach (var region in regions) Paint(image, region);

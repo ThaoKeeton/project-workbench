@@ -104,8 +104,7 @@ public sealed class SceneRecognitionTests
         var expression = CdpExpression.Build(new { op = "probe", objectName = "cube" });
         Assert.Contains("canvas.__r3f", expression, StringComparison.Ordinal);
         Assert.False(CdpExpression.UsesAssignmentComma(expression));
-        var loader = new SuiteLoader();
-        var suite = loader.Load("""
+        var suite = SuiteLoader.Load("""
             {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"scene","name":"场景","cases":[{"id":"c","name":"n","steps":[
               {"id":"probe","type":"scene3d","action":"probe"},
               {"id":"click","type":"scene3d","action":"click","target":{"uuid":"cube-1"}},
@@ -115,7 +114,7 @@ public sealed class SceneRecognitionTests
             """);
         Assert.Equal("cube-1", suite.Cases[0].Steps[1].Target!.Uuid);
         Assert.Equal("Scene/cube", suite.Cases[0].Steps[2].Target!.Path);
-        Assert.Throws<ExecutorDataException>(() => loader.Load("""
+        Assert.Throws<ExecutorDataException>(() => SuiteLoader.Load("""
             {"schema":"workbench.test-executor.suite.v2.preview","schemaVersion":2,"id":"bad","name":"坏","cases":[{"id":"c","name":"n","steps":[{"id":"s","type":"scene3d","action":"click","target":{"selector":"#view"}}]}]}
             """));
     }
@@ -151,7 +150,7 @@ public sealed class SceneRecognitionTests
         var reports = Path.Combine(root, "reports");
         var baselines = Path.Combine(root, "baselines");
         Directory.CreateDirectory(baselines);
-        var masked = new ScreenshotMasker().Apply(shot.Png!, []);
+        var masked = ScreenshotMasker.Apply(shot.Png!, []);
         await File.WriteAllBytesAsync(Path.Combine(baselines, "pixels.png"), masked.Png);
         var computer = new FakeComputerUseProvider();
         var runner = Fixtures.Runner(new ScriptedFactory(), computer, new RecordingExporter(), new RecordingDeadline(), root, reports);

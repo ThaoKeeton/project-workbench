@@ -4,13 +4,12 @@ public sealed record SuiteListItem(string Id, string Name, int Cases, string For
 
 public sealed class SuiteCatalog
 {
-    private readonly SuiteLoader _loader;
     private readonly TestSuite _builtin;
 
     public SuiteCatalog(SuiteLoader loader)
     {
-        _loader = loader;
-        _builtin = loader.LoadBuiltin();
+        _ = loader;
+        _builtin = SuiteLoader.LoadBuiltin();
     }
 
     public TestSuite Builtin => _builtin;
@@ -67,7 +66,7 @@ public sealed class SuiteCatalog
             var safeStem = TextRules.IsSafeId(stem) ? stem : null;
             try
             {
-                var suite = _loader.Load(File.ReadAllText(path));
+                var suite = SuiteLoader.Load(File.ReadAllText(path));
                 result.Add(new LoadedFile(suite, format, safeStem, path));
             }
             catch (ExecutorDataException)

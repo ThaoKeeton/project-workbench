@@ -35,14 +35,14 @@ internal static class YamlJson
         _ => throw new ExecutorDataException(ExecutorError.InvalidSuite)
     };
 
-    private static JsonNode ConvertSequence(YamlSequenceNode sequence)
+    private static JsonArray ConvertSequence(YamlSequenceNode sequence)
     {
         var array = new JsonArray();
         foreach (var child in sequence.Children) array.Add(Convert(child));
         return array;
     }
 
-    private static JsonNode ConvertMapping(YamlMappingNode mapping)
+    private static JsonObject ConvertMapping(YamlMappingNode mapping)
     {
         var obj = new JsonObject();
         var seen = new HashSet<string>(StringComparer.Ordinal);
@@ -55,7 +55,7 @@ internal static class YamlJson
         return obj;
     }
 
-    private static JsonNode? ConvertScalar(YamlScalarNode scalar)
+    private static JsonValue? ConvertScalar(YamlScalarNode scalar)
     {
         var value = scalar.Value ?? "";
         if (scalar.Style != ScalarStyle.Plain) return JsonValue.Create(value);

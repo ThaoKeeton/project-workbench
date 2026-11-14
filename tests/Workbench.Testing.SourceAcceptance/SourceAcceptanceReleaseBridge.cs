@@ -17,7 +17,7 @@ internal sealed class SourceAcceptanceReleaseBridge(string directory, string run
     private readonly TimeProvider _timeProvider = timeProvider;
 
     internal static async Task InitializeAsync(IPluginTestingContext context, SourceAcceptanceScenarioLedger ledger,
-        CancellationToken cancellationToken = default, TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null, CancellationToken cancellationToken = default)
     {
         // Capture revocable properties before the single settings await; never consult them from a monitor.
         var project = SourceAcceptanceProtocol.ValidateContext(context);

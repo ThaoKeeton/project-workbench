@@ -439,7 +439,7 @@ public sealed class PluginPackageStore
             ? Directory.EnumerateFileSystemEntries(_journal.PendingRoot).Order(StringComparer.Ordinal).ToArray() : [];
     }
 
-    private async Task<PackageJournalRecord> ReadPendingAsync(string path, CancellationToken token)
+    private static async Task<PackageJournalRecord> ReadPendingAsync(string path, CancellationToken token)
     {
         var record = await PackageJournal.ReadAsync(path, token);
         if (Path.GetFileName(path) != record.PluginId + ".json") throw new JsonException("Journal filename and ID differ.");

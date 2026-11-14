@@ -86,13 +86,11 @@ public sealed partial class ProjectTestStore
         if (!lease.Cases.TryGetValue(setId, out var current)) throw TestValidation.Error("TestRecordNotFound");
         if (current.Revision != expectedRevision) throw TestValidation.Error("RevisionConflict");
         var key = setId + "/" + expectedRevision;
-        if (!lease.Archives.ContainsKey(key))
-        {
-            if (lease.Archives.Count >= 256) throw TestValidation.Error("StoreLimitExceeded");
-            var path = ProjectWorkspaceStorage.PathIn(_directory, "case-revisions", setId, expectedRevision + ".json");
-            await ProjectWorkspaceStorage.AtomicWriteAsync(path, lease.CaseBytes[setId], overwrite: false, cancellationToken).ConfigureAwait(false);
-            lease.Archives.Add(key, current);
-        }
+        if (lease.Archives.TryGetValue(key, out _)) return CopyCaseSnapshot(current);
+        if (lease.Archives.Count >= 256) throw TestValidation.Error("StoreLimitExceeded");
+        var path = ProjectWorkspaceStorage.PathIn(_directory, "case-revisions", setId, expectedRevision + ".json");
+        await ProjectWorkspaceStorage.AtomicWriteAsync(path, lease.CaseBytes[setId], overwrite: false, cancellationToken).ConfigureAwait(false);
+        if (!lease.Archives.TryAdd(key, current)) throw TestValidation.Error("RevisionConflict");
         return CopyCaseSnapshot(current);
     }
 

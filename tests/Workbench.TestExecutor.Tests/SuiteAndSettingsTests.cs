@@ -8,7 +8,7 @@ public sealed class SuiteAndSettingsTests
     [Fact]
     public void Builtin_suite_uses_schema_2_and_the_decided_defaults()
     {
-        var suite = new SuiteLoader().LoadBuiltin();
+        var suite = SuiteLoader.LoadBuiltin();
         Assert.Equal(ExecutorSchemas.BuiltinSuiteId, suite.Id);
         Assert.False(suite.StopOnFirstFailure);
         Assert.True(suite.MaskPasswordControls);
@@ -50,7 +50,7 @@ public sealed class SuiteAndSettingsTests
                       automationId: sample-ok
                     expected: 按钮被点击
             """;
-        var loaded = new SuiteLoader().Load(Yaml);
+        var loaded = SuiteLoader.Load(Yaml);
         Assert.Equal("yaml-suite", loaded.Id);
         Assert.False(loaded.StopOnFirstFailure);
         Assert.IsType<RectangleMask>(loaded.Masks[0]);
@@ -66,7 +66,7 @@ public sealed class SuiteAndSettingsTests
     [InlineData("")]
     public void Invalid_documents_are_rejected_without_echoing_the_body(string text)
     {
-        var error = Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load(text));
+        var error = Assert.Throws<ExecutorDataException>(() => SuiteLoader.Load(text));
         Assert.Equal(ExecutorError.InvalidSuite, error.Code);
         Assert.Equal(ExecutorError.InvalidSuite, error.Message);
     }
@@ -80,7 +80,7 @@ public sealed class SuiteAndSettingsTests
               {"id":"c","name":"n","steps":[{"id":"s2","type":"ai","action":"read"}]}
             ]}
             """;
-        Assert.Throws<ExecutorDataException>(() => new SuiteLoader().Load(Json));
+        Assert.Throws<ExecutorDataException>(() => SuiteLoader.Load(Json));
     }
 
     [Fact]
@@ -125,7 +125,7 @@ public sealed class SuiteAndSettingsTests
     public void Missing_settings_default_to_ask_and_computer_use_off()
     {
         var root = Fixtures.Temp();
-        var settings = new ExecutorSettingsStore().Load(root);
+        var settings = ExecutorSettingsStore.Load(root);
         Assert.False(settings.ComputerUseEnabled);
         Assert.False(settings.LocalOnly);
         Assert.Equal(ExportMode.Ask, settings.Export);
@@ -142,7 +142,7 @@ public sealed class SuiteAndSettingsTests
         File.WriteAllText(Path.Combine(root, ExecutorSettingsStore.FileName), """
             {"schema":"workbench.test-executor.settings.v2.preview","schemaVersion":2,"computerUseEnabled":true,"localOnly":true,"export":"push","linearTeamId":"team-1","computerUseModel":"computer-use-preview"}
             """);
-        var policy = new ExecutorSettingsStore().Load(root).ToPolicy(false);
+        var policy = ExecutorSettingsStore.Load(root).ToPolicy(false);
         Assert.True(policy.LocalOnly);
         Assert.True(policy.ComputerUseEnabled);
         Assert.False(policy.CanUseComputer);
@@ -159,7 +159,7 @@ public sealed class SuiteAndSettingsTests
         File.WriteAllText(Path.Combine(root, ExecutorSettingsStore.FileName), """
             {"schema":"workbench.test-executor.settings.v2.preview","schemaVersion":2,"apiKey":"synthetic-credential-value"}
             """);
-        var error = Assert.Throws<ExecutorDataException>(() => new ExecutorSettingsStore().Load(root));
+        var error = Assert.Throws<ExecutorDataException>(() => ExecutorSettingsStore.Load(root));
         Assert.Equal(ExecutorError.InvalidSettings, error.Message);
         Assert.DoesNotContain("synthetic-credential-value", error.Message, StringComparison.Ordinal);
         Directory.Delete(root, true);

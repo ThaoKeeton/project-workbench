@@ -17,6 +17,7 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
         "acceptance-seed", "acceptance-restore", "acceptance-stopped", "acceptance-config", "acceptance-missing", "acceptance-disabled"];
     public static readonly string[] RuntimeProbePhases = ["management", "restart-seed", "restart-verify", "restart-disabled", "update-verify", "rollback-verify", "remove-verify"];
     public static readonly string[] SampleIds = ["com.projectworkbench.summary", "com.projectworkbench.test-cases"];
+    private static readonly JsonSerializerOptions ReportJson = new() { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase };
     private readonly List<object> _startupStages = [];
     public IReadOnlyList<object> StartupStages => _startupStages.ToArray();
     internal HostStartupDiagnostics StartupDiagnostics { get; } = new();
@@ -86,7 +87,7 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
             probeRoot ??= Path.Combine(parent, Guid.NewGuid().ToString("N"));
             if (!string.Equals(Path.GetDirectoryName(probeRoot), Path.TrimEndingDirectorySeparator(parent), StringComparison.OrdinalIgnoreCase)
                 || !Guid.TryParseExact(Path.GetFileName(probeRoot), "N", out _)
-                || source is not null && Path.GetFileName(probeRoot) != Path.GetFileName(probeRoot).ToLowerInvariant())
+                || source is not null && Path.GetFileName(probeRoot).Any(char.IsUpper))
                 throw new ArgumentException("Runtime probes require an isolated GUID directory under the dedicated temporary probe root.");
         }
         var root = probeRoot ?? (smoke
@@ -101,7 +102,7 @@ internal sealed record RunOptions(bool SmokeTest, string UserRoot, string? Repor
     {
         if (ReportPath is null) return;
         Directory.CreateDirectory(Path.GetDirectoryName(ReportPath)!);
-        File.WriteAllText(ReportPath, JsonSerializer.Serialize(result, new JsonSerializerOptions { WriteIndented = true, PropertyNamingPolicy = JsonNamingPolicy.CamelCase }));
+        File.WriteAllText(ReportPath, JsonSerializer.Serialize(result, ReportJson));
     }
 
     public void WriteFailure(string stage, Exception error, string? nativeMessage = null) => WriteReport(new

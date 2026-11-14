@@ -111,7 +111,7 @@ internal static class OwnedRunner
         try
         {
             var terminal = await journal.AppendAsync(runId, new(OwnedEventKind.Terminal, Outcome: outcome, ErrorCode: errorCode, Retirement: retirement,
-                UncertainStep: current.Events.LastOrDefault()?.Kind == OwnedEventKind.StepStarted)).ConfigureAwait(false);
+                UncertainStep: (current.Events.Count == 0 ? null : current.Events[^1])?.Kind == OwnedEventKind.StepStarted)).ConfigureAwait(false);
             progress(terminal); return terminal;
         }
         catch (Exception) { journal.Freeze(); var recovery = journal.Read(runId); progress(recovery); return recovery; }

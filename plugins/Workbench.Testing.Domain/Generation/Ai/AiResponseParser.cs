@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Text;
 using System.Text.Json;
 using Workbench.Testing.Domain.Serialization;
@@ -6,6 +7,7 @@ namespace Workbench.Testing.Domain.Generation.Ai;
 
 internal static class AiResponseParser
 {
+    private static readonly SearchValues<char> ResponseIdBody = SearchValues.Create("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-");
     internal static AiGenerationCapture Parse(AiInputCapture input, byte[] bytes, string key)
     {
         try
@@ -14,7 +16,7 @@ internal static class AiResponseParser
             var root = response.RootElement;
             var responseId = Text(Property(root, "id"), 128, true);
             if (!responseId.StartsWith("resp_", StringComparison.Ordinal) || responseId.Length < 6
-                || responseId.AsSpan(5).ContainsAnyExcept("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_-")) throw Invalid();
+                || responseId.AsSpan(5).ContainsAnyExcept(ResponseIdBody)) throw Invalid();
             var model = Text(Property(root, "model"), 128, true);
             if (model != AiTestCaseGenerator.Model) throw Invalid();
             if (Text(Property(root, "status"), 64, true) != "completed" || NonNull(root, "error") || NonNull(root, "incomplete_details"))

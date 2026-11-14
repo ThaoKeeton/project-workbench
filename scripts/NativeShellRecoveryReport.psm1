@@ -325,9 +325,9 @@ function Test-ShellRecoveryFinal {
         if ($kind -ceq 'conflict' -and (Get-FileHash -LiteralPath (Join-Path $Directory $report.relativePath) -Algorithm SHA256).Hash.ToLowerInvariant() -cne $r.collisionBefore) { throw 'ShellRecoveryCollisionInvalid' }
     }
     foreach ($image in $r.images) {
-        $matches = @($r.processes | Where-Object { $_.processId -eq $image.processId -and $_.creationFileTime -eq $image.creationFileTime -and $_.windowHandle -eq $image.windowHandle })
-        if ($matches.Count -ne 1 -or $matches[0].role -cne 'healthy') { throw 'ShellRecoveryImageIdentityInvalid' }
-        Test-ShellRecoveryImage -Directory $Directory -Image $image -Identity $matches[0]
+        $owners = @($r.processes | Where-Object { $_.processId -eq $image.processId -and $_.creationFileTime -eq $image.creationFileTime -and $_.windowHandle -eq $image.windowHandle })
+        if ($owners.Count -ne 1 -or $owners[0].role -cne 'healthy') { throw 'ShellRecoveryImageIdentityInvalid' }
+        Test-ShellRecoveryImage -Directory $Directory -Image $image -Identity $owners[0]
     }
     Test-ShellRecoveryNoWriteEvidence $r.cancelEvidence 'cancel' $Directory $r.reports
     Test-ShellRecoveryNoWriteEvidence $r.closeEvidence 'close' $Directory $r.reports

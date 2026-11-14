@@ -121,7 +121,7 @@ public sealed class WebPathTests
         await using var host = await SyntheticCdpHost.StartAsync();
         var repair = new CountingRepair(_ => new LocatorSuggestion("#ok", 12));
         var runner = Fixtures.Runner(new ScriptedFactory(), new FakeComputerUseProvider(), new RecordingExporter(), new RecordingDeadline(), root, reports, repair);
-        var suite = new SuiteLoader().Load(File.ReadAllText(suiteFile)) with { Application = new ApplicationTarget(null, "合成页面", host.Port, Attach: true) };
+        var suite = SuiteLoader.Load(File.ReadAllText(suiteFile)) with { Application = new ApplicationTarget(null, "合成页面", host.Port, Attach: true) };
         var sink = new ListSink();
         await runner.RunAsync(suite, new RunRequest("repair-run", Fixtures.Policy(repair: true), reports, suiteFile), sink, CancellationToken.None);
         Assert.Equal(1, repair.Calls);
@@ -132,7 +132,7 @@ public sealed class WebPathTests
         Assert.Contains("#ok", saved, StringComparison.Ordinal);
         var again = new CountingRepair(_ => new LocatorSuggestion("#ok", 12));
         var second = Fixtures.Runner(new ScriptedFactory(), new FakeComputerUseProvider(), new RecordingExporter(), new RecordingDeadline(), root, reports, again);
-        var reloaded = new SuiteLoader().Load(saved) with { Application = suite.Application };
+        var reloaded = SuiteLoader.Load(saved) with { Application = suite.Application };
         await second.RunAsync(reloaded, new RunRequest("repair-run-2", Fixtures.Policy(repair: true), reports, suiteFile), new ListSink(), CancellationToken.None);
         Assert.Equal(0, again.Calls);
 
@@ -167,7 +167,7 @@ public sealed class WebPathTests
         Directory.CreateDirectory(baselines);
         var session = await CdpWebSession.ConnectAsync(host.Port, "合成页面", null, CancellationToken.None);
         var shot = await session!.PerformAsync(Step("shot", "screenshot"), CancellationToken.None);
-        var masked = new ScreenshotMasker().Apply(shot.Png!, []);
+        var masked = ScreenshotMasker.Apply(shot.Png!, []);
         await File.WriteAllBytesAsync(Path.Combine(baselines, "shot.png"), masked.Png);
         await session.DisposeAsync();
         var runner = Fixtures.Runner(new ScriptedFactory(), new FakeComputerUseProvider(), new RecordingExporter(), new RecordingDeadline(), root, reports);

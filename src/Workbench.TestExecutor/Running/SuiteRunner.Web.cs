@@ -72,7 +72,7 @@ public sealed partial class SuiteRunner
             if (result.Found && result.Ok)
             {
                 Publish(sink, request, suite, testCase, current, "passed", engine, null, attempt, false, "passed");
-                await _deps.Artifacts.WriteEvidenceAsync(request.ReportDirectory, testCase.Id, current.Id, "passed", engine, log, masked, cancellationToken);
+                await RunArtifactStore.WriteEvidenceAsync(request.ReportDirectory, testCase.Id, current.Id, "passed", engine, log, masked, cancellationToken);
                 return new WebTry(false, StepOutcome.Pass(masked), "", result.Actual, attempt, false, log, masked);
             }
             error = result.Found ? ExecutorError.AssertionMismatch : result.Actual == ExecutorError.Timeout ? ExecutorError.Timeout : ExecutorError.ControlNotFound;
@@ -113,7 +113,7 @@ public sealed partial class SuiteRunner
         await _deps.Originals.SaveAsync(png, cancellationToken);
         var rectangles = suite.Masks.OfType<RectangleMask>().Select(mask => new PixelRect(mask.X, mask.Y, mask.Width, mask.Height)).ToArray();
         MaskedImage masked;
-        try { masked = _deps.Masker.Apply(png, rectangles); }
+        try { masked = ScreenshotMasker.Apply(png, rectangles); }
         catch (ExecutorDataException)
         {
             log.Add("mask-failed");

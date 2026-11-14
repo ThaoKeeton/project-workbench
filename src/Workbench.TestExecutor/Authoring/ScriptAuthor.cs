@@ -316,7 +316,7 @@ public sealed class ScriptAuthor
             ["maskPasswordControls"] = true,
             ["cases"] = new JsonArray(CaseOf(script))
         };
-        return new SuiteLoader().Load(suite.ToJsonString());
+        return SuiteLoader.Load(suite.ToJsonString());
     }
 
     public static void SaveConfirmed(string previewDirectory, string scriptJson)

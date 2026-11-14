@@ -55,7 +55,7 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
 
         var plugins = new PluginManager(new PluginManagerOptions { PluginsRoot = v1Root, UserRoot = userRoot, HostVersion = new Version(0, 4, 1) });
         await plugins.DiscoverAsync(cancellationToken);
-        var v2Packages = await PluginV2Catalog.LoadAsync(v2Root, cancellationToken, userRoot);
+        var v2Packages = await PluginV2Catalog.LoadAsync(v2Root, userRoot, cancellationToken);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions { Args = [] });
         builder.Logging.ClearProviders();

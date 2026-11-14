@@ -92,7 +92,7 @@ internal static class ProjectWorkspaceStorage
         while ((count = await stream.ReadAsync(buffer, cancellationToken)) != 0)
         {
             if (result.Length + count > limit) throw Error(limitCode);
-            result.Write(buffer, 0, count);
+            await result.WriteAsync(buffer.AsMemory(0, count), cancellationToken);
         }
         return result.ToArray();
     }
@@ -109,7 +109,7 @@ internal static class ProjectWorkspaceStorage
             {
                 var lease = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                 if (lease.Length == 0) return lease;
-                lease.Dispose();
+                await lease.DisposeAsync();
                 throw Error("UnsafePath");
             }
             catch (IOException) when (attempt < 79) { await Task.Delay(25, cancellationToken); }

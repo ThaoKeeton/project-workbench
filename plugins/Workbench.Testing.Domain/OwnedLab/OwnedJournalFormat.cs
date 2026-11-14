@@ -93,11 +93,11 @@ internal static class OwnedJournalFormat
 
     internal static void ValidateNext(OwnedRunSnapshot run, OwnedEvent e)
     {
-        if (e.Schema != 1 || e.Sequence != run.Sequence + 1 || e.PriorHash != run.HeadSha || e.ExecutionSha != run.ExecutionSha || e.Utc.Offset != TimeSpan.Zero || !Enum.IsDefined(e.Kind) || e.Outcome is { } outcome && !Enum.IsDefined(outcome) || run.Events.LastOrDefault()?.Kind == OwnedEventKind.Terminal) Invalid();
+        if (e.Schema != 1 || e.Sequence != run.Sequence + 1 || e.PriorHash != run.HeadSha || e.ExecutionSha != run.ExecutionSha || e.Utc.Offset != TimeSpan.Zero || !Enum.IsDefined(e.Kind) || e.Outcome is { } outcome && !Enum.IsDefined(outcome) || Tail(run.Events)?.Kind == OwnedEventKind.Terminal) Invalid();
         if (e.ErrorCode is not null && new OwnedLabException(e.ErrorCode).ErrorCode != e.ErrorCode) Invalid();
         if (e.Identity is not null) { OwnedWireCodec.ValidateIdentity(e.Identity); if (e.Identity.ImageSha != run.Execution.Helper.ImageSha) Invalid(); }
         if (e.State is not null) OwnedWireCodec.ValidateState(e.State);
-        var previous = run.Events.LastOrDefault();
+        var previous = Tail(run.Events);
         switch (e.Kind)
         {
             case OwnedEventKind.Queued:
@@ -125,13 +125,14 @@ internal static class OwnedJournalFormat
     internal static bool AssertionPasses(TestAction action, OwnedState state) => action.Kind != TestActionKind.AssertText || string.Equals(action.Value, action.ElementId switch { "task.toast" => state.Toast, "task.validation" => state.Validation, "task.createdCount" => state.CreatedCount, _ => throw new OwnedLabException("InvalidPlan") }, StringComparison.Ordinal);
     internal static OwnedRunState Project(IReadOnlyList<OwnedEvent> events, bool restored)
     {
-        var last = events.LastOrDefault();
+        var last = Tail(events);
         return last?.Kind == OwnedEventKind.Terminal ? last.Outcome switch { OwnedOutcome.Passed => OwnedRunState.Passed, OwnedOutcome.Cancelled => OwnedRunState.Cancelled, _ => OwnedRunState.Failed }
             : restored ? OwnedRunState.Interrupted : last?.Kind == OwnedEventKind.Queued || last is null ? OwnedRunState.Queued : OwnedRunState.Running;
     }
     private static bool Unused(OwnedEvent e, bool step, bool outcome, bool error, bool observation, bool frame, bool retirement, bool uncertain) => (!step || e.StepIndex is null) && (!outcome || e.Outcome is null) && (!error || e.ErrorCode is null) && (!observation || e.Identity is null && e.State is null) && (!frame || e.FrameSha is null && e.CaptureKind is null && e.SyntheticTarget is null) && (!retirement || e.Retirement is null) && (!uncertain || e.UncertainStep is null);
     private static void Bounded(string value, int max) { OwnedJson.ValidateUnicode(value); if (value.Length == 0 || value.Contains('\0') || OwnedJson.Utf8.GetByteCount(value) > max) Invalid(); }
     private static string T(JsonElement e, string name) => OwnedJson.Text(e, name);
+    private static OwnedEvent? Tail(IReadOnlyList<OwnedEvent> events) => events.Count == 0 ? null : events[^1];
     private static string? N(JsonElement e, string name) => OwnedJson.NullableText(e, name);
     private static int? Int(JsonElement e, string name) => e.GetProperty(name).ValueKind == JsonValueKind.Null ? null : e.GetProperty(name).GetInt32();
     private static bool? Boolean(JsonElement e, string name) => e.GetProperty(name).ValueKind == JsonValueKind.Null ? null : e.GetProperty(name).GetBoolean();

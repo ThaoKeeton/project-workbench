@@ -43,14 +43,14 @@ internal static partial class PluginV2Catalog
 
     public static bool IsSafePluginId(string? id) => id is { Length: > 0 and <= 128 } && PluginIdPattern().IsMatch(id);
 
-    public static async Task<IReadOnlyList<V2Package>> LoadAsync(string root, CancellationToken cancellationToken = default, string? previewUserRoot = null)
+    public static async Task<IReadOnlyList<V2Package>> LoadAsync(string root, string? previewUserRoot = null, CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(root)) return [];
         List<V2Package> packages = [];
         foreach (var directory in Directory.EnumerateDirectories(root).Order(StringComparer.Ordinal))
         {
             cancellationToken.ThrowIfCancellationRequested();
-            packages.Add(await LoadDirectoryAsync(directory, cancellationToken, previewUserRoot));
+            packages.Add(await LoadDirectoryAsync(directory, previewUserRoot, cancellationToken));
         }
         var duplicates = packages.Where(p => IsSafePluginId(p.Id)).GroupBy(p => p.Id, StringComparer.Ordinal).Where(g => g.Count() > 1).Select(g => g.Key).ToHashSet(StringComparer.Ordinal);
         if (duplicates.Count == 0) return packages;
@@ -59,7 +59,7 @@ internal static partial class PluginV2Catalog
             : p).ToArray();
     }
 
-    private static async Task<V2Package> LoadDirectoryAsync(string directory, CancellationToken cancellationToken, string? previewUserRoot)
+    private static async Task<V2Package> LoadDirectoryAsync(string directory, string? previewUserRoot, CancellationToken cancellationToken)
     {
         var manifestPath = Path.Combine(directory, "plugin.v2.json");
         if (!File.Exists(manifestPath))

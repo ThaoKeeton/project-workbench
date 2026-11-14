@@ -119,7 +119,7 @@ public sealed class TestingSourceTests
         var trace = new TestTrace(source.Id, source.Revision, "../literal", 0);
         var original = "=SUM(1,2)\r\n\"fullwidth ＋\" 🧪";
         var set = await store.CreateCaseSetAsync(PluginTestingContextTests.Owner, new("CSV", [new("12345678901234567890", "@setup", [trace], [new(original,"\t-formula",[trace],null)])]));
-        var csv = new CsvTestCaseExporter().Export(set);
+        var csv = CsvTestCaseExporter.Export(set);
         Assert.Equal(new byte[] {239,187,191}, csv[..3]);
         var text = new UTF8Encoding(false,true).GetString(csv[3..]);
         Assert.EndsWith("\r\n", text, StringComparison.Ordinal);
@@ -152,7 +152,7 @@ public sealed class TestingSourceTests
         var third=new TestTrace(new string('5',32),new string('6',64),"＋fullwidth",2);
         var set=new TestCaseSetSnapshot(new string('7',32),"default",PluginTestingContextTests.Owner,DateTimeOffset.UtcNow,new string('8',64),"CSV",
             [new(new string('9',32),"+case","-setup",[first,third],[new(new string('0',32),"@instruction","\t=expected",[first,second],null)])]);
-        var rows=ParseCsv(Encoding.UTF8.GetString(new CsvTestCaseExporter().Export(set)[3..]));
+        var rows=ParseCsv(Encoding.UTF8.GetString(CsvTestCaseExporter.Export(set)[3..]));
         var headers=rows[0];Assert.Equal(5,rows.Count);
         string Cell(string[] row,string name)=>row[System.Array.IndexOf(headers,name)];
         Assert.Equal(new[]{"'case","'case","'step","'step"},rows.Skip(1).Select(r=>Cell(r,"traceScope")));
@@ -170,7 +170,7 @@ public sealed class TestingSourceTests
         var set=new TestCaseSetSnapshot(new string('5',32),"default",PluginTestingContextTests.Owner,DateTimeOffset.UtcNow,new string('6',64),"CSV",
             [new(new string('7',32),"case","setup",caseTraces,
                 [new(new string('8',32),"first","expected",stepTraces,null),new(new string('9',32),"second","expected",stepTraces,null)])]);
-        var rows=ParseCsv(new UTF8Encoding(false,true).GetString(new CsvTestCaseExporter().Export(set)[3..]));
+        var rows=ParseCsv(new UTF8Encoding(false,true).GetString(CsvTestCaseExporter.Export(set)[3..]));
         Assert.Equal(13,rows.Count);
         string Cell(string[] row,string name)=>row[Array.IndexOf(rows[0],name)];
         for(var stepIndex=0;stepIndex<2;stepIndex++)

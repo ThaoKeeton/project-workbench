@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 
 namespace Workbench.Core;
 
-internal static class FileSystemGuard
+internal static partial class FileSystemGuard
 {
     internal static void RejectLinks(string path)
     {
@@ -72,9 +72,9 @@ internal static class FileSystemGuard
         [FieldOffset(4)] public ushort Mode;
     }
 
-    [DllImport("libc", EntryPoint = "statx", SetLastError = true)]
-    private static extern int Statx(int directory, string path, int flags, uint mask, out LinuxStatx status);
+    [LibraryImport("libc", EntryPoint = "statx", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int Statx(int directory, string path, int flags, uint mask, out LinuxStatx status);
 
-    [DllImport("libc", EntryPoint = "lstat", SetLastError = true)]
-    private static extern int DarwinLStat(string path, out DarwinStat status);
+    [LibraryImport("libc", EntryPoint = "lstat", SetLastError = true, StringMarshalling = StringMarshalling.Utf8)]
+    private static partial int DarwinLStat(string path, out DarwinStat status);
 }

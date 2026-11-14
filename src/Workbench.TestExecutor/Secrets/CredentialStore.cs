@@ -40,7 +40,7 @@ public sealed class WindowsCredentialStore : IApiKeyStore
     }
 }
 
-public sealed class Advapi32CredentialReader : ICredentialBlobReader
+public sealed partial class Advapi32CredentialReader : ICredentialBlobReader
 {
     public byte[]? Read(string target)
     {
@@ -83,9 +83,10 @@ public sealed class Advapi32CredentialReader : ICredentialBlobReader
         public IntPtr UserName;
     }
 
-    [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
-    private static extern bool CredRead(string target, int type, int reservedFlag, out IntPtr credential);
+    [LibraryImport("advapi32.dll", EntryPoint = "CredReadW", SetLastError = true, StringMarshalling = StringMarshalling.Utf16)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static partial bool CredRead(string target, int type, int reservedFlag, out IntPtr credential);
 
-    [DllImport("advapi32.dll")]
-    private static extern void CredFree(IntPtr credential);
+    [LibraryImport("advapi32.dll", EntryPoint = "CredFree")]
+    private static partial void CredFree(IntPtr credential);
 }

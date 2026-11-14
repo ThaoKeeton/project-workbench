@@ -8,7 +8,7 @@ public sealed class AiGeneratedStep
     internal AiGeneratedStep(string instruction, string expected) { Instruction = instruction; Expected = expected; }
     public string Instruction { get; }
     public string Expected { get; }
-    public TestAction? Action => null;
+    public static TestAction? Action => null;
 }
 
 public sealed class AiGeneratedCase

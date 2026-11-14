@@ -96,7 +96,7 @@ public sealed class AiTestCaseGenerator(HttpMessageHandler? handler = null)
             var count = await stream.ReadAsync(buffer.AsMemory(0, Math.Min(buffer.Length, remaining)), cancellationToken).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
             if (count == 0) return output.ToArray();
-            output.Write(buffer, 0, count);
+            await output.WriteAsync(buffer.AsMemory(0, count), cancellationToken).ConfigureAwait(false);
             if (output.Length > ByteLimit) throw new AiFailure(AiGenerationError.ResponseTooLarge);
         }
     }

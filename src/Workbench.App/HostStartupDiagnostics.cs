@@ -77,6 +77,7 @@ internal sealed class StartupErrorReport
     private readonly string _operatingSystemVersion = Environment.OSVersion.Version.ToString();
     private readonly string _processArchitecture = RuntimeInformation.ProcessArchitecture.ToString();
     private readonly string? _systemErrorCode;
+    private static readonly JsonSerializerOptions Indented = new() { WriteIndented = true };
     internal string ReportId { get; } = Guid.NewGuid().ToString("N");
     internal string Stage { get; }
     internal string ErrorCode { get; }
@@ -116,7 +117,7 @@ internal sealed class StartupErrorReport
         errorCode = ErrorCode,
         category = Category,
         systemErrorCode = _systemErrorCode
-    }, new JsonSerializerOptions { WriteIndented = true });
+    }, Indented);
 
     private static string ReadApplicationVersion()
     {

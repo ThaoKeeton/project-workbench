@@ -178,7 +178,7 @@ public sealed class RunnerAndProviderTests
     [Fact]
     public async Task OpenAi_provider_sends_the_masked_image_only_after_the_flag_and_credential_are_present()
     {
-        var masked = new ScreenshotMasker().Apply(SyntheticFrames.PasswordField().Png, [new PixelRect(8, 8, 16, 8)]);
+        var masked = ScreenshotMasker.Apply(SyntheticFrames.PasswordField().Png, [new PixelRect(8, 8, 16, 8)]);
         var blocked = new StubHandler();
         var denied = new OpenAiComputerUseProvider(new StaticKey(null), () => Fixtures.Policy(), blocked);
         var session = await denied.StartAsync(new ComputerUseStart("noop"), CancellationToken.None);

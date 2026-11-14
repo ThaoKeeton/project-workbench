@@ -77,7 +77,7 @@ internal sealed class NativeTestingLifecycle(NativeActionOwner owner, NativeActi
 
     private async Task LeaveCoreAsync(CancellationToken token)
     {
-        await _phase.WaitAsync().ConfigureAwait(false);
+        await _phase.WaitAsync(token).ConfigureAwait(false);
         var failures = new Failure();
         IDisposable? ownerSeal = null, activitySeal = null, sourceSeal = null, ownedSeal = null, pilotSeal = null;
         try
@@ -139,7 +139,7 @@ internal sealed class NativeTestingLifecycle(NativeActionOwner owner, NativeActi
     {
         var failures = new Failure();
         if (priorLeave is not null) await failures.JoinAsync(priorLeave).ConfigureAwait(false);
-        await _phase.WaitAsync().ConfigureAwait(false);
+        await _phase.WaitAsync(token).ConfigureAwait(false);
         try
         {
             var virtualStop = virtualController is null ? Task.CompletedTask : Start(() => virtualController.StopAsync());

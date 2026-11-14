@@ -83,7 +83,7 @@ public sealed class RunArtifactStore
     private static readonly JsonSchema ReportSchema = JsonSchema.FromText(SuiteLoader.ReadResource("Workbench.TestExecutor.failure-report.v2.schema.json"));
     private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
 
-    public async Task<FailureReport> WriteFailureAsync(string directory, FailureReport report, MaskedImage? masked, CancellationToken cancellationToken)
+    public static async Task<FailureReport> WriteFailureAsync(string directory, FailureReport report, MaskedImage? masked, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(directory);
         string? file = null;
@@ -119,7 +119,7 @@ public sealed class RunArtifactStore
         return stored;
     }
 
-    public async Task WriteEvidenceAsync(string directory, string caseId, string stepId, string status, string engine, IReadOnlyList<string> log, MaskedImage? masked, CancellationToken cancellationToken)
+    public static async Task WriteEvidenceAsync(string directory, string caseId, string stepId, string status, string engine, IReadOnlyList<string> log, MaskedImage? masked, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(directory);
         string? file = null;

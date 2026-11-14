@@ -36,10 +36,10 @@ internal sealed record NativeGalleryFocusDiagnosticData(string SourceCommit, int
     bool PositionReturned, NativeGalleryFocusObservation? FirstFailure, NativeGalleryFocusObservation? TerminalFailure,
     NativeGalleryAboveRootResult AboveRootResult, int AboveRootVisitedCount, int? AboveRootOwnerDistance)
 {
-    public int SchemaVersion => 1;
-    public string Kind => "gallery-focus-boundary";
-    public string ShotId => "upcam-preview";
-    public string ProbePhase => "business-seed";
+    public int SchemaVersion { get; } = 1;
+    public string Kind { get; } = "gallery-focus-boundary";
+    public string ShotId { get; } = "upcam-preview";
+    public string ProbePhase { get; } = "business-seed";
 }
 
 internal static class NativeGalleryFocusDiagnostic

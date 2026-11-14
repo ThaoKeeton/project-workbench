@@ -37,7 +37,7 @@ public sealed class OwnedJournal : IAsyncDisposable
         }
         catch (Exception error) when (error is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException)
         { throw new OwnedLabException("StoreIoFailure"); }
-        finally { lease?.Dispose(); }
+        finally { if (lease is not null) await lease.DisposeAsync().ConfigureAwait(false); }
     }
 
     internal IReadOnlyList<OwnedRunSnapshot> Runs

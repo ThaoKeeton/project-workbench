@@ -44,7 +44,7 @@ internal static class PackageDataBackup
         return await PackageValidator.FingerprintAsync(files, token);
     }
 
-    private static IReadOnlyList<PackageFile> Inventory(string userRoot, string pluginId)
+    private static PackageFile[] Inventory(string userRoot, string pluginId)
     {
         FileSystemGuard.RejectLinks(userRoot);
         var files = new List<PackageFile>();

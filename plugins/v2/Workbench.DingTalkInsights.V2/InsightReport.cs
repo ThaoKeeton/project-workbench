@@ -57,7 +57,7 @@ internal static class InsightReport
         return insights;
     }
 
-    private static IReadOnlyList<EvidenceItem> Evidence(IReadOnlyList<ChatMessage> messages)
+    private static EvidenceItem[] Evidence(IReadOnlyList<ChatMessage> messages)
         => messages.Take(8).Select(message => new EvidenceItem
         {
             MessageId = message.Id,
