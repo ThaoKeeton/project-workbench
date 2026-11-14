@@ -70,7 +70,9 @@ internal sealed partial class JsonPluginSettings(string directory, Action<Plugin
         FileSystemGuard.EnsureRegularFile(_path);
         try
         {
-            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+            // Delete share lets a publisher replace this file while the read is still open.
+            // Without it, Windows returns sharing violation (0x80070020) and the host dies mid-switch.
+            await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, useAsync: true);
             _values = await JsonSerializer.DeserializeAsync<Dictionary<string, JsonElement>>(stream, AtomicJsonFile.Options, cancellationToken)
                 ?? throw new JsonException("The settings document cannot be null.");
         }

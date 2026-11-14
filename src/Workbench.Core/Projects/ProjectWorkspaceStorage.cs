@@ -84,7 +84,7 @@ internal static class ProjectWorkspaceStorage
         _ = PathIn(Path.GetDirectoryName(path)!, Path.GetFileName(path));
         if (!Exists(path)) return null;
         RegularFile(path);
-        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, FileOptions.Asynchronous);
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, FileOptions.Asynchronous);
         if (stream.Length > limit) throw Error(limitCode);
         using var result = new MemoryStream((int)stream.Length);
         var buffer = new byte[81920];

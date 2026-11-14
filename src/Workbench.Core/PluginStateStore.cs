@@ -48,7 +48,7 @@ internal sealed class PluginStateStore(string userRoot)
             if (File.Exists(_path))
             {
                 FileSystemGuard.EnsureRegularFile(_path);
-                await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read, 81920, useAsync: true);
+                await using var stream = new FileStream(_path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 81920, useAsync: true);
                 var document = await JsonSerializer.DeserializeAsync<PluginStateDocument>(stream, ReadOptions, cancellationToken)
                     ?? throw new JsonException("The state document cannot be null.");
                 if (document.Version != 1 || document.Plugins is null || document.Plugins.Any(p =>
