@@ -39,6 +39,7 @@ public sealed class ProjectFixturePlugin : IWorkbenchPlugin
         var settings = _context.Settings;
         var path = Path.Combine(_context.DataDirectory, "prepare-started");
         var release = Path.Combine(_context.DataDirectory, "release-prepare");
+        settings.SetAsync("prepareThread", Thread.CurrentThread.Name ?? "").GetAwaiter().GetResult();
         if (_mode == "sync-held")
         {
             settings.SetAsync("prepareCalls", settings.GetAsync("prepareCalls", 0).GetAwaiter().GetResult() + 1).GetAwaiter().GetResult();

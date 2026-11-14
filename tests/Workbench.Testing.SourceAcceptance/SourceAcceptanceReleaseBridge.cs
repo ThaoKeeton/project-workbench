@@ -68,12 +68,16 @@ internal sealed class SourceAcceptanceReleaseBridge(string directory, string run
         private async Task CompleteAsync()
         {
             ExceptionDispatchInfo? failure = null;
-            try { bridge.PublishDescriptor(identity); }
-            catch (Exception) { failure = ExceptionDispatchInfo.Capture(new IOException("Synthetic source release descriptor publication failed.")); }
+            var published = false;
             try
             {
                 while (!released.IsCompleted)
                 {
+                    if (!published)
+                    {
+                        try { bridge.PublishDescriptor(identity); published = true; failure = null; }
+                        catch (Exception) { failure = ExceptionDispatchInfo.Capture(new IOException("Synthetic source release descriptor publication failed.")); }
+                    }
                     if (bridge.MatchingRequest(identity)) { release(); break; }
                     // This clock only observes files. Neither its timer nor its cancellation releases IO.
                     using var observation = new CancellationTokenSource();

@@ -185,9 +185,19 @@ jobs:
         shell: pwsh
         run: ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240
       - name: Installed synthetic source controls credentials lifecycle and four actual processes
+        id: source_acceptance
         if: ${{ always() && steps.publish_host.outcome == 'success' && steps.source_package.outcome == 'success' }}
         shell: pwsh
         run: ./scripts/source-acceptance-probe.ps1 -TimeoutSeconds 240
+      - name: Repeat installed synthetic source acceptance
+        if: ${{ steps.source_acceptance.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          1..10 | ForEach-Object {
+            $iteration = $_
+            try { ./scripts/source-acceptance-probe.ps1 -TimeoutSeconds 240 }
+            catch { throw "Repeated synthetic source acceptance failed on iteration ${iteration}: $($_.Exception.Message)" }
+          }
       - name: Independent DingTalk and UPCAM in current shipping app
         if: ${{ always() && steps.publish_host.outcome == 'success' && steps.business_export.outcome == 'success' }}
         shell: pwsh

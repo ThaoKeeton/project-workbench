@@ -60,32 +60,57 @@ internal sealed class PluginRegistrationContext : IPluginTestingContext, IDispos
 
     internal Task<ProjectPreparationResult> PrepareProjectLeaveAsync(CancellationToken cancellationToken)
     {
+        Task<ProjectPreparationResult> preparation;
+        Task entered;
         lock (_sync)
         {
             if (_preparation is { IsCompleted: false }) return _preparation;
             if (!_active) return Task.FromResult(new ProjectPreparationResult(false, false, "ProjectContextClosed"));
-            return _preparation = Task.Run(async () =>
+            var enteredSource = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var finished = new TaskCompletionSource<ProjectPreparationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            entered = enteredSource.Task;
+            preparation = _preparation = finished.Task;
+            // The pool can stay busy for longer than the native observation budget
+            // after two project runtimes start. A canceled token must not drop this
+            // callback either: disposal still has to join it.
+            var worker = new Thread(() =>
             {
-                Func<CancellationToken, Task>? prepare;
-                lock (_sync)
-                {
-                    // A stop may close this context before the queued callback
-                    // starts. Its retained task still must settle before disposal.
-                    if (!_active) return new ProjectPreparationResult(false, false, "ProjectContextClosed");
-                    prepare = _beforeProjectLeave;
-                }
-                string? failure = null;
-                using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, Lifetime);
-                try
-                {
-                    linked.Token.ThrowIfCancellationRequested();
-                    if (prepare is not null) await prepare(linked.Token).ConfigureAwait(false);
-                }
-                catch (Exception error) { failure = ProjectFailure.Code(error, "ProjectPreparationFailed"); }
-                await Task.WhenAll(_project.DrainAsync(), _testing.DrainAsync()).ConfigureAwait(false);
-                return new ProjectPreparationResult(failure is null, false, failure);
-            }, cancellationToken);
+                enteredSource.TrySetResult();
+                try { finished.TrySetResult(PrepareCoreAsync(cancellationToken).GetAwaiter().GetResult()); }
+                catch (Exception error) { finished.TrySetException(error); }
+            })
+            { IsBackground = true, Name = "workbench-project-prepare" };
+            try { worker.Start(); }
+            catch (Exception error)
+            {
+                enteredSource.TrySetResult();
+                finished.TrySetException(error);
+            }
         }
+        entered.GetAwaiter().GetResult();
+        return preparation;
+    }
+
+    private async Task<ProjectPreparationResult> PrepareCoreAsync(CancellationToken cancellationToken)
+    {
+        Func<CancellationToken, Task>? prepare;
+        lock (_sync)
+        {
+            // A stop may close this context before the queued callback
+            // starts. Its retained task still must settle before disposal.
+            if (!_active) return new ProjectPreparationResult(false, false, "ProjectContextClosed");
+            prepare = _beforeProjectLeave;
+        }
+        string? failure = null;
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken, Lifetime);
+        try
+        {
+            linked.Token.ThrowIfCancellationRequested();
+            if (prepare is not null) await prepare(linked.Token).ConfigureAwait(false);
+        }
+        catch (Exception error) { failure = ProjectFailure.Code(error, "ProjectPreparationFailed"); }
+        await Task.WhenAll(_project.DrainAsync(), _testing.DrainAsync()).ConfigureAwait(false);
+        return new ProjectPreparationResult(failure is null, false, failure);
     }
 
     internal async Task DrainProjectWorkAsync()

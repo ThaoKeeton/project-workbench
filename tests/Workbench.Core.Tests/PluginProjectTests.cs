@@ -432,6 +432,21 @@ public sealed class PluginProjectTests(ITestOutputHelper output)
     }
 
     [Fact]
+    public async Task Preparation_hook_starts_on_its_own_thread()
+    {
+        var disk = Package();
+        var manager = Manager(disk);
+        await RuntimeTest.WithCleanupAsync([manager], async () =>
+        {
+            await manager.DiscoverAsync();
+            var settings = manager.GetSettings(Id);
+            Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
+            Assert.True((await manager.PrepareProjectLeaveAsync(Id)).Succeeded);
+            Assert.Equal("workbench-project-prepare", await settings.GetAsync("prepareThread", ""));
+        }, disk);
+    }
+
+    [Fact]
     public async Task Duplicate_hook_rolls_back_the_whole_registration()
     {
         var disk = Package();

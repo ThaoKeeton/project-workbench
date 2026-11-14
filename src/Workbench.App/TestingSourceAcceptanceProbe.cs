@@ -263,7 +263,8 @@ internal static partial class TestingSourceAcceptanceProbe
     private static async Task<byte[]> ReadBytesAsync(string path, int maximum)
     {
         HostRuntime.RejectLinks(path);
-        await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.Asynchronous);
+        // Delete share lets the release monitor replace this descriptor while the read is still open.
+        await using var file = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read | FileShare.Delete, 65536, FileOptions.Asynchronous);
         Require(file.Length is > 0 && file.Length <= maximum, "SourceFileBound");
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var bytes = new byte[(int)file.Length]; await file.ReadExactlyAsync(bytes, cts.Token);
