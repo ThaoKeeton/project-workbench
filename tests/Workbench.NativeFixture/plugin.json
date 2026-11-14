@@ -1,0 +1,11 @@
+{
+  "id": "com.projectworkbench.native-fixture",
+  "name": "Isolated native runtime fixture",
+  "version": "1.0.0",
+  "apiVersion": 1,
+  "minimumHostVersion": "0.3.0",
+  "entryAssembly": "Workbench.NativeFixture.dll",
+  "entryType": "Workbench.NativeFixture.NativeFixturePlugin",
+  "description": "Synthetic local-only native/runtime acceptance fixture; never bundled for normal startup.",
+  "capabilities": ["views", "settings", "background-tasks", "secrets"]
+}

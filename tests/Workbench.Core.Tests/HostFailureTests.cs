@@ -1,0 +1,122 @@
+using System.Text.Json;
+using Workbench.App;
+using Xunit;
+
+namespace Workbench.Core.Tests;
+
+public sealed class HostFailureTests
+{
+    [Theory]
+    [InlineData("owner", "UserStoreInUse")]
+    [InlineData("access", "StoreAccessDenied")]
+    [InlineData("io", "StoreIoFailure")]
+    [InlineData("file", "ApplicationFileMissing")]
+    [InlineData("image", "ApplicationFileInvalid")]
+    [InlineData("native", "NativeDependencyMissing")]
+    [InlineData("directory", "StoreDirectoryUnavailable")]
+    [InlineData("load", "ApplicationFileLoadFailed")]
+    public void Known_startup_failures_keep_actionable_codes_without_exposing_exception_text(string kind, string expected)
+    {
+        Exception error = kind switch
+        {
+            "owner" => new UserStoreInUseException(new IOException(PrivateResponse)),
+            "access" => new UnauthorizedAccessException(PrivateResponse),
+            "file" => new FileNotFoundException(PrivateResponse, PrivateResponse),
+            "image" => new BadImageFormatException(PrivateResponse),
+            "native" => new DllNotFoundException(PrivateResponse),
+            "directory" => new DirectoryNotFoundException(PrivateResponse),
+            "load" => new FileLoadException(PrivateResponse, PrivateResponse),
+            _ => new HostileStorageException()
+        };
+        Assert.Equal(expected, HostFailure.ProjectCode(error));
+    }
+
+    [Fact]
+    public void Project_failure_codes_are_allow_listed_even_for_public_sdk_and_storage_exceptions()
+    {
+        Assert.Equal("RevisionConflict", HostFailure.ProjectCode(new Workbench.Sdk.PluginProjectContextException("RevisionConflict")));
+        Assert.Equal("InvalidContext", HostFailure.ProjectCode(new Workbench.Core.Projects.ProjectWorkspaceStoreException("InvalidContext")));
+        Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new Workbench.Sdk.PluginProjectContextException("synthetic-secret-never-log")));
+        Assert.Equal("ProjectOperationFailed", HostFailure.ProjectCode(new Workbench.Core.Projects.ProjectWorkspaceStoreException("synthetic-secret-never-log")));
+        Assert.Equal("Canceled", HostFailure.ProjectCode(new OperationCanceledException()));
+    }
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Shipping_theme_fallback_never_reads_storage_exception_text(bool hostile)
+    {
+        var theme = HostFailure.ReadTheme<int>(() => throw (hostile ? new HostileStorageException() : new IOException(PrivateResponse)), 0);
+        Assert.Equal(0, theme.Theme);
+        Assert.Equal("ThemeSettingsFailed (Storage).", theme.Error);
+        Assert.DoesNotContain(PrivateResponse, theme.Error);
+        var later = HostFailure.ReadTheme(() => 2, 0);
+        Assert.Equal(2, later.Theme);
+        Assert.Null(later.Error);
+    }
+
+    [Fact]
+    public void Corrupted_theme_json_uses_system_theme_with_a_stable_safe_code()
+    {
+        var theme = HostFailure.ReadTheme(() => JsonSerializer.Deserialize<int>("{\"" + PrivateResponse + "\":"), 0);
+        Assert.Equal(0, theme.Theme);
+        Assert.Equal("ThemeSettingsFailed (InvalidData).", theme.Error);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Shipping_view_and_action_boundaries_capture_failures_and_remain_usable(bool hostile)
+    {
+        Exception Failure() => hostile ? new HostileException() : new InvalidOperationException(PrivateResponse);
+        var view = HostFailure.CreateView<object>(() => throw Failure());
+        Assert.Null(view.Value);
+        Assert.Equal("NativeViewFailed (PluginFailure).", view.Error);
+        var action = await HostFailure.RunAsync(async () => { await Task.Yield(); throw Failure(); });
+        Assert.Equal("HostOperationFailed (PluginFailure).", action);
+        var next = new object();
+        Assert.Same(next, HostFailure.CreateView(() => next).Value);
+        var stopped = false;
+        Assert.Null(await HostFailure.RunAsync(() => { stopped = true; return Task.CompletedTask; }));
+        Assert.True(stopped);
+        Assert.Equal("NativeViewFailed (NullView).", HostFailure.CreateView<object>(() => null).Error);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Failure_reports_never_evaluate_plugin_exception_text(bool hostile)
+    {
+        using var disk = new TestDirectory();
+        var path = Path.Combine(disk.Root, "failure.json");
+        var options = new RunOptions(true, disk.User, path);
+        options.WriteFailure("synthetic-failure", hostile ? new HostileException() : new InvalidOperationException(PrivateResponse), PrivateResponse);
+        var report = File.ReadAllText(path);
+        Assert.DoesNotContain(PrivateResponse, report);
+        using var json = JsonDocument.Parse(report);
+        Assert.Contains("HostOperationFailed", json.RootElement.GetProperty("error").GetString());
+        Assert.Equal(hostile ? typeof(HostileException).FullName : typeof(InvalidOperationException).FullName,
+            json.RootElement.GetProperty("exceptionType").GetString());
+    }
+
+    [Fact]
+    public async Task Timeout_is_a_stable_category_and_its_message_stays_out_of_the_code()
+    {
+        var action = await HostFailure.RunAsync(() => throw new TimeoutException(PrivateResponse));
+        Assert.Equal("HostOperationFailed (Timeout).", action);
+        Assert.DoesNotContain(PrivateResponse, action);
+    }
+
+    internal const string PrivateResponse = "synthetic-private-native-provider-response";
+    internal sealed class HostileException : Exception
+    {
+        public override string Message => throw new InvalidOperationException("Host evaluated plugin Message.");
+        public override string ToString() => throw new InvalidOperationException("Host evaluated plugin ToString.");
+    }
+
+    private sealed class HostileStorageException : IOException
+    {
+        public override string Message => throw new InvalidOperationException("Host evaluated storage Message.");
+        public override string ToString() => throw new InvalidOperationException("Host evaluated storage ToString.");
+        public override Exception GetBaseException() => throw new InvalidOperationException("Host evaluated storage GetBaseException.");
+    }
+}

@@ -1,0 +1,3 @@
+tests/integration/dingtalk/provenance.json -text
+tests/integration/upcam/provenance.json -text
+src/Workbench.App/Assets/Workbench.ico -text

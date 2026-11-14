@@ -1,0 +1,31 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+.superpowers/
+artifacts/
+TestResults/
+*.user
+*.suo
+*.log
+
+# Native Windows tool state produced by Linux reference probes
+**/.mono/
+
+# Local authoring config, spend, and model transcripts. Never commit keys.
+**/author.local.json
+**/author-spend.json
+**/author-log/
+
+# v2 preview web UI
+web/host/node_modules/
+tests/fixtures/TestExecutor.SyntheticElectron/node_modules/
+tests/fixtures/TestExecutor.SyntheticElectron/app.js
+web/host/dist/
+web/host/test-results/
+web/host/playwright-report/
+web/host/e2e/screenshots/
+web/host/coverage/
+desktop/shell/node_modules/
+desktop/shell/dist/
+desktop/shell/coverage/

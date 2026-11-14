@@ -1,0 +1,23 @@
+{
+  "contract": "workbench.plugin.v2",
+  "contractVersion": "2.0.0-preview.1",
+  "id": "com.projectworkbench.upcam-standup.v2",
+  "name": "UPCAM 站会日报",
+  "version": "0.1.0",
+  "description": "从本机文件或文件夹整理今日站会事项和发言摘要，草稿只写在本机。不连接 Teambition，不调用模型，不发送。",
+  "autoSend": false,
+  "backend": {
+    "entryAssembly": "Workbench.UpcamStandup.V2.dll",
+    "entryType": "Workbench.UpcamStandup.V2.UpcamStandupModule"
+  },
+  "ui": {
+    "kind": "web-package",
+    "module": "./ui/UpcamPanel.tsx",
+    "mount": "embedded"
+  },
+  "permissions": [
+    { "id": "project.read", "reason": "按当前项目隔离站会草稿", "sensitive": false },
+    { "id": "plugin.data.read", "reason": "读取本插件自己的站会草稿", "sensitive": false },
+    { "id": "plugin.data.write", "reason": "把站会草稿写入本插件自己的目录", "sensitive": false }
+  ]
+}

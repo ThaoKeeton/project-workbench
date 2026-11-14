@@ -1,0 +1,70 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../plugins/Workbench.Testing/TestingSourceServices.cs" Link="Testing/TestingSourceServices.cs" />
+    <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceProtocol.cs" Link="SourceAcceptance/SourceAcceptanceProtocol.cs" />
+    <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceScenarioLedger.cs" Link="SourceAcceptance/SourceAcceptanceScenarioLedger.cs" />
+    <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceHttpHandlers.cs" Link="SourceAcceptance/SourceAcceptanceHttpHandlers.cs" />
+    <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceOwnership.cs" Link="SourceAcceptance/SourceAcceptanceOwnership.cs" />
+    <Compile Include="../Workbench.Testing.SourceAcceptance/SourceAcceptanceReleaseBridge.cs" Link="SourceAcceptance/SourceAcceptanceReleaseBridge.cs" />
+    <Compile Include="../../src/Workbench.App/HostRuntime.cs" Link="Host/HostRuntime.cs" />
+    <Compile Include="../../src/Workbench.App/WorkspaceRootLease.cs" Link="Host/WorkspaceRootLease.cs" />
+    <Compile Include="../../src/Workbench.App/ProjectDocumentSession.cs" Link="Host/ProjectDocumentSession.cs" />
+    <Compile Include="../../src/Workbench.App/WorkspaceRuntimeCoordinator.cs" Link="Host/WorkspaceRuntimeCoordinator.cs" />
+    <Compile Include="../../src/Workbench.App/ProjectTransition.cs" Link="Host/ProjectTransition.cs" />
+    <Compile Include="../../src/Workbench.App/RunOptions.cs" Link="Host/RunOptions.cs" />
+    <Compile Include="../../src/Workbench.App/HostThemeSession.cs" Link="Host/HostThemeSession.cs" />
+    <Compile Include="../../src/Workbench.App/HostFailure.cs" Link="Host/HostFailure.cs" />
+    <Compile Include="../../src/Workbench.App/HostStartupDiagnostics.cs" Link="Host/HostStartupDiagnostics.cs" />
+    <Compile Include="../../src/Workbench.App/HostErrorReportExport.cs" Link="Host/HostErrorReportExport.cs" />
+    <Compile Include="../../src/Workbench.App/PackagePresentation.cs" Link="Host/PackagePresentation.cs" />
+    <Compile Include="../../src/Workbench.App/NativeProbeEvidence.cs" Link="Host/NativeProbeEvidence.cs" />
+    <Compile Include="../../src/Workbench.App/NativeStoreObservation.cs" Link="Host/NativeStoreObservation.cs" />
+    <Compile Include="../../src/Workbench.App/NativeGalleryPolicy.cs" Link="Host/NativeGalleryPolicy.cs" />
+    <Compile Include="../../src/Workbench.App/NativeGalleryFocusDiagnostic.cs" Link="Host/NativeGalleryFocusDiagnostic.cs" />
+    <Compile Include="../../src/Workbench.App/TestingNativeProbe.Diagnostics.cs" Link="Host/TestingNativeProbe.Diagnostics.cs" />
+    <Compile Include="../../plugins/Shared/SampleTextBuffer.cs" Link="Samples/SampleTextBuffer.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeActionOwner.cs" Link="Testing/NativeActionOwner.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeInvocationFeedback.cs" Link="Testing/NativeInvocationFeedback.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeOwnedPilot.cs" Link="Testing/NativeOwnedPilot.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeOwnedEvidence.cs" Link="Testing/NativeOwnedEvidence.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeTestingLifecycle.cs" Link="Testing/NativeTestingLifecycle.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeActivityCoordinator.cs" Link="Testing/NativeActivityCoordinator.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeSourceDraft.cs" Link="Testing/NativeSourceDraft.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeRemoteOperation.cs" Link="Testing/NativeRemoteOperation.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeRunAdmission.cs" Link="Testing/NativeRunAdmission.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeTestingFiles.cs" Link="Testing/NativeTestingFiles.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeEventSelection.cs" Link="Testing/NativeEventSelection.cs" />
+    <Compile Include="../../plugins/Workbench.Testing/NativeEvidenceCache.cs" Link="Testing/NativeEvidenceCache.cs" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="Microsoft.Extensions.TimeProvider.Testing" Version="10.0.0" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <ProjectReference Include="../../src/Workbench.Core/Workbench.Core.csproj" />
+    <ProjectReference Include="../../plugins/Workbench.Testing.Domain/Workbench.Testing.Domain.csproj" />
+    <ProjectReference Include="../Workbench.TestDependency/Workbench.TestDependency.csproj" />
+    <ProjectReference Include="../Workbench.TestPlugin/Workbench.TestPlugin.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../Workbench.DeploymentProbe/Workbench.DeploymentProbe.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyPluginFixture" AfterTargets="Build">
+    <ItemGroup>
+      <FixtureFiles Include="../Workbench.TestPlugin/bin/$(Configuration)/$(TargetFramework)/Workbench.TestPlugin.dll;../Workbench.TestPlugin/bin/$(Configuration)/$(TargetFramework)/Workbench.TestPlugin.deps.json;../Workbench.TestPlugin/bin/$(Configuration)/$(TargetFramework)/Workbench.TestDependency.dll" />
+    </ItemGroup>
+    <Copy SourceFiles="@(FixtureFiles)" DestinationFolder="$(OutDir)fixtures" />
+  </Target>
+  <Target Name="PublishDeploymentProbe" AfterTargets="Build">
+    <MSBuild Projects="../Workbench.DeploymentProbe/Workbench.DeploymentProbe.csproj"
+             Targets="Publish"
+             Properties="Configuration=$(Configuration);PublishDir=$(TargetDir)deployment-probe/" />
+  </Target>
+</Project>

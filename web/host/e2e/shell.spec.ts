@@ -1,0 +1,521 @@
+import AxeBuilder from "@axe-core/playwright";
+import { expect, test, type Page } from "@playwright/test";
+
+test.beforeEach(async ({ page, request }) => {
+  await request.post("http://127.0.0.1:4317/api/v2/__reset");
+  await page.addInitScript(() => {
+    sessionStorage.setItem("workbench.session", "preview-session");
+    if (!sessionStorage.getItem("workbench.theme-ready")) {
+      localStorage.removeItem("workbench.theme");
+      sessionStorage.setItem("workbench.theme-ready", "1");
+    }
+  });
+});
+
+async function chooseTheme(page: Page, name: "深色" | "浅色" | "跟随系统") {
+  await page.goto("/settings");
+  await page.getByRole("radio", { name: new RegExp(name) }).click();
+  await expect(page.getByRole("radio", { name: new RegExp(name) })).toBeChecked();
+}
+
+async function shot(page: Page, name: string) {
+  await page.screenshot({ path: `e2e/screenshots/${name}.png`, fullPage: true });
+}
+
+test("project switch updates the current project", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeVisible();
+  const rail = page.getByRole("navigation", { name: "主导航" });
+  await expect(rail.getByRole("button", { name: "UPCAM 站会日报" })).toBeVisible();
+  await expect(rail.getByRole("button", { name: "钉钉 Insights" })).toBeVisible();
+  await expect(rail.getByRole("button", { name: "测试设计" })).toBeVisible();
+      await expect(rail.getByRole("button", { name: "自动测试" })).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await page.getByRole("option", { name: "灯塔实验" }).click();
+  await expect(page.locator(".context-project")).toContainText("灯塔实验");
+});
+
+test("sample cases stay on their own local page", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await chooseTheme(page, "深色");
+  await page.goto("/plugins/test-cases");
+  const step = page.getByRole("textbox", { name: "EX-001 步骤" });
+  await expect(step).toHaveValue("启用本地插件");
+  await step.fill("查看本地示例");
+  await page.getByRole("button", { name: "保存示例草稿" }).click();
+  await expect(page.getByRole("status")).toHaveText("已保存到本机，未发送。");
+  await page.reload();
+  await expect(page.getByRole("textbox", { name: "EX-001 步骤" })).toHaveValue("查看本地示例");
+});
+
+test("launcher opens the synthetic test dashboard", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/");
+  await page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "测试设计" }).click();
+  await expect(page.getByRole("heading", { name: "测试设计" })).toBeVisible();
+  await expect(page.getByRole("note")).toContainText("不替代人工验收");
+  await expect(page.getByRole("cell", { name: "SYN-TC-001", exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("cell", { name: "未验收" }).first()).toBeVisible();
+});
+
+test("a local standup file becomes today's draft and ding send stays closed", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 });
+  await page.goto("/plugin/upcam");
+  const today = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+  const notes = `日期: ${today}\n\n事项: SYN-044\n标题: 本机导入\n负责人: 界面\n状态: 进行中\n发言: 这条来自本机文件。\n`;
+  await page.getByLabel("选择站会文件", { exact: true }).setInputFiles({ name: "notes.txt", mimeType: "text/plain", buffer: Buffer.from(notes) });
+  await expect(page.getByRole("cell", { name: "SYN-044" })).toBeVisible();
+  await expect(page.getByRole("cell", { name: "界面" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveText("已从本机导入，未发送。");
+  await page.reload();
+  await expect(page.getByRole("cell", { name: "SYN-044" })).toBeVisible();
+
+  const sends: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("/actions/send")) sends.push(request.url());
+  });
+  await page.goto("/plugin/ding");
+  await page.getByRole("button", { name: "载入合成样本" }).click();
+  await page.getByRole("button", { name: "按需分析" }).click();
+  await expect(page.getByText("登录页对照出现 3 次")).toBeVisible();
+  await expect(page.getByRole("button", { name: "发送已关闭" })).toBeDisabled();
+  await page.getByRole("button", { name: "发送已关闭" }).click({ force: true });
+  expect(sends).toEqual([]);
+});
+
+test("follow system tracks the color scheme", async ({ page }) => {
+  await page.emulateMedia({ colorScheme: "dark" });
+  await page.goto("/settings");
+  await page.getByRole("radio", { name: /跟随系统/ }).click();
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "dark");
+  await page.emulateMedia({ colorScheme: "light" });
+  await expect(page.locator("html")).toHaveAttribute("data-theme", "light");
+});
+
+for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const) {
+  test.describe(theme, () => {
+    test.beforeEach(async ({ page }) => {
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await chooseTheme(page, label);
+    });
+
+    test("home, palette, and device menu", async ({ page }) => {
+      await page.goto("/");
+      await expect(page.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeVisible();
+      await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
+      await shot(page, `home-${theme}`);
+      const axe = await new AxeBuilder({ page }).withTags(["wcag2aa"]).analyze();
+      const serious = axe.violations.filter((item) => item.impact === "serious" || item.impact === "critical");
+      expect(serious, serious.map((item) => item.id).join(",")).toEqual([]);
+      await page.keyboard.press("Control+k");
+      await expect(page.getByRole("dialog", { name: "命令条" })).toBeVisible();
+      await shot(page, `command-${theme}`);
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: /星河笔记本/ }).click();
+      await expect(page.getByRole("menuitem", { name: /书房工作站/ })).toBeVisible();
+      await shot(page, `devices-menu-${theme}`);
+    });
+
+    test("market, installed, updates, and import", async ({ page }) => {
+      await page.goto("/market");
+      await expect(page.getByRole("heading", { name: "插件市场" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "安装" }).first()).toBeVisible();
+      await shot(page, `market-${theme}`);
+      await page.getByRole("link", { name: "已安装" }).click();
+      await expect(page.getByRole("heading", { name: "已安装" })).toBeVisible();
+      await shot(page, `installed-${theme}`);
+      await page.getByRole("link", { name: "更新" }).click();
+      await expect(page.getByText("即将安装")).toBeVisible();
+      await shot(page, `updates-${theme}`);
+      await page.getByRole("link", { name: "本地导入" }).click();
+      await expect(page.getByText("未请求网络访问")).toBeVisible();
+      await shot(page, `import-${theme}`);
+    });
+
+    test("wizard drafts, demos, and keeps a saved test on the home", async ({ page }) => {
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.fake", "pass");
+        sessionStorage.setItem("workbench.author.pace", "700");
+      });
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByRole("status")).toContainText("已连接");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await expect(page.getByRole("heading", { name: "它会做" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "它会核对" })).toBeVisible();
+      await expect(page.getByText("旁边的牙保持原样")).toHaveCount(1);
+      await expect(page.getByText("今天还能生成 20 次。")).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `wizard-checklist-${theme}`);
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await expect(page.getByText("正在演示。可以取消。")).toBeVisible();
+      await expect(page.getByText("没跑").first()).toBeVisible();
+      await shot(page, `wizard-demo-${theme}`);
+      await expect(page.getByText("通过", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("工件体积从 8 变成 4，小了 50%", { exact: true })).toBeVisible();
+      await expect(page.getByRole("img", { name: "之后" })).toBeVisible();
+      await shot(page, `wizard-pass-${theme}`);
+      await page.getByRole("button", { name: "保存并设置每天重跑" }).click();
+      await page.getByLabel("每天重跑的时间").fill("07:30");
+      await shot(page, `wizard-schedule-${theme}`);
+      await page.getByRole("button", { name: "保存安排" }).click();
+      await page.getByRole("button", { name: "回到首页" }).click();
+      await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
+      await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
+      await expect(page.getByText(/下次 (今天|明天) 07:30/)).toBeVisible();
+      await shot(page, `wizard-home-${theme}`);
+    });
+
+    test("home shows dated saved tests and can hide the ones that passed", async ({ page }) => {
+      await page.addInitScript(() => sessionStorage.setItem("workbench.author.samples", "1"));
+      await page.goto("/plugin/runner");
+      await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
+      await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "更多" }).first()).toHaveText("⋯");
+      await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
+      await expect(page.getByText(/上次 今天/).first()).toBeVisible();
+      await expect(page.getByText(/下次 今天/).first()).toBeVisible();
+      await expect(page.getByText(/下次 明天/).first()).toBeVisible();
+      await expect(page.getByText(/\d+月\d+日/).first()).toBeVisible();
+      await expect(page.getByText("没通过").first()).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `wizard-library-${theme}`);
+      await shot(page, `saved-list-${theme}`);
+      await page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" }).click();
+      await expect(page.locator(".row-open", { hasText: "切削后体积减小" })).toHaveCount(0);
+      await expect(page.locator(".row-open", { hasText: "旁边的牙变了" })).toBeVisible();
+    });
+
+    test("app picker, a live connection, an already-open app, and AI settings", async ({ page }) => {
+      await page.goto("/plugin/runner");
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeVisible();
+      await expect(page.getByRole("list", { name: "三步" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
+      await page.setViewportSize({ width: 1100, height: 640 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await shot(page, `journey-01-empty-${theme}`);
+      await shot(page, `empty-home-${theme}`);
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await expect(page.getByRole("heading", { name: "最近用过的" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "这台电脑上的程序" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "浏览…" })).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `wizard-apps-${theme}`);
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：合成电子样品");
+      await expect(page.getByText("认出了 3D 画面，里面有 2 个物体")).toBeVisible();
+      await expect(page.getByRole("img", { name: "程序画面" })).toBeVisible();
+      await shot(page, `wizard-connected-${theme}`);
+      await page.getByRole("button", { name: "已经开着的样品" }).click();
+      await expect(page.getByRole("status")).toHaveText("这个程序已经开着，需要由工作台重新打开它。");
+      await expect(page.getByRole("button", { name: "关掉并重新打开" })).toBeVisible();
+      await shot(page, `wizard-busy-${theme}`);
+      await page.getByRole("button", { name: "关掉并重新打开" }).click();
+      await page.getByRole("dialog", { name: "确认重新打开" }).getByRole("button", { name: "关掉并重新打开" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：已经开着的样品");
+      await page.getByRole("button", { name: "记事本" }).click();
+      await expect(page.getByRole("status")).toHaveText("这个程序还不能自动测试。");
+      await page.getByLabel("浏览程序").setInputFiles({ name: "连不上的样品.exe", mimeType: "application/octet-stream", buffer: Buffer.from("x") });
+      await expect(page.getByRole("status")).toHaveText("连上用的时间太长了。");
+      await page.getByRole("button", { name: "再试一次" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：连不上的样品");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("link", { name: "去设置" }).click();
+      await expect(page.getByRole("heading", { name: "AI 设置" })).toBeVisible();
+      await expect(page.getByText("每天重跑不会再用 AI。").first()).toBeVisible();
+      await expect(page.getByLabel("密钥")).toHaveAttribute("type", "password");
+      await shot(page, `wizard-ai-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "1"));
+      await page.getByLabel("密钥").fill("sample-key-0001");
+      await page.getByRole("button", { name: "测试一下" }).click();
+      await expect(page.getByRole("status")).toHaveText("可以用");
+      await expect(page.getByRole("status")).not.toContainText("sample-key");
+      await page.getByRole("button", { name: "保存" }).click();
+      await expect(page.getByRole("heading", { name: "看它准备做什么" })).toBeVisible();
+    });
+
+    test("AI settings use the same buttons, presets, and a saved key", async ({ page }) => {
+      await page.goto("/settings/ai");
+      await expect(page.getByRole("heading", { name: "AI 设置" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "保存" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "测试一下" })).toBeVisible();
+      const radius = await page.getByRole("button", { name: "保存" }).evaluate((node) => getComputedStyle(node).borderRadius);
+      expect(radius === "6px" || radius === "8px").toBe(true);
+      await shot(page, `wizard-ai-empty-${theme}`);
+      await page.getByRole("radio", { name: "兼容接口" }).click();
+      await page.getByRole("button", { name: "DeepSeek" }).click();
+      await expect(page.getByLabel("接口地址")).toHaveValue("https://api.deepseek.com");
+      await expect(page.getByLabel("模型")).toHaveValue("deepseek-flash");
+      await shot(page, `wizard-ai-preset-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "1"));
+      await page.getByLabel("密钥").fill("sample-key-0001");
+      await page.getByRole("button", { name: "测试一下" }).click();
+      await expect(page.getByRole("status")).toHaveText("可以用");
+      await shot(page, `wizard-ai-result-${theme}`);
+      await page.getByRole("button", { name: "保存" }).click();
+      await expect(page.getByRole("status")).toHaveText("已保存");
+      await expect(page.getByLabel("已保存的密钥")).toHaveText("••••••••");
+      await expect(page.getByRole("button", { name: "更换" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "删除" })).toBeVisible();
+      await shot(page, `wizard-ai-saved-${theme}`);
+    });
+
+    test("schedule, missed start, a changed page, and past results", async ({ page }) => {
+      test.setTimeout(60_000);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.fake", "pass");
+        sessionStorage.setItem("workbench.author.pace", "0");
+      });
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await page.getByRole("button", { name: "保存并设置每天重跑" }).click();
+      await expect(page.getByText("到点时这台电脑要开着，工作台也要开着。")).toBeVisible();
+      await expect(page.getByRole("button", { name: "周一" })).toHaveAttribute("aria-pressed", "true");
+      await expect(page.getByRole("button", { name: "开机时自动启动工作台：关" })).toBeVisible();
+      await shot(page, `wizard-schedule-days-${theme}`);
+      await page.goto("/");
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.summary", JSON.stringify({ ran: 8, passed: 7, failed: 1, needsUpdate: 0 })));
+      await page.reload();
+      await expect(page.getByRole("link", { name: /今天跑了 8 个，7 个通过，1 个没通过/ })).toBeVisible();
+      await shot(page, `launcher-summary-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.summary", JSON.stringify({ ran: 8, passed: 7, failed: 0, needsUpdate: 1 })));
+      await page.reload();
+      await expect(page.getByRole("link", { name: "今天跑了 8 个，7 个通过，1 个需要更新" })).toBeVisible();
+      await shot(page, `launcher-summary-update-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.summary", JSON.stringify({ ran: 8, passed: 6, failed: 1, needsUpdate: 1 })));
+      await page.reload();
+      await expect(page.getByRole("link", { name: "今天跑了 8 个，6 个通过，1 个没通过，1 个需要更新" })).toBeVisible();
+      await shot(page, `launcher-summary-mixed-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.samples", "1"));
+      await page.getByRole("link", { name: /今天跑了 8 个/ }).click();
+      await expect(page).toHaveURL(/filter=todo/);
+      await expect(page.getByRole("button", { name: "要处理的", pressed: true })).toBeVisible();
+      await expect(page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" })).toHaveAttribute("aria-pressed", "false");
+      await expect(page.getByText("旁边的牙变了")).toBeVisible();
+      await expect(page.getByText("画面文字不对")).toBeVisible();
+      await expect(page.locator(".saved-list .is-update .result-label")).toHaveText("需要更新");
+      await expect(page.getByText("切削后体积减小")).toHaveCount(0);
+      const todoLabels = await page.locator(".saved-list .result-label").allTextContents();
+      expect(todoLabels.lastIndexOf("没通过")).toBeGreaterThanOrEqual(0);
+      expect(todoLabels.lastIndexOf("没通过")).toBeLessThan(todoLabels.indexOf("需要更新"));
+      await shot(page, `filter-todo-${theme}`);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.samples", "1");
+        sessionStorage.setItem("workbench.author.fake", "changed");
+        sessionStorage.setItem("workbench.author.boot", "1");
+        sessionStorage.setItem("workbench.author.now", "2026-11-13T12:00:00");
+        sessionStorage.removeItem("workbench.author.key");
+      });
+      await page.goto("/plugin/runner");
+      await expect(page.getByRole("status")).toHaveText("上次到点时电脑关着，刚补跑了一次。");
+      await page.getByRole("button", { name: "现在跑一次" }).first().click();
+      await expect(page.getByRole("status").first()).toHaveText("第 2 步找不到「开始」按钮");
+      await expect(page.getByText("停在这一步。这张画面只留在这台电脑上。")).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toHaveCount(0);
+      await expect(page.getByText("需要更新", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("找不到", { exact: true })).toBeVisible();
+      await expect(page.getByRole("button", { name: "用 AI 修一下" })).toBeDisabled();
+      await expect(page.getByText("需要先设置 AI 密钥")).toBeVisible();
+      await expect(page.getByRole("link", { name: "去设置" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "重新演示并更新" })).toBeVisible();
+      await shot(page, `wizard-stale-nokey-${theme}`);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.samples", "1");
+        sessionStorage.setItem("workbench.author.fake", "changed");
+        sessionStorage.setItem("workbench.author.key", "1");
+        sessionStorage.setItem("workbench.author.boot", "0");
+        sessionStorage.setItem("workbench.author.now", "2026-11-13T12:00:00");
+      });
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "现在跑一次" }).first().click();
+      await expect(page.getByRole("button", { name: "用 AI 修一下" })).toBeEnabled();
+      await expect(page.getByText("需要先设置 AI 密钥")).toHaveCount(0);
+      await shot(page, `wizard-stale-key-${theme}`);
+      await page.getByRole("button", { name: "用 AI 修一下" }).click();
+      await expect(page.getByText("这是建议的修改，还没保存。")).toBeVisible();
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.samples", "1");
+        sessionStorage.setItem("workbench.author.fake", "off");
+        sessionStorage.setItem("workbench.author.boot", "0");
+        sessionStorage.removeItem("workbench.author.key");
+        sessionStorage.setItem("workbench.author.now", "2026-11-13T12:00:00");
+      });
+      await page.goto("/plugin/runner");
+      await page.locator(".row-open", { hasText: "切削后体积减小" }).click();
+      await expect(page.getByRole("list", { name: "以前的结果" })).toBeVisible();
+      await expect(page.getByText("前后画面只留最近 30 次")).toBeVisible();
+      const past = page.getByRole("list", { name: "以前的结果" }).getByRole("button");
+      await expect(past.first()).toHaveAttribute("aria-current", "true");
+      await expect(past.first()).toContainText("通过");
+      await shot(page, `wizard-history-${theme}`);
+      await past.filter({ hasText: "需要更新" }).click();
+      await expect(page.getByRole("status").first()).toHaveText("第 2 步找不到「开始」按钮");
+    });
+
+    test("a first visit walks from an empty home through a fix", async ({ page }) => {
+      test.setTimeout(90_000);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.fake", "pass");
+        sessionStorage.setItem("workbench.author.pace", "0");
+      });
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await shot(page, `journey-02-pick-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.wait", "open"));
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByText("正在打开「合成电子样品」…")).toBeVisible();
+      await expect(page.getByRole("button", { name: "浏览…" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "下一步" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "下一步" })).toHaveAttribute("tabindex", "-1");
+      await shot(page, `journey-03-starting-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.wait", "connect"));
+      await expect(page.getByText("正在连上…")).toBeVisible();
+      await expect(page.getByRole("button", { name: "下一步" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "下一步" })).toHaveAttribute("tabindex", "-1");
+      expect(await page.getByRole("button", { name: "下一步" }).evaluate((node) => getComputedStyle(node).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+      await shot(page, `connect-connecting-${theme}`);
+      await page.getByRole("button", { name: "取消" }).click();
+      await page.evaluate(() => sessionStorage.removeItem("workbench.author.wait"));
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：合成电子样品");
+      await shot(page, `journey-04-connected-${theme}`);
+      await page.getByRole("button", { name: "下一步" }).click();
+      await shot(page, `journey-05-sentence-${theme}`);
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.wait", "1"));
+      await page.getByLabel("要测什么").press("Enter");
+      await expect(page.getByRole("status")).toHaveText("正在生成检查。");
+      await shot(page, `journey-06-writing-${theme}`);
+      await page.getByRole("button", { name: "取消" }).click();
+      await page.evaluate(() => sessionStorage.removeItem("workbench.author.wait"));
+      await page.getByLabel("要测什么").press("Enter");
+      await expect(page.getByRole("heading", { name: "它会做" })).toBeVisible();
+      await shot(page, `journey-07-checklist-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.pace", "400"));
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await expect(page.getByText("正在演示。可以取消。")).toBeVisible();
+      await expect(page.getByText("通过", { exact: true }).first()).toBeVisible();
+      await shot(page, `journey-08-demo-${theme}`);
+      await expect(page.getByRole("button", { name: "保存并设置每天重跑" })).toBeVisible();
+      await shot(page, `journey-09-pass-${theme}`);
+      await page.getByRole("button", { name: "保存并设置每天重跑" }).click();
+      await shot(page, `journey-10-schedule-${theme}`);
+      await page.getByRole("button", { name: "回到首页" }).click();
+      await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
+      await shot(page, `journey-11-home-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "changed"));
+      await page.getByRole("button", { name: "现在跑一次" }).click();
+      await expect(page.getByText("需要更新", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await shot(page, `journey-12-needs-update-${theme}`);
+      await page.getByRole("button", { name: "重新演示并更新" }).click();
+      await expect(page.getByRole("heading", { name: "重新演示并更新" })).toBeVisible();
+      await shot(page, `journey-13-fix-${theme}`);
+      await page.addInitScript(() => sessionStorage.setItem("workbench.author.fake", "fail"));
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await expect(page.getByRole("button", { name: "重新演示" })).toBeVisible();
+      await shot(page, `journey-14-fail-${theme}`);
+    });
+
+    test("wizard explains a failed check in plain words", async ({ page }) => {
+      await page.addInitScript(() => sessionStorage.setItem("workbench.author.fake", "fail"));
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("哪里不对").fill("文字不该停在已开始");
+      await page.getByRole("button", { name: "重新生成" }).click();
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await expect(page.getByText("没通过", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("期望看到「不会出现」")).toBeVisible();
+      await expect(page.getByText("实际看到「已开始」")).toBeVisible();
+      await expect(page.getByRole("button", { name: "重新演示" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "修改检查" })).toBeVisible();
+      await shot(page, `wizard-fail-${theme}`);
+    });
+
+    test("plugin, diagnostics, settings, pairing, offline, and crash", async ({ page }) => {
+      await page.goto("/plugin/upcam");
+      await expect(page.getByRole("heading", { name: "站会日报" })).toBeVisible();
+      await expect(page.getByText("自动发送已关闭")).toBeVisible();
+      await page.getByRole("button", { name: "载入合成样本" }).click();
+      await expect(page.getByRole("cell", { name: "SYN-014" })).toBeVisible();
+      await expect(page.getByRole("cell", { name: "界面" })).toBeVisible();
+      await expect(page.getByText("登录页今天完成对照，明日交给合成检查。")).toBeVisible();
+      await expect(page.getByRole("status")).toHaveText("已载入合成样本，未发送。");
+      await shot(page, `plugin-upcam-${theme}`);
+      await shot(page, `plugin-${theme}`);
+      await page.goto("/plugin/ding");
+      await page.getByRole("button", { name: "载入合成样本" }).click();
+      await page.getByRole("button", { name: "按需分析" }).click();
+      await expect(page.getByText("登录页对照出现 3 次")).toBeVisible();
+      await expect(page.getByText("09 时有 5 条消息")).toBeVisible();
+      await expect(page.getByRole("button", { name: "发送已关闭" })).toBeDisabled();
+      await shot(page, `plugin-ding-${theme}`);
+      await page.goto("/plugin/test");
+      await expect(page.getByRole("heading", { name: "测试设计" })).toBeVisible();
+      await expect(page.getByRole("note")).toContainText("不替代人工验收");
+      await expect(page.getByRole("cell", { name: "SYN-TC-006", exact: true }).first()).toBeVisible();
+      await expect(page.getByRole("cell", { name: "未验收" }).first()).toBeVisible();
+      await shot(page, `plugin-test-${theme}`);
+      await page.goto("/diagnostics");
+      await expect(page.getByText("仅本机回环")).toBeVisible();
+      await expect(page.getByText("自动发送：关闭")).toBeVisible();
+      await expect(page.getByText("1,100")).toBeVisible();
+      await shot(page, `diagnostics-${theme}`);
+      await page.goto("/settings");
+      await expect(page.getByRole("radio", { name: new RegExp(label) })).toBeChecked();
+      await expect(page.getByLabel("每天最多生成几次")).toBeVisible();
+      await expect(page.getByText("这里不写金额")).toBeVisible();
+      await shot(page, `settings-${theme}`);
+      await page.goto("/devices");
+      await expect(page.getByText("7K4M — XQ2P")).toBeVisible();
+      await shot(page, `pairing-${theme}`);
+      await page.goto("/offline");
+      await expect(page.getByRole("heading", { name: "本地服务未连接" })).toBeVisible();
+      await shot(page, `offline-${theme}`);
+      await page.goto("/plugin/test/stopped");
+      await expect(page.getByText("exit 1 · renderer timeout after 12s")).toBeVisible();
+      await shot(page, `crashed-${theme}`);
+    });
+  });
+}
+
+test.describe("minimum width", () => {
+  test.use({ viewport: { width: 1100, height: 900 } });
+
+  test("keeps the icon rail at 1100px", async ({ page }) => {
+    await page.goto("/");
+    await expect(page.getByRole("navigation", { name: "主导航" })).toBeVisible();
+    await expect(page.getByRole("button", { name: /星河笔记本/ })).toBeVisible();
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+    expect(overflow).toBeLessThanOrEqual(1);
+    await page.screenshot({ path: "e2e/screenshots/home-1100.png", fullPage: true });
+  });
+});

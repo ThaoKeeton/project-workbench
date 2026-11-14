@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <RootNamespace>Workbench.DingTalkInsights.V2</RootNamespace>
+    <AssemblyName>Workbench.DingTalkInsights.V2</AssemblyName>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <Version>0.1.0</Version>
+    <AssemblyVersion>0.1.0.0</AssemblyVersion>
+    <FileVersion>0.1.0.0</FileVersion>
+    <InformationalVersion>0.1.0-preview.1</InformationalVersion>
+    <Description>On-demand insights for a synthetic chat export. No DingTalk and no webhook.</Description>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="../../../src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
+    <None Include="plugin.v2.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="Never" />
+    <EmbeddedResource Include="Samples\chat.txt" LogicalName="chat-sample.txt" />
+  </ItemGroup>
+</Project>

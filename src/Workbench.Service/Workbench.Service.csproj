@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup>
+    <RootNamespace>Workbench.Service</RootNamespace>
+    <AssemblyName>Workbench.Service</AssemblyName>
+    <Version>0.5.0</Version>
+    <AssemblyVersion>0.5.0.0</AssemblyVersion>
+    <FileVersion>0.5.0.0</FileVersion>
+    <InformationalVersion>0.5.0-preview.1</InformationalVersion>
+    <Description>Local loopback preview service. Does not replace the WinUI host.</Description>
+    <IsPackable>false</IsPackable>
+    <Nullable>enable</Nullable>
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+  </PropertyGroup>
+  <ItemGroup>
+    <InternalsVisibleTo Include="Workbench.Service.Tests" />
+    <ProjectReference Include="../Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
+    <ProjectReference Include="../Workbench.Core/Workbench.Core.csproj" />
+    <ProjectReference Include="../../plugins/v2/Workbench.TestCases.V2/Workbench.TestCases.V2.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.TestExecutor/Workbench.TestExecutor.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.UpcamStandup.V2/Workbench.UpcamStandup.V2.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.DingTalkInsights.V2/Workbench.DingTalkInsights.V2.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="../../plugins/v2/Workbench.TestingDesign.V2/Workbench.TestingDesign.V2.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Import Project="StagePreviewPlugins.targets" />
+</Project>

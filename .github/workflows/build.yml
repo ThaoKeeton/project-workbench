@@ -1,0 +1,715 @@
+name: Build and native verification
+on:
+  pull_request:
+  push:
+    branches: [main, feat/native-plugin-workbench]
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Verification lane
+        type: choice
+        options: [full, shipping-recovery]
+        default: full
+      producer_run_id:
+        description: Successful producer run ID
+        type: string
+        required: false
+      artifact_id:
+        description: Producer workbench-win-x64 artifact ID
+        type: string
+        required: false
+      host_source:
+        description: Exact producer source commit
+        type: string
+        required: false
+      archive_sha256:
+        description: Exact producer artifact archive SHA256
+        type: string
+        required: false
+      native_diagnostic_only:
+        description: 'Run isolated native smoke diagnostics; this does not qualify a delivery.'
+        type: boolean
+        default: false
+        required: false
+permissions:
+  contents: read
+jobs:
+  core-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Smoke report filesystem regressions
+        shell: pwsh
+        run: |
+          ./tests/scripts/NativeSmokeReport.Tests.ps1
+          ./tests/scripts/WorkspaceProbeReport.Tests.ps1
+          ./tests/scripts/WorkspaceProbePhase.Tests.ps1
+          ./tests/scripts/TestingPluginProbe.Tests.ps1
+          ./tests/scripts/SourceAcceptanceProbe.Tests.ps1
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly -Profile SourceAcceptance
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -StructuralGuardsOnly
+          ./tests/scripts/NativeGalleryReport.Tests.ps1
+          ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
+          ./tests/scripts/OwnedLabProbeStaging.Tests.ps1
+          ./tests/scripts/OwnedLabProbeOutput.Tests.ps1
+      - name: Debug launch privacy and argument regressions
+        shell: pwsh
+        run: ./tests/scripts/NativeDebugSupport.Tests.ps1
+      - name: Pinned business package import and process report regressions
+        shell: pwsh
+        run: |
+          ./tests/scripts/BusinessPluginImport.Tests.ps1
+          ./tests/scripts/BusinessPluginReport.Tests.ps1
+      - name: Core runtime and real filesystem tests
+        run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-linux.trx" --results-directory artifacts/tests
+      - name: Explicit owned reference compilation and missing helper refusals
+        shell: pwsh
+        run: |
+          dotnet build tests/Workbench.OwnedLab.WindowsProbe -c Release --nologo -p:OwnedLabReferenceOnly=true -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
+          if ($LASTEXITCODE -ne 0) { throw 'Owned reference probe compilation failed.' }
+          dotnet build tests/Workbench.NativeReference/Workbench.NativeReference.csproj -c Release --nologo -p:OwnedLabReferenceOnly=true -p:UseWinUI=false -p:AppxGeneratePriEnabled=false -p:WindowsAppSDKSelfContained=false
+          if ($LASTEXITCODE -ne 0) { throw 'Full App/Testing/SourceAcceptance reference compilation failed.' }
+          dotnet tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0/Workbench.OwnedLab.WindowsProbe.dll --reference-only-check
+          if ($LASTEXITCODE -ne 0) { throw 'Owned reference descriptor/queue refusal failed.' }
+          dotnet tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0/Workbench.OwnedLab.WindowsProbe.dll --scenario-policy-check
+          if ($LASTEXITCODE -ne 0) { throw 'Owned scenario retirement policy checks failed.' }
+          ./tests/scripts/OwnedLabProbeStaging.Tests.ps1 -ProbeDirectory ./tests/Workbench.OwnedLab.WindowsProbe/bin/Release/net10.0-windows10.0.19041.0
+          ./scripts/package-testing-plugin.ps1 -ReferenceOnly -OutputDirectory ./artifacts/reference-must-not-create-delivery
+          if (Test-Path ./artifacts/reference-must-not-create-delivery) { throw 'Reference compilation produced a production delivery.' }
+          ./scripts/package-testing-plugin.ps1 -ReferenceOnly -Profile SourceAcceptance -OutputDirectory ./artifacts/source-reference-must-not-create-delivery -PairedProductionDirectory ./artifacts/source-reference-must-not-create-production
+          if ((Test-Path ./artifacts/source-reference-must-not-create-delivery) -or (Test-Path ./artifacts/source-reference-must-not-create-production)) { throw 'SourceAcceptance ReferenceOnly exported a delivery.' }
+          $PSNativeCommandUseErrorActionPreference = $false
+          dotnet build plugins/Workbench.Testing.Windows -c Release --nologo --no-restore -t:Rebuild -p:OwnedLabReferenceOnly=false *> ./artifacts/tests/owned-missing-helper.log
+          if ($LASTEXITCODE -eq 0 -or -not (Select-String -LiteralPath ./artifacts/tests/owned-missing-helper.log -Pattern 'UnavailableHelper:' -Quiet)) { throw 'Missing production helper was accepted or failed for an unrelated reason.' }
+          $global:LASTEXITCODE = 0
+          Write-Host 'Reference-only unavailable descriptor and missing production helper refusals passed; no native execution or ZIP.'
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: core-linux-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  native-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: windows-2025
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Smoke report filesystem regressions
+        shell: pwsh
+        run: |
+          ./tests/scripts/NativeSmokeReport.Tests.ps1
+          ./tests/scripts/WorkspaceProbeReport.Tests.ps1
+          ./tests/scripts/WorkspaceProbePhase.Tests.ps1
+          ./tests/scripts/TestingPluginProbe.Tests.ps1
+          ./tests/scripts/SourceAcceptanceProbe.Tests.ps1
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -HelperGuardsOnly -Profile SourceAcceptance
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -StructuralGuardsOnly
+          ./tests/scripts/NativeGalleryReport.Tests.ps1
+          ./tests/scripts/OwnedLabBuild.Tests.ps1 -Mode ToolchainContract
+          ./tests/scripts/OwnedLabProbeStaging.Tests.ps1
+          ./tests/scripts/OwnedLabProbeOutput.Tests.ps1
+      - name: Debug launch privacy and argument regressions
+        shell: pwsh
+        run: ./tests/scripts/NativeDebugSupport.Tests.ps1
+      - name: Publish native host and independent plugins
+        id: publish_host
+        shell: pwsh
+        run: ./scripts/build.ps1 -IncludeSourceAcceptance
+      - name: Core runtime and Windows filesystem tests
+        run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-windows.trx" --results-directory artifacts/tests
+      - name: Repeat background-task and native-activity tests
+        shell: pwsh
+        run: |
+          1..30 | ForEach-Object {
+            dotnet test ProjectWorkbench.Core.slnx -c Release --no-build --nologo --filter "FullyQualifiedName~BackgroundTaskTests|FullyQualifiedName~TestingNativeActivityTests"
+            if ($LASTEXITCODE -ne 0) { throw "Repeated Windows runtime tests failed on iteration $_." }
+          }
+      - name: Audited production delivery packaging regressions
+        shell: pwsh
+        run: |
+          ./tests/scripts/DeliveryHostVersion.Tests.ps1
+          ./tests/scripts/NativeShellAssets.Tests.ps1
+          ./tests/scripts/BusinessPluginDelivery.Tests.ps1 -AppDirectory ./artifacts/native/app
+      - name: Independent testing package integrity and actual package-store install
+        id: testing_package
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./tests/scripts/TestingPluginPackage.Tests.ps1 -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
+          dotnet run --project ./tests/Workbench.Testing.PackageProbe/Workbench.Testing.PackageProbe.csproj -c Release -- ./artifacts/native/testing-plugin/workbench-testing-plugin-0.2.0.zip
+          if ($LASTEXITCODE -ne 0) { throw 'Actual testing package-store acceptance failed.' }
+      - name: Paired synthetic source profile integrity and actual package-store install
+        id: source_package
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          Import-Module ./scripts/TestingPluginDelivery.psm1 -Force
+          Test-TestingPluginDelivery -Directory ./artifacts/native/source-acceptance-fixture -Profile SourceAcceptance -ProductionDirectory ./artifacts/native/testing-plugin -AppDirectory ./artifacts/native/app -RequireCurrentSource
+          dotnet run --project ./tests/Workbench.Testing.PackageProbe/Workbench.Testing.PackageProbe.csproj -c Release -- ./artifacts/native/source-acceptance-fixture/workbench-testing-source-acceptance-0.2.0.zip --profile SourceAcceptance --report ./artifacts/native/source-acceptance-probes/package-install.json
+          if ($LASTEXITCODE -ne 0) { throw 'Actual SourceAcceptance package-store acceptance failed.' }
+      - name: Export and verify production plugins paired with current host
+        id: business_export
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          ./scripts/export-business-plugins.ps1 -RequireCurrentSource
+          Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
+          Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
+      - name: Real WinUI isolated native smoke
+        id: native_smoke
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
+      - name: Native runtime management and actual process restarts
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/native-runtime-probe.ps1 -TimeoutSeconds 180
+      - name: Native project workspaces and actual process restore
+        if: ${{ always() && steps.publish_host.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/project-workspace-probe.ps1 -TimeoutSeconds 180
+      - name: Independent testing plugin actual native pass failure cancel and process restore
+        if: ${{ always() && steps.publish_host.outcome == 'success' && steps.testing_package.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/testing-plugin-probe.ps1 -TimeoutSeconds 240
+      - name: Installed synthetic source controls credentials lifecycle and four actual processes
+        id: source_acceptance
+        if: ${{ always() && steps.publish_host.outcome == 'success' && steps.source_package.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/source-acceptance-probe.ps1 -TimeoutSeconds 240
+      - name: Repeat installed synthetic source acceptance
+        if: ${{ steps.source_acceptance.outcome == 'success' }}
+        shell: pwsh
+        run: |
+          1..10 | ForEach-Object {
+            $iteration = $_
+            try { ./scripts/source-acceptance-probe.ps1 -TimeoutSeconds 240 }
+            catch { throw "Repeated synthetic source acceptance failed on iteration ${iteration}: $($_.Exception.Message)" }
+          }
+      - name: Independent DingTalk and UPCAM in current shipping app
+        if: ${{ always() && steps.publish_host.outcome == 'success' && steps.business_export.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/business-plugin-smoke.ps1 -TimeoutSeconds 300 -ProductionInputRoot ./artifacts/native/business-plugins
+      - name: Collect strict genuine WinUI gallery
+        id: gallery_collect
+        if: always()
+        shell: pwsh
+        run: ./scripts/collect-native-gallery.ps1
+      - name: Actual owned Windows UIA capture identity and failure retirement
+        if: ${{ always() && steps.publish_host.outcome == 'success' && steps.testing_package.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/owned-lab-probe.ps1 -DeliveryDirectory ./artifacts/native/testing-plugin
+      - name: Export independent SDK source and NuGet snapshot
+        shell: pwsh
+        run: ./scripts/export-sdk.ps1
+      - name: Verify SDK snapshot integrity and identity
+        shell: pwsh
+        run: ./tests/scripts/SdkSnapshot.Tests.ps1 -SnapshotRoot ./artifacts/sdk-snapshot
+      - name: Reverify independently installable testing delivery
+        shell: pwsh
+        run: |
+          Import-Module ./scripts/TestingPluginDelivery.psm1 -Force
+          Test-TestingPluginDelivery -Directory ./artifacts/native/testing-plugin -RequireCurrentSource
+          Test-TestingPluginDelivery -Directory ./artifacts/native/source-acceptance-fixture -Profile SourceAcceptance -ProductionDirectory ./artifacts/native/testing-plugin -AppDirectory ./artifacts/native/app -RequireCurrentSource
+      - name: Reverify the tested production download before upload
+        shell: pwsh
+        run: |
+          Import-Module ./scripts/BusinessPluginDelivery.psm1 -Force
+          Test-BusinessPluginDelivery -Directory ./artifacts/native/business-plugins -AppDirectory ./artifacts/native/app -RequireCurrentSource
+      - name: Collect native exception text after smoke failure
+        id: native_debug
+        if: failure() && steps.native_smoke.outcome == 'failure'
+        shell: pwsh
+        run: ./scripts/native-debug.ps1 -TimeoutSeconds 240
+      - uses: actions/upload-artifact@v7.0.2
+        if: ${{ always() && hashFiles('artifacts/native/genuine-gallery/index.json') != '' }}
+        with:
+          name: native-verification-evidence
+          path: |
+            artifacts/native/native-smoke.json
+            artifacts/native/native-smoke.gallery-binding.json
+            artifacts/native/native-stdout.log
+            artifacts/native/native-stderr.log
+            artifacts/native/native-crash-events.json
+            artifacts/native/gallery/
+            artifacts/native/runtime-probes/
+            artifacts/native/workspace-probes/
+            artifacts/native/testing-probes/
+            artifacts/native/source-acceptance-fixture/
+            artifacts/native/source-acceptance-probes/
+            artifacts/native/business-probes/
+            artifacts/native/owned-lab-probes/
+            artifacts/native/native-debug/
+            artifacts/tests/
+            src/Workbench.App/obj/**/App.g*.cs
+            src/Workbench.App/obj/**/XamlTypeInfo.g.cs
+            !artifacts/native/gallery/**/*.png
+            !artifacts/native/workspace-probes/**/gallery/**/*.png
+            !artifacts/native/testing-probes/**/gallery/**/*.png
+            !artifacts/native/business-probes/**/gallery/**/*.png
+          if-no-files-found: warn
+          retention-days: 1
+      - uses: actions/upload-artifact@v7.0.2
+        if: ${{ always() && hashFiles('artifacts/native/genuine-gallery/index.json') == '' }}
+        with:
+          name: native-verification-evidence
+          path: |
+            artifacts/native/native-smoke.json
+            artifacts/native/native-smoke.gallery-binding.json
+            artifacts/native/native-stdout.log
+            artifacts/native/native-stderr.log
+            artifacts/native/native-crash-events.json
+            artifacts/native/gallery/
+            artifacts/native/runtime-probes/
+            artifacts/native/workspace-probes/
+            artifacts/native/testing-probes/
+            artifacts/native/source-acceptance-fixture/
+            artifacts/native/source-acceptance-probes/
+            artifacts/native/business-probes/
+            artifacts/native/owned-lab-probes/
+            artifacts/native/native-debug/
+            artifacts/tests/
+            src/Workbench.App/obj/**/App.g*.cs
+            src/Workbench.App/obj/**/XamlTypeInfo.g.cs
+          if-no-files-found: warn
+          retention-days: 1
+      - uses: actions/upload-artifact@v7.0.2
+        if: ${{ always() && hashFiles('artifacts/native/genuine-gallery/index.json') != '' }}
+        with:
+          name: workbench-ui-gallery
+          path: artifacts/native/genuine-gallery/
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-testing-plugin-0.2.0
+          path: artifacts/native/testing-plugin/
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-sdk-0.4.0
+          path: artifacts/sdk-snapshot.zip
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-business-plugins
+          path: artifacts/native/business-plugins/
+          if-no-files-found: error
+          retention-days: 1
+      - uses: actions/upload-artifact@v7.0.2
+        with:
+          name: workbench-win-x64
+          path: artifacts/native/app/
+          if-no-files-found: error
+          retention-days: 1
+  native-diagnostic:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'full' && inputs.native_diagnostic_only == true }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Smoke and client-gallery report regressions
+        shell: pwsh
+        run: |
+          ./tests/scripts/NativeSmokeReport.Tests.ps1
+          ./tests/scripts/NativeGalleryReport.Tests.ps1
+      - name: Smoke checkpoint filesystem regressions
+        run: dotnet test tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj -c Release --nologo --filter "FullyQualifiedName~Workbench.Core.Tests.RunOptionsTests.Smoke_checkpoint" --logger "trx;LogFileName=smoke-checkpoints.trx" --results-directory artifacts/tests
+      - name: Publish native host and curated samples for diagnostics
+        id: diagnostic_publish
+        shell: pwsh
+        run: ./scripts/build.ps1
+      - name: Run isolated native smoke once
+        if: ${{ always() && steps.diagnostic_publish.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/native-smoke.ps1 -TimeoutSeconds 120
+      - name: Collect strict client-content gallery
+        if: ${{ always() && steps.diagnostic_publish.outcome == 'success' }}
+        shell: pwsh
+        run: ./scripts/collect-native-gallery.ps1
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: native-diagnostic-evidence
+          path: |
+            artifacts/native/native-smoke.json
+            artifacts/native/native-smoke.gallery-binding.json
+            artifacts/native/native-stdout.log
+            artifacts/native/native-stderr.log
+            artifacts/native/native-crash-events.json
+            artifacts/native/gallery/
+            artifacts/native/genuine-gallery/
+            artifacts/native/testing-plugin/provenance.json
+            artifacts/tests/*.trx
+          if-no-files-found: warn
+          retention-days: 1
+  shell-recovery-consumer:
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.mode == 'shipping-recovery' && inputs.native_diagnostic_only == false }}
+    runs-on: windows-2025
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - name: Validate exact producer and run owned shell recovery
+        shell: pwsh
+        env:
+          SHELL_RECOVERY_API_TOKEN: ${{ github.token }}
+          PRODUCER_RUN_ID: ${{ inputs.producer_run_id }}
+          PRODUCER_ARTIFACT_ID: ${{ inputs.artifact_id }}
+          PRODUCER_HOST_SOURCE: ${{ inputs.host_source }}
+          PRODUCER_ARCHIVE_SHA256: ${{ inputs.archive_sha256 }}
+        run: ./scripts/native-shell-recovery-probe.ps1 -ProducerRunId $env:PRODUCER_RUN_ID -ArtifactId $env:PRODUCER_ARTIFACT_ID -HostSource $env:PRODUCER_HOST_SOURCE -ArchiveSha256 $env:PRODUCER_ARCHIVE_SHA256
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: shell-recovery-consumer-evidence
+          path: artifacts/native/shell-recovery-probes/
+          if-no-files-found: error
+          retention-days: 1
+  invalid-selection:
+    if: ${{ github.event_name == 'workflow_dispatch' && ((inputs.mode != 'full' && inputs.mode != 'shipping-recovery') || (inputs.mode == 'shipping-recovery' && inputs.native_diagnostic_only == true)) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Reject incompatible verification selection
+        run: |
+          echo 'Choose full with or without diagnostics, or shipping-recovery without diagnostics.'
+          exit 1
+  service-v2-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: Preview service API tests
+        run: dotnet test ProjectWorkbench.V2.slnx -c Release --nologo --logger "trx;LogFileName=service-v2-linux.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: service-v2-linux-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  web-v2-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/host/package-lock.json
+      - name: Install Chinese fonts for screenshots
+        run: sudo apt-get update && sudo apt-get install -y fonts-noto-cjk
+      - name: Install the web UI and Playwright
+        working-directory: web/host
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          ./node_modules/.bin/playwright install --with-deps chromium
+      - name: Typecheck, unit-test, build, and run Linux Playwright tests
+        working-directory: web/host
+        run: |
+          npm run test:unit
+          npm run build
+          npm run test:e2e
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: web-v2-playwright
+          path: |
+            web/host/e2e/screenshots/
+            web/host/test-results/
+          if-no-files-found: warn
+          retention-days: 1
+  test-executor-windows:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: windows-2025
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - name: FlaUI checks, skipping the native file dialog on hosted runners
+        shell: pwsh
+        run: |
+          Write-Host "SKIP native #32770 file dialog: GitHub-hosted Windows runners have no interactive desktop. Keyboard and ValuePattern input into that dialog is not reliable, and this path is auxiliary. The test is skipped in hosted CI. Verify it on a real Windows 11 desktop with scripts/verify-native-dialog.ps1. It has not been accepted on a real machine yet."
+          dotnet test tests/Workbench.TestExecutor.WindowsTests/Workbench.TestExecutor.WindowsTests.csproj -c Release --nologo --verbosity normal --logger "trx;LogFileName=test-executor-windows.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: test-executor-windows-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  test-executor-electron:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+      - name: Install a display and the synthetic Electron sample
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
+            || sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2
+          npm ci --ignore-scripts --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/electron/install.js
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/esbuild/install.js
+          npm run build --prefix tests/fixtures/TestExecutor.SyntheticElectron
+      - name: Run the Electron CDP suite
+        env:
+          EXECUTOR_ELECTRON: "1"
+        run: xvfb-run -a dotnet test tests/Workbench.TestExecutor.Tests/Workbench.TestExecutor.Tests.csproj -c Release --nologo --filter FullyQualifiedName~Electron_sample --logger "trx;LogFileName=test-executor-electron.trx" --results-directory artifacts/tests
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: test-executor-electron-results
+          path: artifacts/tests
+          if-no-files-found: error
+          retention-days: 1
+  shell-electron-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/shell/package-lock.json
+      - name: Install Electron libraries
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          if apt-cache show libgtk-3-0t64 >/dev/null 2>&1; then
+            gtk=libgtk-3-0t64
+            asound=libasound2t64
+            atk=libatk1.0-0t64
+            bridge=libatk-bridge2.0-0t64
+            cups=libcups2t64
+          else
+            gtk=libgtk-3-0
+            asound=libasound2
+            atk=libatk1.0-0
+            bridge=libatk-bridge2.0-0
+            cups=libcups2
+          fi
+          sudo apt-get install -y xvfb libnss3 libgbm1 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libpango-1.0-0 libcairo2 "$gtk" "$asound" "$atk" "$bridge" "$cups"
+      - name: Unit-test the Electron shell
+        working-directory: desktop/shell
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          npm rebuild electron
+          npm test
+          npm run build
+      - name: Build the existing React UI
+        working-directory: web/host
+        run: |
+          npm ci --ignore-scripts
+          npm rebuild esbuild
+          npm run build
+      - name: Start the real loopback service from the shell
+        working-directory: desktop/shell
+        env:
+          WORKBENCH_SHELL_LIVE: "1"
+        run: ./node_modules/.bin/vitest run src/supervisor.live.test.ts
+      - name: Open the React UI in Electron
+        working-directory: desktop/shell
+        run: |
+          set -euo pipefail
+          root="$(mktemp -d)"
+          mkdir -p "$GITHUB_WORKSPACE/artifacts"
+          xvfb-run -a ./node_modules/.bin/electron . --no-sandbox --disable-gpu --smoke \
+            --user-root "$root" \
+            --ui-dist "$GITHUB_WORKSPACE/web/host/dist" \
+            --smoke-report "$GITHUB_WORKSPACE/artifacts/electron-smoke.json"
+          rm -rf "$root"
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: electron-shell-smoke
+          path: artifacts/electron-smoke.json
+          if-no-files-found: warn
+          retention-days: 1
+  sonarcloud:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Skip when SONAR_TOKEN is not configured
+        id: sonar_gate
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: |
+          if [ -z "${SONAR_TOKEN}" ]; then
+            echo "SONAR_TOKEN is not configured. Skipping SonarQube Cloud analysis."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-dotnet@v6.1.0
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-java@v4.7.1
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: actions/setup-node@v7.1.0
+        if: steps.sonar_gate.outputs.skip != 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/host/package-lock.json
+      - name: Analyze the preview service and web UI
+        if: steps.sonar_gate.outputs.skip != 'true'
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          dotnet tool install --global dotnet-sonarscanner
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          # Absolute report path: the .NET scanner resolves this property from each
+          # project directory, so a repo-relative path is invisible to the plugin project.
+          web_lcov="$(pwd)/web/host/coverage/lcov.info"
+          shell_lcov="$(pwd)/desktop/shell/coverage/lcov.info"
+          dotnet sonarscanner begin /k:"ThaoKeeton_project-workbench" /o:"thaokeeton" /d:sonar.host.url="https://sonarcloud.io" /d:sonar.token="${SONAR_TOKEN}" /d:sonar.qualitygate.wait=true /d:sonar.qualitygate.timeout=300 /d:sonar.sources="web/host/src,plugins/v2/Workbench.TestCases.V2/ui,plugins/v2/Workbench.UpcamStandup.V2/ui,plugins/v2/Workbench.DingTalkInsights.V2/ui,plugins/v2/Workbench.TestingDesign.V2/ui,desktop/shell/src" /d:sonar.exclusions="**/bin/**,**/obj/**,**/node_modules/**,web/host/dist/**,web/host/e2e/**,desktop/shell/dist/**,desktop/shell/src/**/*.test.ts,**/*.{woff,woff2,css}" /d:sonar.test.inclusions="tests/**/*.ps1,tests/**/*.psm1" /d:sonar.coverage.exclusions="**/*.css,**/*.{woff,woff2},**/node_modules/**,**/obj/**,**/*.g.cs,tests/fixtures/**" /d:sonar.cs.opencover.reportsPaths="$(pwd)/artifacts/coverage/**/coverage.opencover.xml" /d:sonar.javascript.lcov.reportPaths="${web_lcov},${shell_lcov}" /d:sonar.coverageReportPaths="$(pwd)/artifacts/coverage/powershell.xml"
+          dotnet build ProjectWorkbench.V2.slnx -c Release --nologo
+          # Core and the testing domain are built inside this scan so they receive
+          # project ids. Their OpenCover report is what covers those lines.
+          dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
+          sudo apt-get update
+          sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0t64 libasound2t64 libatk-bridge2.0-0t64 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2 \
+            || sudo apt-get install -y xvfb libnss3 libgbm1 libgtk-3-0 libasound2 libatk-bridge2.0-0 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxrandr2 libcups2
+          npm ci --ignore-scripts --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/electron/install.js
+          node tests/fixtures/TestExecutor.SyntheticElectron/node_modules/esbuild/install.js
+          npm run build --prefix tests/fixtures/TestExecutor.SyntheticElectron
+          export EXECUTOR_ELECTRON=1
+          # Preview service, plugins, and the executor. Lands next to the Core OpenCover report.
+          # The full Electron sample is collected separately: coverage instrumentation
+          # makes that page miss its first probe when the service tests run beside it.
+          xvfb-run -a dotnet test ProjectWorkbench.V2.slnx -c Release --no-build --nologo --filter "FullyQualifiedName!~Electron_sample_runs_the_cdp_suite&FullyQualifiedName!~Electron_sample_records_a_case_and_replays_it&FullyQualifiedName!~Electron_sample_authors_a_script_from_text_and_replays_it" --results-directory artifacts/coverage --collect:"XPlat Code Coverage;Format=opencover"
+          xvfb-run -a dotnet test tests/Workbench.TestExecutor.Tests/Workbench.TestExecutor.Tests.csproj -c Release --no-build --nologo --filter "FullyQualifiedName~Electron_sample_runs_the_cdp_suite|FullyQualifiedName~Electron_sample_records_a_case_and_replays_it|FullyQualifiedName~Electron_sample_authors_a_script_from_text_and_replays_it"
+          npm ci --ignore-scripts --prefix web/host
+          npm rebuild esbuild --prefix web/host
+          npm run test:unit --prefix web/host
+          npm ci --ignore-scripts --prefix desktop/shell
+          npm rebuild esbuild --prefix desktop/shell
+          npm test --prefix desktop/shell
+          pwsh -NoProfile -File ./tests/scripts/collect-powershell-coverage.ps1
+          python3 - <<'PY'
+          from pathlib import Path
+
+          repo = Path(".").resolve()
+
+          def rewrite(report_path: str, package_root: str) -> None:
+              report = Path(report_path)
+              root = Path(package_root).resolve()
+              out = []
+              record = []
+              for line in report.read_text().splitlines():
+                  if line == "end_of_record":
+                      source = next(item[3:] for item in record if item.startswith("SF:"))
+                      path = Path(source)
+                      if not path.is_absolute():
+                          path = (root / path).resolve()
+                      else:
+                          path = path.resolve()
+                      body = [item for item in record if not item.startswith("SF:")]
+                      absolute = path.as_posix()
+                      relative = path.relative_to(repo).as_posix()
+                      # Absolute matches files indexed from a project directory.
+                      # Repo-relative matches plugin panels that live outside web/host.
+                      for name in dict.fromkeys((absolute, relative)):
+                          out.extend(["SF:" + name, *body, "end_of_record"])
+                      record = []
+                      continue
+                  record.append(line)
+              report.write_text("\n".join(out) + "\n")
+
+          rewrite("web/host/coverage/lcov.info", "web/host")
+          rewrite("desktop/shell/coverage/lcov.info", "desktop/shell")
+          PY
+          echo "OpenCover reports:"
+          find artifacts/coverage -name coverage.opencover.xml -print
+          echo "LCOV sources:"
+          grep '^SF:' web/host/coverage/lcov.info desktop/shell/coverage/lcov.info
+          set +e
+          dotnet sonarscanner end /d:sonar.token="${SONAR_TOKEN}"
+          status=$?
+          set -e
+          echo "SonarQube Cloud quality gate:"
+          pr="${PR_NUMBER:-}"
+          query="projectKey=ThaoKeeton_project-workbench"
+          if [ -n "$pr" ]; then query="${query}&pullRequest=${pr}"; fi
+          curl -fsS -H "Authorization: Bearer ${SONAR_TOKEN}" "https://sonarcloud.io/api/qualitygates/project_status?${query}" | jq '{status: .projectStatus.status, conditions: .projectStatus.conditions}' || echo "Quality gate API was not readable."
+          echo "Top open issues:"
+          curl -fsS -H "Authorization: Bearer ${SONAR_TOKEN}" "https://sonarcloud.io/api/issues/search?componentKeys=ThaoKeeton_project-workbench&pullRequest=${pr}&resolved=false&ps=10&s=SEVERITY&asc=false" | jq '[.issues[] | {severity, type, rule, component, line, message}]' || echo "Issue API was not readable."
+          exit "$status"
+  preview-win-x64:
+    if: ${{ github.event_name != 'workflow_dispatch' || (inputs.mode == 'full' && inputs.native_diagnostic_only == false) }}
+    runs-on: windows-2025
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-dotnet@v6.1.0
+        with:
+          global-json-file: global.json
+      - uses: actions/setup-node@v7.1.0
+        with:
+          node-version: 22
+      - name: Build the Windows x64 preview zip
+        shell: pwsh
+        run: ./scripts/package-v2-preview.ps1 -OutputDirectory ./artifacts/v2-preview
+      - uses: actions/upload-artifact@v7.0.2
+        if: always()
+        with:
+          name: workbench-v2-preview-win-x64
+          path: artifacts/v2-preview/*.zip
+          if-no-files-found: error
+          retention-days: 14

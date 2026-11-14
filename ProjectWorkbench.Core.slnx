@@ -1,0 +1,16 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Workbench.Core/Workbench.Core.csproj" />
+    <Project Path="src/Workbench.Sdk/Workbench.Sdk.csproj" />
+  </Folder>
+  <Folder Name="/plugins/">
+    <Project Path="plugins/Workbench.Testing.Domain/Workbench.Testing.Domain.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Workbench.Core.Tests/Workbench.Core.Tests.csproj" />
+    <Project Path="tests/Workbench.DeploymentProbe/Workbench.DeploymentProbe.csproj" />
+    <Project Path="tests/Workbench.HostTestDependency/Workbench.HostTestDependency.csproj" />
+    <Project Path="tests/Workbench.TestDependency/Workbench.TestDependency.csproj" />
+    <Project Path="tests/Workbench.TestPlugin/Workbench.TestPlugin.csproj" />
+  </Folder>
+</Solution>
