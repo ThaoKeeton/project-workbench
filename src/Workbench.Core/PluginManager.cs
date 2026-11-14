@@ -526,11 +526,22 @@ public sealed partial class PluginManager : IAsyncDisposable
             entry.PreserveInvalid = entry.Snapshot.State == PluginState.Invalid;
             entry.Update(s => s with { State = PluginState.Stopping, HasPendingStop = true });
             PublishContributions();
-            // Plugin delegates and cancellation callbacks may have a synchronous prefix.
-            // Keep it off the caller/dispatcher, and retain this single Task until it really ends.
-            // Caller cancellation only stops the wait. The owned stop itself still runs to completion.
-            var stop = entry.StopTask = Task.Run(() => StopOwnedWorkAsync(entry), CancellationToken.None);
+            // A synchronous plugin prefix must stay off the caller. Do not also hand it to the
+            // pool: a 100ms stop budget can expire before the pool runs the delegate, and the
+            // caller then observes "still stopping" before the close reason exists.
+            var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            var finished = new TaskCompletionSource<PluginOperationResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+            var worker = new Thread(() =>
+            {
+                entered.TrySetResult();
+                try { finished.TrySetResult(StopOwnedWorkAsync(entry).GetAwaiter().GetResult()); }
+                catch (Exception error) { finished.TrySetException(error); }
+            })
+            { IsBackground = true, Name = "workbench-stop-" + entry.Package.Manifest?.Id };
+            var stop = entry.StopTask = finished.Task;
+            worker.Start();
             _ = CleanupAfterStopAsync(entry, stop);
+            await entered.Task;
         }
         try { await entry.StopTask.WaitAsync(_options.StopTimeout, cancellationToken); }
         catch (TimeoutException)
@@ -558,10 +569,10 @@ public sealed partial class PluginManager : IAsyncDisposable
         var instance = entry.Instance;
         var cancellation = ObserveAsync(() => context?.CancelLifetimeAsync() ?? Task.CompletedTask, "LifetimeCancellationFailed");
         var background = context?.BackgroundTasks.StopAllAsync() ?? Task.FromResult(true);
-        var plugin = ObserveAsync(() => Task.Run(async () =>
+        var plugin = ObserveAsync(async () =>
         {
             if (instance is not null) await instance.StopAsync(CancellationToken.None);
-        }), "PluginStopFailed");
+        }, "PluginStopFailed");
         var project = ObserveAsync(() => context?.DrainProjectWorkAsync() ?? Task.CompletedTask, "ProjectDrainFailed");
         var results = await Task.WhenAll(cancellation, background, plugin, project);
         return results.All(success => success) ? new(true, "Stopped.") : new(false, "StopFailed: known work completed with errors.");

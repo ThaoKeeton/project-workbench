@@ -176,6 +176,7 @@ public sealed class PluginProjectTests(ITestOutputHelper output)
             Assert.False(prepare.Succeeded);
             Assert.Equal("ProjectContextClosed", prepare.ErrorCode);
             Assert.Equal(0, await settings.GetAsync("prepareCalls", 0));
+            await RuntimeTest.WaitAsync(async () => await settings.GetAsync("projectStopCode", "") == "ProjectContextClosed");
             Assert.Equal("ProjectContextClosed", await settings.GetAsync("projectStopCode", ""));
             disabled = RuntimeTest.CompleteDisableAsync(manager, Id, output);
             await RuntimeTest.WaitAsync(() => Task.FromResult(Assert.Single(manager.Plugins).Diagnostics
