@@ -331,7 +331,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByText("停在这一步。这张画面只留在这台电脑上。")).toBeVisible();
       await expect(page.getByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toHaveCount(0);
       await expect(page.getByText("需要更新", { exact: true }).first()).toBeVisible();
-      await expect(page.getByText("找不到", { exact: true })).toBeVisible();
+      await expect(page.locator(".finding-list strong").first()).toHaveText("需要更新");
       await expect(page.getByRole("button", { name: "用 AI 修一下" })).toBeDisabled();
       await expect(page.getByText("需要先设置 AI 密钥")).toBeVisible();
       await expect(page.getByRole("link", { name: "去设置" })).toBeVisible();
@@ -503,6 +503,33 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.goto("/plugin/test/stopped");
       await expect(page.getByText("exit 1 · renderer timeout after 12s")).toBeVisible();
       await shot(page, `crashed-${theme}`);
+    });
+
+    test("1100px polish shows the todo rows, a disabled next step, and the open menu", async ({ page }) => {
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await page.addInitScript(() => sessionStorage.setItem("workbench.author.samples", "1"));
+      await page.goto("/plugin/runner?filter=todo");
+      await expect(page.getByRole("button", { name: "要处理的", pressed: true })).toBeVisible();
+      await expect(page.locator(".saved-list .is-fail .result-label").first()).toHaveText("没通过");
+      await expect(page.locator(".saved-list .is-update .result-label")).toHaveText("需要更新");
+      await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `filter-todo-1100-${theme}`);
+      await page.getByRole("button", { name: "更多" }).first().click();
+      await expect(page.getByRole("menuitem", { name: "重命名" })).toBeVisible();
+      await expect(page.getByRole("menuitem", { name: "暂停每天重跑" })).toBeVisible();
+      await expect(page.getByRole("menuitem", { name: "删除" })).toBeVisible();
+      await shot(page, `saved-menu-1100-${theme}`);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("menuitem", { name: "重命名" })).toHaveCount(0);
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.wait", "connect"));
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByText("正在连上…")).toBeVisible();
+      await expect(page.getByRole("button", { name: "下一步" })).toBeDisabled();
+      await shot(page, `connect-connecting-1100-${theme}`);
     });
   });
 }

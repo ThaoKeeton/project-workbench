@@ -66,8 +66,9 @@ describe("executor wizard", () => {
     expect(screen.getByRole("heading", { name: "它会做" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "它会核对" })).toBeTruthy();
     expect(screen.getAllByText("旁边的牙保持原样")).toHaveLength(1);
-    expect(screen.getByText("沿着路径切一刀")).toBeTruthy();
-    expect(screen.getByText("工件变小")).toBeTruthy();
+    expect(screen.getByText("在画面里切一刀")).toBeTruthy();
+    expect(screen.getByText("工件体积从 8 变成大约 4")).toBeTruthy();
+    expect(screen.getByText("已经看过画面里的物体。下面是它会做的事，以及要核对的结果。")).toBeTruthy();
     expect(calls).toBe(1);
     await user.type(screen.getByLabelText("哪里不对"), "牙不要变");
     await user.click(screen.getByRole("button", { name: "重新生成" }));
@@ -193,7 +194,7 @@ describe("executor wizard", () => {
     await user.click(screen.getAllByRole("button", { name: "现在跑一次" })[0]);
     expect(screen.getByRole("status").textContent).toBe("第 2 步找不到「开始」按钮");
     expect(document.querySelector(".result-mark")?.textContent).toBe("需要更新");
-    expect(screen.getByText("找不到")).toBeTruthy();
+    expect(document.querySelector(".finding-list strong")?.textContent).toBe("需要更新");
     expect(screen.queryByText("没通过")).toBeNull();
     expect((screen.getByRole("button", { name: "用 AI 修一下" }) as HTMLButtonElement).disabled).toBe(true);
     expect(screen.getByText("需要先设置 AI 密钥")).toBeTruthy();
@@ -333,7 +334,10 @@ describe("executor script", () => {
     expect(replay(saved!, sampleDom).passed).toBe(true);
     const plan = plainPlan(saved!);
     expect(plan.does.length).toBeLessThanOrEqual(4);
+    expect(plan.does).toContain("在画面里切一刀");
+    expect(plan.checks).toContain("工件体积从 8 变成大约 4");
     expect(plan.checks.filter((line) => line === "旁边的牙保持原样")).toHaveLength(1);
+    expect(plan.checks).toContain("只有被切的工件变了，旁边的物体不动");
     const findings = humanFindings(saved!, replay(saved!, sampleDom));
     expect(findings.some((item) => item.sentence.includes("小了 50%"))).toBe(true);
     expect(replay(caseFromScript(failingReplayScript)!, sampleDom).passed).toBe(false);
@@ -377,6 +381,7 @@ describe("executor script", () => {
       "glm-5.3",
       "",
     ]);
+    expect(describeStep(saved!.steps.find((item) => item.action === "drag-path")!).check).toContain("大约 4");
     expect(describeStep(saved!.steps[1]).will).toContain("点击");
     expect(resultSentence(false)).toContain("没有达到预期");
     writeDailyCap(3);

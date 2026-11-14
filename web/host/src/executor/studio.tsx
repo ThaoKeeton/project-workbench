@@ -12,6 +12,7 @@ import {
   authorKeyReady,
   formatWhen,
   humanFindings,
+  isSceneAction,
   missedBecauseOff,
   nextDailyInstant,
   outcomeOf,
@@ -488,15 +489,16 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
   const [renameValue, setRenameValue] = useState("");
   const [removing, setRemoving] = useState<SavedTest | null>(null);
   useEffect(() => {
-    if (!renaming && !removing) return;
+    if (!renaming && !removing && !menu) return;
     const onKey = (event: KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setRenaming(null);
       setRemoving(null);
+      setMenu(null);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [renaming, removing]);
+  }, [renaming, removing, menu]);
   if (library.length === 0) {
     return (
       <div className="wizard-card" aria-label="开始">
@@ -538,7 +540,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
         </div>
       ) : null}
       {missedNote ? <p role="status">{missedNote}</p> : null}
-      {visible.length === 0 ? <p>没有要看的测试。</p> : null}
+      {visible.length === 0 ? <p>这个筛选下没有测试。点「全部」可以看全部。</p> : null}
       <ul className="saved-list">
         {visible.map((item) => {
           const outcome = listedOutcome(item);
@@ -740,6 +742,7 @@ function DraftStep({ left, keyReady, draft, notice, correction, writing, onCorre
       {!writing && notice ? <p role="status">{notice}</p> : null}
       {!writing && plan ? (
         <div className="plan" aria-label="检查清单">
+          {draft!.steps.some((item) => isSceneAction(item.action)) ? <p>已经看过画面里的物体。下面是它会做的事，以及要核对的结果。</p> : null}
           <h3>{draft!.name}</h3>
           <div>
             <h4>它会做</h4>
@@ -875,7 +878,7 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
         <ul className="finding-list" aria-label="核对结果">
           {findings.map((item) => (
             <li key={item.sentence} data-state={item.kind === "missing" ? "missing" : item.ok ? "ok" : "bad"}>
-              <strong>{item.kind === "missing" ? "找不到" : item.ok ? "通过" : "没通过"}</strong>
+              <strong>{item.kind === "missing" ? "需要更新" : item.ok ? "通过" : "没通过"}</strong>
               {item.kind === "missing" ? null : <span>{item.sentence}</span>}
               {item.expected ? <span>{item.expected}</span> : null}
               {item.seen ? <span>{item.seen}</span> : null}

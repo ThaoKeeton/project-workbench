@@ -256,6 +256,7 @@
 }
 .more-menu [role="menu"] {
   position: absolute;
+  top: calc(100% + 4px);
   right: 0;
   z-index: 2;
   display: grid;
@@ -326,5 +327,5 @@
   .plan, .frames { grid-template-columns: 1fr; }
   .executor { padding: 24px 16px 32px; }
   .row-open { grid-template-columns: minmax(0, 1fr) auto; }
-  .saved-list li { grid-template-columns: minmax(0, 1fr); }
+  .saved-list li { grid-template-columns: minmax(0, 1fr) auto auto; }
 }

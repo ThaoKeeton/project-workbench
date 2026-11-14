@@ -517,7 +517,7 @@ export function describeStep(item: ExecutorStep): { will: string; check: string 
   if (item.action === "click") return { will: `点击「${item.text || "按钮"}」`, check: item.expected ? `画面应变成「${item.expected}」` : "点完再继续" };
   if (item.action === "assert-text") return { will: "查看画面上的文字", check: item.expected ? `应显示「${item.expected}」` : "文字应和你说的一致" };
   if (item.action === "snapshot" || item.action === "screenshot") return { will: "记下现在的样子", check: "只留在这台电脑上" };
-  if (item.action === "drag-path") return { will: "沿着路径切一刀", check: "工件变小，旁边的牙保持原样" };
+  if (item.action === "drag-path") return { will: "在画面里切一刀", check: item.expected ? `工件体积变成大约 ${item.expected}，旁边的牙保持原样` : "工件变小，旁边的牙保持原样" };
   if (item.action === "assert-mesh" && item.text.includes("sphere")) return { will: "看旁边的牙", check: "形状保持不变" };
   if (item.action === "assert-mesh") return { will: "看工件现在有多大", check: "大小应和你说的一致" };
   if (item.action === "diff-scene") return { will: "对比前后的样子", check: "只有工件变了" };
@@ -537,14 +537,16 @@ export function plainPlan(testCase: ExecutorCase): PlainPlan {
   const push = (list: string[], line: string) => {
     if (list.length < 4 && !list.includes(line)) list.push(line);
   };
+  const beforeVolume = testCase.steps.find((item) => item.action === "assert-mesh" && item.text === "stock.volume")?.expected;
+  const afterVolume = testCase.steps.find((item) => item.action === "drag-path")?.expected;
   for (const item of testCase.steps) {
     if (item.action === "click") push(does, `点击「${item.text || "按钮"}」`);
-    if (item.action === "drag-path") push(does, "沿着路径切一刀");
+    if (item.action === "drag-path") push(does, "在画面里切一刀");
     if (item.action === "wait-for" && does.length === 0) push(does, `等到出现「${item.text || "开始"}」`);
     if (item.action === "assert-text" && item.expected) push(checks, `画面显示「${item.expected}」`);
-    if (item.action === "drag-path") push(checks, "工件变小");
+    if (item.action === "drag-path") push(checks, beforeVolume && afterVolume ? `工件体积从 ${beforeVolume} 变成大约 ${afterVolume}` : "工件变小");
     if (item.action === "assert-mesh" && item.text.includes("sphere")) push(checks, "旁边的牙保持原样");
-    if (item.action === "diff-scene") push(checks, "只有工件变了");
+    if (item.action === "diff-scene") push(checks, "只有被切的工件变了，旁边的物体不动");
   }
   if (does.length === 0) does.push("按你说的做一遍");
   if (checks.length === 0) checks.push("结果和你说的一致");
