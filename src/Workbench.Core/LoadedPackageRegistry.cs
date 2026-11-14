@@ -4,6 +4,8 @@ namespace Workbench.Core;
 internal static class LoadedPackageRegistry
 {
     private static readonly object Sync = new();
+    /// <summary>One plugin assembly load and InitializeAsync in the process at a time.</summary>
+    internal static SemaphoreSlim Activation { get; } = new(1, 1);
     private static readonly HashSet<string> LoadedPaths = new(StringComparer.OrdinalIgnoreCase);
     private static readonly HashSet<string> DiscoveredRoots = new(StringComparer.OrdinalIgnoreCase);
     private static readonly Dictionary<string, SemaphoreSlim> Gates = new(StringComparer.OrdinalIgnoreCase);

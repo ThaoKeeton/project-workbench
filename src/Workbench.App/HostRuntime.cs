@@ -7,6 +7,7 @@ internal sealed class HostRuntime : IAsyncDisposable
 {
     private readonly IDisposable _lease;
     private readonly PluginManagerOptions _options;
+    private static readonly SemaphoreSlim Startup = new(1, 1);
     private Task? _initialization;
     private bool _managerRetired;
     private bool _disposed;
@@ -44,12 +45,19 @@ internal sealed class HostRuntime : IAsyncDisposable
 
     private async Task InitializeCoreAsync(Action<string>? trace)
     {
-        trace?.Invoke("applying-pending-package-maintenance");
-        MaintenanceResults = await Packages.ApplyPendingAsync();
-        trace?.Invoke("discovering-packages");
-        await Manager.DiscoverAsync();
-        trace?.Invoke("restoring-enabled-packages");
-        await Manager.RestoreEnabledAsync();
+        // A second project window must not discover or restore while this one still is.
+        // Overlapping restores load the same plugin twice and the process fail-fasts.
+        await Startup.WaitAsync();
+        try
+        {
+            trace?.Invoke("applying-pending-package-maintenance");
+            MaintenanceResults = await Packages.ApplyPendingAsync();
+            trace?.Invoke("discovering-packages");
+            await Manager.DiscoverAsync();
+            trace?.Invoke("restoring-enabled-packages");
+            await Manager.RestoreEnabledAsync();
+        }
+        finally { Startup.Release(); }
     }
 
     // Terminal manager retirement revokes old host/plugin actions, but keeps this root leased
@@ -73,8 +81,13 @@ internal sealed class HostRuntime : IAsyncDisposable
 
     private async Task RestoreCoreAsync()
     {
-        await Manager.DiscoverAsync();
-        await Manager.RestoreEnabledAsync();
+        await Startup.WaitAsync();
+        try
+        {
+            await Manager.DiscoverAsync();
+            await Manager.RestoreEnabledAsync();
+        }
+        finally { Startup.Release(); }
     }
 
     internal static FileStream AcquireLease(string userRoot)

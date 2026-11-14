@@ -379,16 +379,23 @@ public sealed partial class PluginManager : IAsyncDisposable
             entry.FailedInitialization = false;
             entry.Context = context;
             entry.Update(s => s with { HasRuntime = true });
-            entry.LoadContext ??= new PluginLoadContext(entry.Package, _sharedAssemblies, _sharedAssemblyNames);
-            entry.Assembly ??= entry.LoadContext.LoadFromAssemblyPath(FileSystemGuard.ContainedPath(entry.Package.Path, entry.Package.Manifest!.EntryAssembly));
-            entry.Update(s => s with { IsLoaded = true });
-            var type = entry.Assembly.GetType(entry.Package.Manifest!.EntryType, throwOnError: true)!;
-            if (type.IsAbstract || !typeof(IWorkbenchPlugin).IsAssignableFrom(type))
-                throw new InvalidOperationException("The entry type must be a concrete IWorkbenchPlugin with a public parameterless constructor.");
-            entry.Instance = (IWorkbenchPlugin?)Activator.CreateInstance(type)
-                ?? throw new InvalidOperationException("The plugin constructor returned no instance.");
-            initializing = true;
-            await entry.Instance.InitializeAsync(context, cancellationToken);
+            // Two project runtimes can reach activation together. Assembly load and
+            // InitializeAsync are process-wide; overlapping them fail-fasts the CLR.
+            await LoadedPackageRegistry.Activation.WaitAsync(cancellationToken);
+            try
+            {
+                entry.LoadContext ??= new PluginLoadContext(entry.Package, _sharedAssemblies, _sharedAssemblyNames);
+                entry.Assembly ??= entry.LoadContext.LoadFromAssemblyPath(FileSystemGuard.ContainedPath(entry.Package.Path, entry.Package.Manifest!.EntryAssembly));
+                entry.Update(s => s with { IsLoaded = true });
+                var type = entry.Assembly.GetType(entry.Package.Manifest!.EntryType, throwOnError: true)!;
+                if (type.IsAbstract || !typeof(IWorkbenchPlugin).IsAssignableFrom(type))
+                    throw new InvalidOperationException("The entry type must be a concrete IWorkbenchPlugin with a public parameterless constructor.");
+                entry.Instance = (IWorkbenchPlugin?)Activator.CreateInstance(type)
+                    ?? throw new InvalidOperationException("The plugin constructor returned no instance.");
+                initializing = true;
+                await entry.Instance.InitializeAsync(context, cancellationToken);
+            }
+            finally { LoadedPackageRegistry.Activation.Release(); }
             cancellationToken.ThrowIfCancellationRequested();
             if (!await background.PrepareCommitAsync(cancellationToken))
                 throw new IOException("Could not clear background task resume intent.");

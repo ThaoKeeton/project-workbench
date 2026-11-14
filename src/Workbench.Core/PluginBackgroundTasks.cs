@@ -106,6 +106,7 @@ internal sealed class PluginBackgroundTasks(
     private async Task<PluginTaskOperationResult> StartCoreAsync(string id, PluginTaskStartReason reason, CancellationToken cancellationToken, bool fromHost = false)
     {
         await _operations.WaitAsync(cancellationToken);
+        Task? entered = null;
         try
         {
             Registration? task;
@@ -132,11 +133,30 @@ internal sealed class PluginBackgroundTasks(
                 task.ErrorCode = null;
                 task.StartedAt = DateTimeOffset.UtcNow;
                 task.FinishedAt = null;
-                task.Work = Task.Run(() => RunObservedAsync(task), task.Cancellation.Token);
+                // Do not pass the execution token to the scheduler. A cancel that wins
+                // the race before dequeue drops the delegate, and nothing ever writes
+                // the stop or start reason the caller is waiting to observe.
+                var ready = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var finished = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                var worker = new Thread(() =>
+                {
+                    ready.TrySetResult();
+                    try
+                    {
+                        RunObservedAsync(task).GetAwaiter().GetResult();
+                        finished.TrySetResult();
+                    }
+                    catch (Exception error) { finished.TrySetException(error); }
+                })
+                { IsBackground = true, Name = "workbench-" + task.Definition.Id };
+                task.Work = finished.Task;
+                worker.Start();
+                entered = ready.Task;
             }
-            return new(true, "Background task started.");
         }
         finally { _operations.Release(); }
+        if (entered is not null) await entered.WaitAsync(cancellationToken);
+        return entered is null ? Unavailable() : new(true, "Background task started.");
     }
 
     private async Task RunObservedAsync(Registration task)

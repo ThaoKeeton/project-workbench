@@ -218,8 +218,10 @@ public sealed class RuntimeFixturePlugin : IWorkbenchPlugin
         var settings = _context.Settings;
         var run = Interlocked.Increment(ref _runCount);
         await File.WriteAllTextAsync(Path.Combine(_context.DataDirectory, $"run-{run}.marker"), "synthetic execution");
-        await settings.SetAsync("jobRuns", run);
+        // jobRuns is the publication barrier. The reason has to be in that same
+        // document first, or a reader can observe the new count with the previous reason.
         await settings.SetAsync("startReason", execution.StartReason.ToString());
+        await settings.SetAsync("jobRuns", run);
         if (_mode == "callback-held")
         {
             if (await settings.GetAsync("pauseCallbackRegistration", false))

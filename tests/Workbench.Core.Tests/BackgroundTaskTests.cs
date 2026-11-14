@@ -195,7 +195,10 @@ public sealed class BackgroundTaskTests
             Assert.False(Assert.Single(manager.GetBackgroundTaskSnapshots(Id)).ResumeOnStartup);
             Assert.True((await manager.SetBackgroundTaskResumeOnStartupAsync(Id, "monitor", optedIn)).Succeeded);
             Assert.True((await manager.StartBackgroundTaskAsync(Id, "monitor")).Succeeded);
-            await RuntimeTest.WaitAsync(async () => await manager.GetSettings(Id).GetAsync("jobRuns", 0) == 1);
+            await RuntimeTest.WaitAsync(async () =>
+                await manager.GetSettings(Id).GetAsync("jobRuns", 0) == 1
+                && await manager.GetSettings(Id).GetAsync("startReason", "") == "UserRequest");
+            Assert.Equal(1, await manager.GetSettings(Id).GetAsync("jobRuns", 0));
             Assert.Equal("UserRequest", await manager.GetSettings(Id).GetAsync("startReason", ""));
             await manager.ShutdownAsync();
             Assert.Equal("HostShutdown", await manager.GetSettings(Id).GetAsync("jobStopReason", ""));
@@ -204,7 +207,9 @@ public sealed class BackgroundTaskTests
         await using var restarted = Manager(disk);
         await restarted.DiscoverAsync();
         Assert.All(await restarted.RestoreEnabledAsync(), result => Assert.True(result.Succeeded, result.Message));
-        if (optedIn) await RuntimeTest.WaitAsync(async () => await restarted.GetSettings(Id).GetAsync("jobRuns", 0) == 2);
+        if (optedIn) await RuntimeTest.WaitAsync(async () =>
+            await restarted.GetSettings(Id).GetAsync("jobRuns", 0) == 2
+            && await restarted.GetSettings(Id).GetAsync("startReason", "") == "Restore");
         Assert.Equal(optedIn ? 2 : 1, await restarted.GetSettings(Id).GetAsync("jobRuns", 0));
         if (optedIn) Assert.Equal("Restore", await restarted.GetSettings(Id).GetAsync("startReason", ""));
     }

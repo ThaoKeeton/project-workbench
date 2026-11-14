@@ -129,6 +129,13 @@ jobs:
         run: ./scripts/build.ps1 -IncludeSourceAcceptance
       - name: Core runtime and Windows filesystem tests
         run: dotnet test ProjectWorkbench.Core.slnx -c Release --nologo --logger "trx;LogFileName=core-windows.trx" --results-directory artifacts/tests
+      - name: Repeat background-task and native-activity tests
+        shell: pwsh
+        run: |
+          1..30 | ForEach-Object {
+            dotnet test ProjectWorkbench.Core.slnx -c Release --no-build --nologo --filter "FullyQualifiedName~BackgroundTaskTests|FullyQualifiedName~TestingNativeActivityTests"
+            if ($LASTEXITCODE -ne 0) { throw "Repeated Windows runtime tests failed on iteration $_." }
+          }
       - name: Audited production delivery packaging regressions
         shell: pwsh
         run: |

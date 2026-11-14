@@ -15,9 +15,13 @@ public sealed partial class WorkbenchApplication : Application
         _options.TraceStartup("sdk-generated-main-application-constructor");
         UnhandledException += (_, args) =>
         {
+            args.Handled = true;
             Environment.ExitCode = 1;
-            _options.WriteFailure("unhandled-ui-exception", args.Exception);
-            // Do not turn an unhandled native/UI failure into a successful smoke result.
+            try { _options.WriteFailure("unhandled-ui-exception", args.Exception); }
+            catch (Exception) { /* The exit below is the probe result either way. */ }
+            // Leaving this unhandled makes WinUI fail-fast with 0xE0464645 and
+            // drops the managed exception. Exit with the written report instead.
+            Environment.Exit(1);
         };
         _options.TraceStartup("initializing-compiled-application-xaml");
         InitializeComponent();
