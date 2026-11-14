@@ -85,6 +85,29 @@
   font: inherit;
 }
 .app-grid button.is-on { background: var(--accent); color: var(--accent-on); border-color: transparent; }
+.app-grid li.is-opening { display: flex; align-items: center; gap: 8px; }
+.app-grid li.is-opening > button:first-child { flex: 1; }
+.app-grid li.is-dim { opacity: 0.4; }
+.app-grid button:disabled { cursor: default; }
+.app-grid button.is-busy:disabled { opacity: 1; color: var(--text-primary); }
+.spin {
+  width: 14px;
+  height: 14px;
+  flex: none;
+  border: 2px solid var(--border);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  animation: workbench-spin 0.8s linear infinite;
+}
+@keyframes workbench-spin { to { transform: rotate(360deg); } }
+.executor.is-start {
+  min-height: calc(100vh - 102px);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
 .app-icon {
   width: 28px;
   height: 28px;

@@ -71,6 +71,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [repairNote, setRepairNote] = useState("");
   const [rerecordStep, setRerecordStep] = useState(0);
   const [busy, setBusy] = useState<"" | "open" | "write">("");
+  const [launch, setLaunch] = useState<{ app: TestApp; phase: "opening" | "connecting" } | null>(null);
   const cancelToken = useRef(0);
   const [scheduled, setScheduled] = useState(false);
   const fakeMode = readAuthorFake();
@@ -103,6 +104,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const cancelBusy = () => {
     cancelToken.current += 1;
     setBusy("");
+    setLaunch(null);
   };
 
   const choose = (next: TestApp | null, options: { attempt?: number; relaunch?: boolean } = {}) => {
@@ -113,21 +115,37 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
         setAttempt(1);
         setRelaunch(false);
         setBusy("");
+        setLaunch(null);
         return;
       }
       const nextAttempt = options.attempt ?? 1;
       const nextRelaunch = Boolean(options.relaunch);
       const preview = connectApp(next, { attempt: nextAttempt, relaunch: nextRelaunch });
-      if (preview.state === "connected" && readWait()) {
+      if (preview.state === "connected" && readWaitMode()) {
         setBusy("open");
-        const ok = await holdUntilSettled(token, () => cancelToken.current);
-        if (!ok) {
-          setBusy("");
-          return;
+        setLaunch({ app: next, phase: readWaitMode() === "connect" ? "connecting" : "opening" });
+        if (readWaitMode() !== "connect") {
+          const leftOpening = await holdUntil(token, () => cancelToken.current, () => readWaitMode() !== "open");
+          if (!leftOpening) {
+            setBusy("");
+            setLaunch(null);
+            return;
+          }
+        }
+        if (token !== cancelToken.current) return;
+        if (readWaitMode() !== "") {
+          setLaunch({ app: next, phase: "connecting" });
+          const linked = await holdUntil(token, () => cancelToken.current, () => readWaitMode() === "");
+          if (!linked) {
+            setBusy("");
+            setLaunch(null);
+            return;
+          }
         }
       }
       if (token !== cancelToken.current) return;
       setBusy("");
+      setLaunch(null);
       setPicked(next);
       setAttempt(nextAttempt);
       setRelaunch(nextRelaunch);
@@ -224,7 +242,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   };
 
   return (
-    <section className="executor" aria-label="自动测试">
+    <section className={phase === "home" && library.length === 0 ? "executor is-start" : "executor"} aria-label="自动测试">
       <header className="executor-head">
         <div>
           <h1>自动测试</h1>
@@ -262,7 +280,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               connection={connection}
               recent={recent}
               installed={sampleApps().filter((item) => !recent.some((entry) => entry.id === item.id))}
-              busy={busy === "open"}
+              launch={launch}
               onChoose={choose}
               onCancel={cancelBusy}
               onNext={() => setStepIndex(1)}
@@ -340,16 +358,24 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   );
 }
 
-function readWait(): boolean {
+function readWaitMode(): "" | "open" | "connect" | "hold" {
   try {
-    return window.sessionStorage.getItem("workbench.author.wait") === "1";
+    const value = window.sessionStorage.getItem("workbench.author.wait");
+    if (value === "open" || value === "connect") return value;
+    if (value === "1") return "hold";
+    return "";
   } catch {
-    return false;
+    return "";
   }
 }
 
-function holdUntilSettled(token: number, current: () => number): Promise<boolean> {
-  if (!readWait()) return Promise.resolve(token === current());
+function readWait(): boolean {
+  return readWaitMode() !== "";
+}
+
+function holdUntil(token: number, current: () => number, done: () => boolean): Promise<boolean> {
+  if (token !== current()) return Promise.resolve(false);
+  if (done()) return Promise.resolve(true);
   return new Promise((resolve) => {
     const timer = window.setInterval(() => {
       if (token !== current()) {
@@ -357,12 +383,16 @@ function holdUntilSettled(token: number, current: () => number): Promise<boolean
         resolve(false);
         return;
       }
-      if (!readWait()) {
+      if (done()) {
         window.clearInterval(timer);
         resolve(true);
       }
     }, 30);
   });
+}
+
+function holdUntilSettled(token: number, current: () => number): Promise<boolean> {
+  return holdUntil(token, current, () => !readWait());
 }
 
 function readPace(fallback: number): number {
@@ -451,7 +481,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
   onPause: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const [filter, setFilter] = useState<"all" | "fail" | "update" | "pass">(readListFilter);
+  const [filter, setFilter] = useState<"all" | "todo" | "fail" | "update" | "pass">(readListFilter);
   const [menu, setMenu] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<SavedTest | null>(null);
   const [renameValue, setRenameValue] = useState("");
@@ -486,7 +516,8 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
     const outcome = listedOutcome(item);
     if (filter === "pass") return outcome === "pass";
     if (filter === "update") return outcome === "needs-update";
-    if (filter === "fail") return outcome !== "pass";
+    if (filter === "fail") return outcome === "fail";
+    if (filter === "todo") return outcome !== "pass";
     return true;
   });
   return (
@@ -497,7 +528,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
       </div>
       {library.length > 5 ? (
         <div className="filter-row" role="group" aria-label="筛选">
-          {([["all", "全部"], ["fail", "没通过"], ["update", "需要更新"], ["pass", "通过"]] as const).map(([value, label]) => (
+          {([["all", "全部"], ["todo", "要处理的"], ["fail", "没通过"], ["update", "需要更新"], ["pass", "通过"]] as const).map(([value, label]) => (
             <button key={value} type="button" className={filter === value ? "is-on" : ""} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
           ))}
         </div>
@@ -556,19 +587,19 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
   );
 }
 
-function AppStep({ picked, connection, recent, installed, busy, onChoose, onCancel, onNext }: {
+function AppStep({ picked, connection, recent, installed, launch, onChoose, onCancel, onNext }: {
   picked: TestApp | null;
   connection: ConnectView;
   recent: TestApp[];
   installed: TestApp[];
-  busy: boolean;
+  launch: { app: TestApp; phase: "opening" | "connecting" } | null;
   onChoose: (app: TestApp | null, options?: { attempt?: number; relaunch?: boolean }) => void;
   onCancel: () => void;
   onNext: () => void;
 }) {
   const [confirm, setConfirm] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const connected = connection.state === "connected" && !busy;
+  const connected = connection.state === "connected" && !launch;
   useEffect(() => {
     if (!confirm) return;
     const onKey = (event: KeyboardEvent) => {
@@ -581,7 +612,7 @@ function AppStep({ picked, connection, recent, installed, busy, onChoose, onCanc
     <div className="wizard-card" aria-label="选择程序">
       <h2>选择要测的程序</h2>
       <p>从最近用过的里面选，浏览一个程序，或从这台电脑上已安装的里面选。选中后由这里打开并连上。</p>
-      <button type="button" className="btn" onClick={() => fileRef.current?.click()}>浏览…</button>
+      <button type="button" className="btn" disabled={Boolean(launch)} onClick={() => fileRef.current?.click()}>浏览…</button>
       <input ref={fileRef} aria-label="浏览程序" className="file-input" type="file" accept=".exe,.app,application/octet-stream" onChange={(event) => {
         const file = event.target.files?.[0];
         const next = file ? appFromFileName(file.name) : null;
@@ -589,19 +620,13 @@ function AppStep({ picked, connection, recent, installed, busy, onChoose, onCanc
       }} />
       <h3>最近用过的</h3>
       <ul className="app-grid" aria-label="最近用过的程序">
-        {recent.map((app) => <AppButton key={app.id} app={app} selected={picked?.id === app.id} onChoose={onChoose} />)}
+        {recent.map((app) => <AppButton key={app.id} app={app} selected={picked?.id === app.id} launch={launch} onChoose={onChoose} onCancel={onCancel} />)}
       </ul>
       <h3>这台电脑上的程序</h3>
       <ul className="app-grid" aria-label="已安装的程序">
-        {installed.map((app) => <AppButton key={app.id} app={app} selected={picked?.id === app.id} onChoose={onChoose} />)}
+        {installed.map((app) => <AppButton key={app.id} app={app} selected={picked?.id === app.id} launch={launch} onChoose={onChoose} onCancel={onCancel} />)}
       </ul>
-      {busy ? (
-        <>
-          <p role="status">正在启动程序。</p>
-          <p>连接中。可以取消。</p>
-          <button type="button" className="btn" onClick={onCancel}>取消</button>
-        </>
-      ) : (
+      {launch ? null : (
         <>
           <p role="status">{connection.status}</p>
           {connection.detail ? <p>{connection.detail}</p> : null}
@@ -631,13 +656,22 @@ function AppStep({ picked, connection, recent, installed, busy, onChoose, onCanc
   );
 }
 
-function AppButton({ app, selected, onChoose }: { app: TestApp; selected: boolean; onChoose: (app: TestApp) => void }) {
+function AppButton({ app, selected, launch, onChoose, onCancel }: {
+  app: TestApp;
+  selected: boolean;
+  launch: { app: TestApp; phase: "opening" | "connecting" } | null;
+  onChoose: (app: TestApp) => void;
+  onCancel: () => void;
+}) {
+  const opening = launch?.app.id === app.id;
+  const held = Boolean(launch);
   return (
-    <li>
-      <button type="button" className={selected ? "is-on" : ""} onClick={() => onChoose(app)}>
-        <span className="app-icon" aria-hidden="true">{app.name.slice(0, 1)}</span>
-        <span>{app.name}</span>
+    <li className={opening ? "is-opening" : held ? "is-dim" : ""}>
+      <button type="button" className={opening ? "is-busy" : selected ? "is-on" : ""} disabled={held} onClick={() => onChoose(app)}>
+        {opening ? <i className="spin" aria-hidden="true" /> : <span className="app-icon" aria-hidden="true">{app.name.slice(0, 1)}</span>}
+        <span>{opening ? (launch?.phase === "connecting" ? "正在连上…" : `正在打开「${app.name}」…`) : app.name}</span>
       </button>
+      {opening ? <button type="button" className="btn" onClick={onCancel}>取消</button> : null}
     </li>
   );
 }
@@ -966,10 +1000,10 @@ function listedOutcome(item: SavedTest): "pass" | "fail" | "needs-update" {
   return item.history.at(-1)?.outcome ?? (item.passed ? "pass" : "fail");
 }
 
-function readListFilter(): "all" | "fail" | "update" | "pass" {
+function readListFilter(): "all" | "todo" | "fail" | "update" | "pass" {
   try {
     const value = new URLSearchParams(window.location.search).get("filter");
-    if (value === "fail" || value === "pass" || value === "update") return value;
+    if (value === "todo" || value === "fail" || value === "pass" || value === "update") return value;
   } catch {
     return "all";
   }

@@ -30,7 +30,7 @@ export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void
             <ul className="today">
               {dailySummary() ? (
                 <li>
-                  <Link className="today-link" to="/plugin/runner?filter=fail">
+                  <Link className="today-link" to="/plugin/runner?filter=todo">
                     <span className="time"><Icon name="activity" size={18} /></span>
                     <span className="source">自动测试</span>
                     <span>{dailySummary()}</span>

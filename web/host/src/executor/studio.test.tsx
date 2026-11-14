@@ -226,13 +226,18 @@ describe("executor wizard", () => {
     expect(screen.getByText("这一次的画面已经清掉。")).toBeTruthy();
   });
 
-  it("opens the list on tests that did not pass", () => {
-    window.history.pushState({}, "", "/plugin/runner?filter=fail");
+  it("opens the list on tests that did not pass", async () => {
+    window.history.pushState({}, "", "/plugin/runner?filter=todo");
     sessionStorage.setItem("workbench.author.samples", "1");
+    const user = userEvent.setup();
     render(<ExecutorStudio />);
-    expect((screen.getByRole("button", { name: "没通过" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByRole("button", { name: "要处理的" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("true");
+    expect((screen.getByRole("button", { name: "没通过" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("false");
     expect(screen.queryByText("切削后体积减小")).toBeNull();
     expect(screen.getByText("旁边的牙变了")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "没通过", pressed: false }));
+    expect(screen.getByText("旁边的牙变了")).toBeTruthy();
+    expect(screen.queryByText("切削后体积减小")).toBeNull();
     window.history.pushState({}, "", "/");
   });
 
@@ -249,12 +254,16 @@ describe("executor wizard", () => {
   });
 
   it("cancels a held launch and submits the sentence with Enter", async () => {
-    sessionStorage.setItem("workbench.author.wait", "1");
+    sessionStorage.setItem("workbench.author.wait", "open");
     const user = userEvent.setup();
     render(<ExecutorStudio complete={async () => ({ text: fixedReplayScript, cost: 0 })} />);
     await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     await user.click(screen.getByRole("button", { name: sampleAppName }));
-    expect(await screen.findByText("正在启动程序。")).toBeTruthy();
+    expect(await screen.findByText("正在打开「合成电子样品」…")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "浏览…" }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole("button", { name: "切削台" }) as HTMLButtonElement).disabled).toBe(true);
+    sessionStorage.setItem("workbench.author.wait", "connect");
+    expect(await screen.findByText("正在连上…")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByText(/已连接/)).toBeNull();
     sessionStorage.removeItem("workbench.author.wait");
