@@ -302,7 +302,7 @@ function pastClock(now: Date): string {
   return `${String(Math.floor(earlier / 60)).padStart(2, "0")}:${String(earlier % 60).padStart(2, "0")}`;
 }
 
-/** Eight local samples so a returning tester can see pass, fail, and older dates. */
+/** Eight local samples so a returning tester can see pass, fail, needs-update, and older dates. */
 export function sampleLibrary(now = new Date()): SavedTestRecord[] {
   const last = (daysAgo: number, hour: number, minute: number) => {
     const value = new Date(now);
@@ -330,6 +330,8 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
       { at: last(3, 9, 0), outcome: "pass", reason: "通过", image: false },
       { at: last(1, 9, 0), outcome: "needs-update", reason: "第 2 步找不到「开始」按钮", image: true },
       { at: last(0, 3, 26), outcome: "pass", reason: "通过", image: true },
+    ] : id === "text" ? [
+      { at: last(daysAgo, hour, minute), outcome: "needs-update", reason: "第 2 步找不到「开始」按钮", image: true },
     ] : [{ at: last(daysAgo, hour, minute), outcome: passed ? "pass" : "fail", reason: passed ? "通过" : "没通过", image: true }],
   }));
 }

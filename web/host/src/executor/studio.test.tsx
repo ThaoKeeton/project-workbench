@@ -12,6 +12,13 @@ afterEach(() => {
   localStorage.removeItem(aiKeyStorageKey);
 });
 
+function rowMore(name: string) {
+  const open = screen.getByRole("button", { name: new RegExp(`^${name}`) });
+  const row = open.closest("li");
+  if (!row) throw new Error(`missing row for ${name}`);
+  return within(row).getByRole("button", { name: "更多" });
+}
+
 async function openSample(user: ReturnType<typeof userEvent.setup>, start = "新建一个测试") {
   await user.click(screen.getByRole("button", { name: start }));
   await user.click(screen.getByRole("button", { name: sampleAppName }));
@@ -91,6 +98,8 @@ describe("executor wizard", () => {
     expect(screen.getByRole("status").textContent).toContain("到 07:30 会再跑一遍");
     await user.click(screen.getByRole("button", { name: "回到首页" }));
     expect(screen.getByRole("heading", { name: "已保存的测试" })).toBeTruthy();
+    expect(screen.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeTruthy();
+    expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeNull();
     expect(screen.getByRole("button", { name: "新建一个测试" })).toBeTruthy();
     expect(screen.getByText("通过")).toBeTruthy();
     expect(screen.getByText(/下次 (今天|明天) 07:30/)).toBeTruthy();
@@ -123,34 +132,38 @@ describe("executor wizard", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio />);
     expect(screen.getByRole("group", { name: "筛选" })).toBeTruthy();
+    expect(screen.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeTruthy();
+    expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeNull();
+    expect(rowMore("旁边的牙变了").querySelector("[aria-hidden]")?.textContent).toBe("⋯");
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "需要更新", pressed: false }));
-    expect(screen.getByText("没有要看的测试。")).toBeTruthy();
+    expect(screen.getByText("画面文字不对")).toBeTruthy();
+    expect(screen.queryByText("旁边的牙变了")).toBeNull();
     await user.click(screen.getByRole("button", { name: "通过", pressed: false }));
     expect(screen.queryByText("旁边的牙变了")).toBeNull();
     await user.click(screen.getByRole("button", { name: "全部" }));
     await user.click(screen.getByRole("button", { name: /^切削后体积减小通过/ }));
     expect(await screen.findByText("工件体积从 8 变成 4，小了 50%")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "返回首页" }));
-    await user.click(screen.getByRole("button", { name: "旁边的牙变了 更多" }));
+    await user.click(rowMore("旁边的牙变了"));
     await user.click(screen.getByRole("menuitem", { name: "重命名" }));
     expect(screen.getByRole("dialog", { name: "重命名" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "重命名" })).toBeNull();
-    await user.click(screen.getByRole("button", { name: "旁边的牙变了 更多" }));
+    await user.click(rowMore("旁边的牙变了"));
     await user.click(screen.getByRole("menuitem", { name: "重命名" }));
     fireEvent.change(screen.getByLabelText("新名称"), { target: { value: "牙的检查" } });
     await user.click(screen.getByRole("button", { name: "保存名称" }));
     expect(screen.getByText("牙的检查")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "牙的检查 更多" }));
+    await user.click(rowMore("牙的检查"));
     await user.click(screen.getByRole("menuitem", { name: "暂停每天重跑" }));
     expect(screen.getByRole("button", { name: /^牙的检查没通过/ }).textContent).toContain("每天重跑已暂停");
-    await user.click(screen.getByRole("button", { name: "牙的检查 更多" }));
+    await user.click(rowMore("牙的检查"));
     await user.click(screen.getByRole("menuitem", { name: "删除" }));
     expect(screen.getByRole("dialog", { name: "确认删除" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByText("牙的检查")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "牙的检查 更多" }));
+    await user.click(rowMore("牙的检查"));
     await user.click(screen.getByRole("menuitem", { name: "删除" }));
     await user.click(screen.getByRole("button", { name: "删除" }));
     expect(screen.queryByText("牙的检查")).toBeNull();
@@ -235,8 +248,15 @@ describe("executor wizard", () => {
     expect((screen.getByRole("button", { name: "没通过" }) as HTMLButtonElement).getAttribute("aria-pressed")).toBe("false");
     expect(screen.queryByText("切削后体积减小")).toBeNull();
     expect(screen.getByText("旁边的牙变了")).toBeTruthy();
+    expect(screen.getByText("画面文字不对")).toBeTruthy();
+    const labels = [...document.querySelectorAll(".saved-list .result-label")].map((node) => node.textContent);
+    const firstUpdate = labels.indexOf("需要更新");
+    expect(firstUpdate).toBeGreaterThan(0);
+    expect(labels.slice(0, firstUpdate).every((label) => label === "没通过")).toBe(true);
+    expect(labels.slice(firstUpdate).every((label) => label === "需要更新")).toBe(true);
     await user.click(screen.getByRole("button", { name: "没通过", pressed: false }));
     expect(screen.getByText("旁边的牙变了")).toBeTruthy();
+    expect(screen.queryByText("画面文字不对")).toBeNull();
     expect(screen.queryByText("切削后体积减小")).toBeNull();
     window.history.pushState({}, "", "/");
   });
@@ -260,15 +280,22 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     await user.click(screen.getByRole("button", { name: sampleAppName }));
     expect(await screen.findByText("正在打开「合成电子样品」…")).toBeTruthy();
+    const next = () => screen.getByRole("button", { name: "下一步" }) as HTMLButtonElement;
+    expect(next().disabled).toBe(true);
+    expect(next().tabIndex).toBe(-1);
     expect((screen.getByRole("button", { name: "浏览…" }) as HTMLButtonElement).disabled).toBe(true);
     expect((screen.getByRole("button", { name: "切削台" }) as HTMLButtonElement).disabled).toBe(true);
     sessionStorage.setItem("workbench.author.wait", "connect");
     expect(await screen.findByText("正在连上…")).toBeTruthy();
+    expect(next().disabled).toBe(true);
+    expect(next().tabIndex).toBe(-1);
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.queryByText(/已连接/)).toBeNull();
     sessionStorage.removeItem("workbench.author.wait");
     await user.click(screen.getByRole("button", { name: sampleAppName }));
     expect((await screen.findByRole("status")).textContent).toContain("已连接");
+    expect(next().disabled).toBe(false);
+    expect(next().tabIndex).toBe(0);
     await user.click(screen.getByRole("button", { name: "下一步" }));
     await user.type(screen.getByLabelText("要测什么"), "切削工件后，工件变小，旁边的牙不变");
     await user.keyboard("{Enter}");
@@ -383,6 +410,8 @@ describe("executor script", () => {
     expect(authorKeyReady("off")).toBe(true);
     sessionStorage.removeItem("workbench.author.key");
     expect(sampleLibrary(now)).toHaveLength(8);
+    expect(sampleLibrary(now).some((item) => item.history.at(-1)?.outcome === "fail")).toBe(true);
+    expect(sampleLibrary(now).some((item) => item.history.at(-1)?.outcome === "needs-update")).toBe(true);
     expect(hintDismissed()).toBe(false);
     dismissHint();
     expect(hintDismissed()).toBe(true);

@@ -166,6 +166,8 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "保存安排" }).click();
       await page.getByRole("button", { name: "回到首页" }).click();
       await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
+      await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
       await expect(page.getByText(/下次 (今天|明天) 07:30/)).toBeVisible();
       await shot(page, `wizard-home-${theme}`);
@@ -175,6 +177,9 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.addInitScript(() => sessionStorage.setItem("workbench.author.samples", "1"));
       await page.goto("/plugin/runner");
       await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
+      await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await expect(page.getByRole("button", { name: "更多" }).first()).toHaveText("⋯");
       await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
       await expect(page.getByText(/上次 今天/).first()).toBeVisible();
       await expect(page.getByText(/下次 今天/).first()).toBeVisible();
@@ -184,6 +189,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBeLessThanOrEqual(1);
       await shot(page, `wizard-library-${theme}`);
+      await shot(page, `saved-list-${theme}`);
       await page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" }).click();
       await expect(page.locator(".row-open", { hasText: "切削后体积减小" })).toHaveCount(0);
       await expect(page.locator(".row-open", { hasText: "旁边的牙变了" })).toBeVisible();
@@ -304,7 +310,12 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByRole("button", { name: "要处理的", pressed: true })).toBeVisible();
       await expect(page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" })).toHaveAttribute("aria-pressed", "false");
       await expect(page.getByText("旁边的牙变了")).toBeVisible();
+      await expect(page.getByText("画面文字不对")).toBeVisible();
+      await expect(page.locator(".saved-list .is-update .result-label")).toHaveText("需要更新");
       await expect(page.getByText("切削后体积减小")).toHaveCount(0);
+      const todoLabels = await page.locator(".saved-list .result-label").allTextContents();
+      expect(todoLabels.lastIndexOf("没通过")).toBeGreaterThanOrEqual(0);
+      expect(todoLabels.lastIndexOf("没通过")).toBeLessThan(todoLabels.indexOf("需要更新"));
       await shot(page, `filter-todo-${theme}`);
       await page.addInitScript(() => {
         sessionStorage.setItem("workbench.author.samples", "1");
@@ -372,8 +383,15 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "合成电子样品" }).click();
       await expect(page.getByText("正在打开「合成电子样品」…")).toBeVisible();
       await expect(page.getByRole("button", { name: "浏览…" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "下一步" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "下一步" })).toHaveAttribute("tabindex", "-1");
       await shot(page, `journey-03-starting-${theme}`);
-      await shot(page, `connect-starting-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.wait", "connect"));
+      await expect(page.getByText("正在连上…")).toBeVisible();
+      await expect(page.getByRole("button", { name: "下一步" })).toBeDisabled();
+      await expect(page.getByRole("button", { name: "下一步" })).toHaveAttribute("tabindex", "-1");
+      expect(await page.getByRole("button", { name: "下一步" }).evaluate((node) => getComputedStyle(node).backgroundColor)).toBe("rgba(0, 0, 0, 0)");
+      await shot(page, `connect-connecting-${theme}`);
       await page.getByRole("button", { name: "取消" }).click();
       await page.evaluate(() => sessionStorage.removeItem("workbench.author.wait"));
       await page.getByRole("button", { name: "合成电子样品" }).click();

@@ -175,7 +175,13 @@
   border-color: transparent;
   font-weight: 500;
 }
-.executor .btn:disabled, .executor .btn-accent:disabled { opacity: 0.45; }
+.executor .btn:disabled, .executor .btn-accent:disabled {
+  opacity: 1;
+  background: transparent;
+  color: var(--text-muted);
+  border-color: var(--border);
+  cursor: default;
+}
 .case-list, .plan ul, .saved-list, .live-list, .finding-list { margin: 0; padding: 0; list-style: none; }
 .case-list { display: flex; flex-wrap: wrap; gap: 8px; }
 .case-list button.is-on { background: var(--accent); color: var(--accent-on); border-color: transparent; }
@@ -232,6 +238,22 @@
 }
 .filter-row button.is-on { background: var(--accent); color: var(--accent-on); border-color: transparent; }
 .more-menu { position: relative; }
+.more-menu .icon-more {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  padding: 0;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-primary);
+  font: inherit;
+  font-size: 20px;
+  line-height: 1;
+}
 .more-menu [role="menu"] {
   position: absolute;
   right: 0;

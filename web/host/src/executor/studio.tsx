@@ -246,7 +246,8 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       <header className="executor-head">
         <div>
           <h1>自动测试</h1>
-          {phase === "result" || (phase === "home" && library.length === 0) ? null : <p>选一个程序，用一句话说要检查什么，再看它做一遍。</p>}
+          {phase === "home" && library.length > 0 ? <p>每天自动跑这些测试，有问题会提醒你。</p> : null}
+          {phase === "wizard" ? <p>选一个程序，用一句话说要检查什么，再看它做一遍。</p> : null}
         </div>
       </header>
       {phase === "home" ? (
@@ -512,7 +513,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
       </div>
     );
   }
-  const visible = library.filter((item) => {
+  const matched = library.filter((item) => {
     const outcome = listedOutcome(item);
     if (filter === "pass") return outcome === "pass";
     if (filter === "update") return outcome === "needs-update";
@@ -520,6 +521,9 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
     if (filter === "todo") return outcome !== "pass";
     return true;
   });
+  const visible = filter === "todo"
+    ? [...matched].sort((a, b) => todoRank(listedOutcome(a)) - todoRank(listedOutcome(b)))
+    : matched;
   return (
     <div className="wizard-card" aria-label="已保存的测试">
       <div className="wizard-actions">
@@ -549,7 +553,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
               </button>
               <button type="button" className="btn" onClick={() => onRun(item)}>现在跑一次</button>
               <div className="more-menu">
-                <button type="button" className="btn" aria-expanded={menu === item.id} aria-label={`${item.name} 更多`} onClick={() => setMenu(menu === item.id ? null : item.id)}>…</button>
+                <button type="button" className="icon-more" aria-haspopup="menu" aria-expanded={menu === item.id} aria-label="更多" onClick={() => setMenu(menu === item.id ? null : item.id)}><span aria-hidden="true">⋯</span></button>
                 {menu === item.id ? (
                   <div role="menu">
                     <button type="button" role="menuitem" onClick={() => { setRenaming(item); setRenameValue(item.name); setMenu(null); }}>重命名</button>
@@ -650,7 +654,7 @@ function AppStep({ picked, connection, recent, installed, launch, onChoose, onCa
         </div>
       ) : null}
       <div className="wizard-actions">
-        <button type="button" className="btn-accent" disabled={!connected} onClick={onNext}>下一步</button>
+        <button type="button" className="btn-accent" disabled={!connected} tabIndex={connected ? 0 : -1} onClick={onNext}>下一步</button>
       </div>
     </div>
   );
@@ -998,6 +1002,12 @@ function Rerecord({ appName, sentence, step, onAdvance, onSave }: {
 
 function listedOutcome(item: SavedTest): "pass" | "fail" | "needs-update" {
   return item.history.at(-1)?.outcome ?? (item.passed ? "pass" : "fail");
+}
+
+function todoRank(outcome: "pass" | "fail" | "needs-update"): number {
+  if (outcome === "fail") return 0;
+  if (outcome === "needs-update") return 1;
+  return 2;
 }
 
 function readListFilter(): "all" | "todo" | "fail" | "update" | "pass" {
