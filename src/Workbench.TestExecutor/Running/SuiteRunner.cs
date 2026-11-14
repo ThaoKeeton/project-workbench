@@ -291,7 +291,7 @@ public sealed partial class SuiteRunner
         return regions;
     }
 
-    private async Task<StepOutcome> FailAsync(TestSuite suite, TestCase testCase, TestStep step, RunRequest request, IRunSink sink, string engine, string error, string actual, int attempts, bool review, List<string> log, MaskedImage? masked, CancellationToken cancellationToken)
+    private static async Task<StepOutcome> FailAsync(TestSuite suite, TestCase testCase, TestStep step, RunRequest request, IRunSink sink, string engine, string error, string actual, int attempts, bool review, List<string> log, MaskedImage? masked, CancellationToken cancellationToken)
     {
         var status = review && error == ExecutorError.NeedsReview ? "needs-review" : "failed";
         Publish(sink, request, suite, testCase, step, status, engine, error, attempts, review, error);
@@ -299,7 +299,7 @@ public sealed partial class SuiteRunner
         return new StepOutcome(status != "needs-review", review, masked, report);
     }
 
-    private async Task<FailureReport> WriteFailureAsync(TestCase testCase, TestStep step, RunRequest request, string engine, string error, string actual, int attempts, bool review, List<string> log, MaskedImage? masked, CancellationToken cancellationToken)
+    private static async Task<FailureReport> WriteFailureAsync(TestCase testCase, TestStep step, RunRequest request, string engine, string error, string actual, int attempts, bool review, List<string> log, MaskedImage? masked, CancellationToken cancellationToken)
     {
         var report = new FailureReport
         {

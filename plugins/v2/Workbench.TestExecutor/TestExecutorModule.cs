@@ -153,7 +153,7 @@ public sealed class TestExecutorModule : IWorkbenchPluginModule, IWorkbenchRunEv
         }
         var reportDirectory = ContainedPath.Combine(ContainedPath.Combine(request.DataDirectory, "runs"), runId);
         Directory.CreateDirectory(reportDirectory);
-        var suiteFile = _catalog.TryGetFile(request.DataDirectory, suite.Id);
+        var suiteFile = SuiteCatalog.TryGetFile(request.DataDirectory, suite.Id);
         var baselines = Path.Combine(request.DataDirectory, "baselines");
         _ = Task.Run(async () =>
         {

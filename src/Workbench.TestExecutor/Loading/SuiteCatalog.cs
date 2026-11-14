@@ -35,7 +35,7 @@ public sealed class SuiteCatalog
         return items;
     }
 
-    public string? TryGetFile(string dataDirectory, string suiteId)
+    public static string? TryGetFile(string dataDirectory, string suiteId)
         => ReadFiles(dataDirectory).FirstOrDefault(file => file.Suite?.Id == suiteId && file.Path is not null)?.Path;
 
     public TestSuite Require(string dataDirectory, string suiteId)
@@ -48,7 +48,7 @@ public sealed class SuiteCatalog
         throw new ExecutorDataException(ExecutorError.SuiteNotFound);
     }
 
-    private List<LoadedFile> ReadFiles(string dataDirectory)
+    private static List<LoadedFile> ReadFiles(string dataDirectory)
     {
         var result = new List<LoadedFile>();
         var directory = Path.Combine(Path.GetFullPath(dataDirectory), "suites");
