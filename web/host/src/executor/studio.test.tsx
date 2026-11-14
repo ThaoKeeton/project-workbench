@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorKeyReady, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, formatDailySummary, formatWhen, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, outcomeWord, pageChangedFindings, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, stuckStepSentence, writeAiSettings, writeDailyCap } from "./model";
+import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorKeyReady, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, dismissHint, formatDailySummary, formatWhen, hintDismissed, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, outcomeWord, pageChangedFindings, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, stuckStepSentence, writeAiSettings, writeDailyCap } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => {
@@ -12,7 +12,7 @@ afterEach(() => {
   localStorage.removeItem(aiKeyStorageKey);
 });
 
-async function openSample(user: ReturnType<typeof userEvent.setup>, start = "选择程序") {
+async function openSample(user: ReturnType<typeof userEvent.setup>, start = "新建一个测试") {
   await user.click(screen.getByRole("button", { name: start }));
   await user.click(screen.getByRole("button", { name: sampleAppName }));
   expect(screen.getByRole("status").textContent).toContain("已连接");
@@ -26,14 +26,11 @@ describe("executor wizard", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio stepDelay={10000} />);
     expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
-    expect(screen.getByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeTruthy();
-    expect(screen.getByRole("note", { name: "第一次使用" }).textContent).toContain("先选一个程序。");
-    expect(screen.getByText("用一句话说明要检查什么。")).toBeTruthy();
-    expect(screen.getByText("看它做一遍，对了再保存。")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "知道了" }));
-    expect(screen.queryByRole("note", { name: "第一次使用" })).toBeNull();
+    expect(screen.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeTruthy();
+    expect(screen.getByRole("list", { name: "三步" }).textContent).toContain("选择程序");
+    expect(screen.getByRole("button", { name: "新建一个测试" })).toBeTruthy();
     const file = new File(["x"], "notes.txt", { type: "text/plain" });
-    await user.click(screen.getByRole("button", { name: "选择程序" }));
+    await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     fireEvent.change(screen.getByLabelText("浏览程序"), { target: { files: [file] } });
     expect(screen.getByRole("status").textContent).toContain("还不能自动测试");
     await user.click(screen.getByRole("button", { name: "重新选择" }));
@@ -69,10 +66,11 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "重新生成" }));
     expect(calls).toBe(2);
     await user.click(screen.getByRole("button", { name: "演示一遍" }));
-    expect(screen.getByRole("button", { name: "停止" })).toBeTruthy();
-    expect(screen.getByText("正在检查下一项。")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "停止" }));
-    expect(screen.getByText(/已停下/)).toBeTruthy();
+    expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
+    expect(screen.getByText("正在演示。可以取消。")).toBeTruthy();
+    expect(screen.getAllByText("没跑").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getByText(/已取消/)).toBeTruthy();
   });
 
   it("finishes a passing demo and returns home with the saved test", async () => {
@@ -103,10 +101,9 @@ describe("executor wizard", () => {
   it("explains an open app, a non-electron app, and a slow connection", async () => {
     const user = userEvent.setup();
     render(<ExecutorStudio />);
-    await user.click(screen.getByRole("button", { name: "知道了" }));
-    await user.click(screen.getByRole("button", { name: "选择程序" }));
+    await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     await user.click(screen.getByRole("button", { name: "已经开着的样品" }));
-    expect(screen.getByRole("status").textContent).toBe("这个程序已经开着，需要由工作台重新打开它");
+    expect(screen.getByRole("status").textContent).toBe("这个程序已经开着，需要由工作台重新打开它。");
     await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
     expect(screen.getByRole("dialog", { name: "确认重新打开" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "取消" }));
@@ -127,12 +124,19 @@ describe("executor wizard", () => {
     render(<ExecutorStudio />);
     expect(screen.getByRole("group", { name: "筛选" })).toBeTruthy();
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "需要更新", pressed: false }));
+    expect(screen.getByText("没有要看的测试。")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "通过", pressed: false }));
     expect(screen.queryByText("旁边的牙变了")).toBeNull();
     await user.click(screen.getByRole("button", { name: "全部" }));
     await user.click(screen.getByRole("button", { name: /^切削后体积减小通过/ }));
     expect(await screen.findByText("工件体积从 8 变成 4，小了 50%")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "返回首页" }));
+    await user.click(screen.getByRole("button", { name: "旁边的牙变了 更多" }));
+    await user.click(screen.getByRole("menuitem", { name: "重命名" }));
+    expect(screen.getByRole("dialog", { name: "重命名" })).toBeTruthy();
+    fireEvent.keyDown(window, { key: "Escape" });
+    expect(screen.queryByRole("dialog", { name: "重命名" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "旁边的牙变了 更多" }));
     await user.click(screen.getByRole("menuitem", { name: "重命名" }));
     fireEvent.change(screen.getByLabelText("新名称"), { target: { value: "牙的检查" } });
@@ -244,6 +248,24 @@ describe("executor wizard", () => {
     expect(screen.getByText("今天已经问得够多了。先用保存好的检查，或把每天的次数调大。")).toBeTruthy();
   });
 
+  it("cancels a held launch and submits the sentence with Enter", async () => {
+    sessionStorage.setItem("workbench.author.wait", "1");
+    const user = userEvent.setup();
+    render(<ExecutorStudio complete={async () => ({ text: fixedReplayScript, cost: 0 })} />);
+    await user.click(screen.getByRole("button", { name: "新建一个测试" }));
+    await user.click(screen.getByRole("button", { name: sampleAppName }));
+    expect(await screen.findByText("正在启动程序。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByText(/已连接/)).toBeNull();
+    sessionStorage.removeItem("workbench.author.wait");
+    await user.click(screen.getByRole("button", { name: sampleAppName }));
+    expect((await screen.findByRole("status")).textContent).toContain("已连接");
+    await user.click(screen.getByRole("button", { name: "下一步" }));
+    await user.type(screen.getByLabelText("要测什么"), "切削工件后，工件变小，旁边的牙不变");
+    await user.keyboard("{Enter}");
+    expect(await screen.findByRole("heading", { name: "它会做" })).toBeTruthy();
+  });
+
   it("stops generating when today's count is used up", async () => {
     localStorage.setItem(capStorageKey, "0");
     const user = userEvent.setup();
@@ -352,6 +374,9 @@ describe("executor script", () => {
     expect(authorKeyReady("off")).toBe(true);
     sessionStorage.removeItem("workbench.author.key");
     expect(sampleLibrary(now)).toHaveLength(8);
+    expect(hintDismissed()).toBe(false);
+    dismissHint();
+    expect(hintDismissed()).toBe(true);
     expect(sampleLibrary(now).some((item) => !item.passed)).toBe(true);
   });
 });

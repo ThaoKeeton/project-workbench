@@ -383,17 +383,17 @@ export function appFromFileName(fileName: string): TestApp | null {
 /** What the tester sees after a pick. The debugging port and profile stay inside the runner. */
 export function connectApp(app: TestApp | null, options: { attempt?: number; relaunch?: boolean } = {}): ConnectView {
   if (!app) {
-    return { state: "empty", status: "还没有选择", detail: "请选择一个程序，或从最近用过的里面点一个。", objects: null };
+    return { state: "empty", status: "还没有选择。", detail: "请点一个程序。", objects: null };
   }
   if (app.kind !== "electron") {
-    return { state: "unsupported", status: "这个程序还不能自动测试。", detail: "请换一个用 Electron 做的程序。", objects: null };
+    return { state: "unsupported", status: "这个程序还不能自动测试。", detail: "请换一个程序。", objects: null };
   }
   const attempt = options.attempt ?? 1;
   if (app.running === "timeout" && attempt < 2) {
-    return { state: "timeout", status: "连上用的时间太长了。", detail: "可以再试一次。", objects: null };
+    return { state: "timeout", status: "连上用的时间太长了。", detail: "请再试一次。", objects: null };
   }
   if (app.running === "busy" && !options.relaunch) {
-    return { state: "busy", status: "这个程序已经开着，需要由工作台重新打开它", detail: "正在用的窗口会先关掉。", objects: null };
+    return { state: "busy", status: "这个程序已经开着，需要由工作台重新打开它。", detail: "请点关掉并重新打开。正在用的窗口会先关掉。", objects: null };
   }
   const objects = app.objects;
   const detail = objects !== null && objects > 0

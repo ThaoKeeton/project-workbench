@@ -162,7 +162,7 @@ describe("launcher pages", () => {
     sessionStorage.clear();
     render(<MemoryRouter initialEntries={["/plugin/runner"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "选择程序" }));
+    await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     await user.click(screen.getByRole("button", { name: "合成电子样品" }));
     expect(screen.getByRole("status").textContent).toContain("已连接");
     cleanup();

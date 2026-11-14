@@ -139,7 +139,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
         sessionStorage.setItem("workbench.author.pace", "700");
       });
       await page.goto("/plugin/runner");
-      await page.getByRole("button", { name: "选择程序" }).click();
+      await page.getByRole("button", { name: "新建一个测试" }).click();
       await page.getByRole("button", { name: "合成电子样品" }).click();
       await expect(page.getByRole("status")).toContainText("已连接");
       await page.getByRole("button", { name: "下一步" }).click();
@@ -153,8 +153,8 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       expect(overflow).toBeLessThanOrEqual(1);
       await shot(page, `wizard-checklist-${theme}`);
       await page.getByRole("button", { name: "演示一遍" }).click();
-      await expect(page.getByText("完成").first()).toBeVisible();
-      await expect(page.getByText("通过", { exact: true })).toHaveCount(0);
+      await expect(page.getByText("正在演示。可以取消。")).toBeVisible();
+      await expect(page.getByText("没跑").first()).toBeVisible();
       await shot(page, `wizard-demo-${theme}`);
       await expect(page.getByText("通过", { exact: true }).first()).toBeVisible();
       await expect(page.getByText("工件体积从 8 变成 4，小了 50%", { exact: true })).toBeVisible();
@@ -191,13 +191,14 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
 
     test("app picker, a live connection, an already-open app, and AI settings", async ({ page }) => {
       await page.goto("/plugin/runner");
-      await expect(page.getByRole("note", { name: "第一次使用" })).toBeVisible();
-      await expect(page.getByText("先选一个程序。")).toBeVisible();
-      await expect(page.getByText("用一句话说明要检查什么。")).toBeVisible();
-      await expect(page.getByText("看它做一遍，对了再保存。")).toBeVisible();
-      await page.getByRole("button", { name: "知道了" }).click();
-      await expect(page.getByRole("note", { name: "第一次使用" })).toHaveCount(0);
-      await page.getByRole("button", { name: "选择程序" }).click();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeVisible();
+      await expect(page.getByRole("list", { name: "三步" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
+      await page.setViewportSize({ width: 1100, height: 640 });
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+      await page.setViewportSize({ width: 1440, height: 900 });
+      await shot(page, `journey-01-empty-${theme}`);
+      await page.getByRole("button", { name: "新建一个测试" }).click();
       await expect(page.getByRole("heading", { name: "最近用过的" })).toBeVisible();
       await expect(page.getByRole("heading", { name: "这台电脑上的程序" })).toBeVisible();
       await expect(page.getByRole("button", { name: "浏览…" })).toBeVisible();
@@ -210,7 +211,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByRole("img", { name: "程序画面" })).toBeVisible();
       await shot(page, `wizard-connected-${theme}`);
       await page.getByRole("button", { name: "已经开着的样品" }).click();
-      await expect(page.getByRole("status")).toHaveText("这个程序已经开着，需要由工作台重新打开它");
+      await expect(page.getByRole("status")).toHaveText("这个程序已经开着，需要由工作台重新打开它。");
       await expect(page.getByRole("button", { name: "关掉并重新打开" })).toBeVisible();
       await shot(page, `wizard-busy-${theme}`);
       await page.getByRole("button", { name: "关掉并重新打开" }).click();
@@ -272,8 +273,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
         sessionStorage.setItem("workbench.author.pace", "0");
       });
       await page.goto("/plugin/runner");
-      await page.getByRole("button", { name: "知道了" }).click();
-      await page.getByRole("button", { name: "选择程序" }).click();
+      await page.getByRole("button", { name: "新建一个测试" }).click();
       await page.getByRole("button", { name: "合成电子样品" }).click();
       await page.getByRole("button", { name: "下一步" }).click();
       await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
@@ -356,10 +356,72 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByRole("status").first()).toHaveText("第 2 步找不到「开始」按钮");
     });
 
+    test("a first visit walks from an empty home through a fix", async ({ page }) => {
+      test.setTimeout(90_000);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.fake", "pass");
+        sessionStorage.setItem("workbench.author.pace", "0");
+      });
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await shot(page, `journey-02-pick-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.wait", "1"));
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByRole("status")).toHaveText("正在启动程序。");
+      await shot(page, `journey-03-starting-${theme}`);
+      await page.getByRole("button", { name: "取消" }).click();
+      await page.evaluate(() => sessionStorage.removeItem("workbench.author.wait"));
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await expect(page.getByRole("status")).toHaveText("已连接：合成电子样品");
+      await shot(page, `journey-04-connected-${theme}`);
+      await page.getByRole("button", { name: "下一步" }).click();
+      await shot(page, `journey-05-sentence-${theme}`);
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.wait", "1"));
+      await page.getByLabel("要测什么").press("Enter");
+      await expect(page.getByRole("status")).toHaveText("正在生成检查。");
+      await shot(page, `journey-06-writing-${theme}`);
+      await page.getByRole("button", { name: "取消" }).click();
+      await page.evaluate(() => sessionStorage.removeItem("workbench.author.wait"));
+      await page.getByLabel("要测什么").press("Enter");
+      await expect(page.getByRole("heading", { name: "它会做" })).toBeVisible();
+      await shot(page, `journey-07-checklist-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.pace", "400"));
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await expect(page.getByText("正在演示。可以取消。")).toBeVisible();
+      await expect(page.getByText("通过", { exact: true }).first()).toBeVisible();
+      await shot(page, `journey-08-demo-${theme}`);
+      await expect(page.getByRole("button", { name: "保存并设置每天重跑" })).toBeVisible();
+      await shot(page, `journey-09-pass-${theme}`);
+      await page.getByRole("button", { name: "保存并设置每天重跑" }).click();
+      await shot(page, `journey-10-schedule-${theme}`);
+      await page.getByRole("button", { name: "回到首页" }).click();
+      await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
+      await shot(page, `journey-11-home-${theme}`);
+      await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "changed"));
+      await page.getByRole("button", { name: "现在跑一次" }).click();
+      await expect(page.getByText("需要更新", { exact: true }).first()).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await shot(page, `journey-12-needs-update-${theme}`);
+      await page.getByRole("button", { name: "重新演示并更新" }).click();
+      await expect(page.getByRole("heading", { name: "重新演示并更新" })).toBeVisible();
+      await shot(page, `journey-13-fix-${theme}`);
+      await page.addInitScript(() => sessionStorage.setItem("workbench.author.fake", "fail"));
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("button", { name: "演示一遍" }).click();
+      await expect(page.getByRole("button", { name: "重新演示" })).toBeVisible();
+      await shot(page, `journey-14-fail-${theme}`);
+    });
+
     test("wizard explains a failed check in plain words", async ({ page }) => {
       await page.addInitScript(() => sessionStorage.setItem("workbench.author.fake", "fail"));
       await page.goto("/plugin/runner");
-      await page.getByRole("button", { name: "选择程序" }).click();
+      await page.getByRole("button", { name: "新建一个测试" }).click();
       await page.getByRole("button", { name: "合成电子样品" }).click();
       await page.getByRole("button", { name: "下一步" }).click();
       await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");

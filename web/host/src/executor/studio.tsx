@@ -6,13 +6,11 @@ import {
   authorPrompt,
   caseFromScript,
   connectApp,
-  dismissHint,
   failingReplayScript,
   fixedReplayScript,
   allWeekdays,
   authorKeyReady,
   formatWhen,
-  hintDismissed,
   humanFindings,
   missedBecauseOff,
   nextDailyInstant,
@@ -72,11 +70,12 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [missedNote, setMissedNote] = useState("");
   const [repairNote, setRepairNote] = useState("");
   const [rerecordStep, setRerecordStep] = useState(0);
+  const [busy, setBusy] = useState<"" | "open" | "write">("");
+  const cancelToken = useRef(0);
   const [scheduled, setScheduled] = useState(false);
   const fakeMode = readAuthorFake();
   const keyReady = authorKeyReady(fakeMode, Boolean(complete));
   const connection = connectApp(picked, { attempt, relaunch });
-  const pace = readPace(stepDelay);
   const left = Math.max(0, cap - spent);
 
   useEffect(() => {
@@ -92,32 +91,54 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
 
   useEffect(() => {
     if (phase !== "demo" || stopped || !demo) return;
+    const pace = readPace(stepDelay);
     if (shown >= findings.length) {
       const timer = window.setTimeout(() => setPhase("result"), pace);
       return () => window.clearTimeout(timer);
     }
     const timer = window.setTimeout(() => setShown((count) => count + 1), pace);
     return () => window.clearTimeout(timer);
-  }, [phase, shown, stopped, pace, findings.length, demo]);
+  }, [phase, shown, stopped, stepDelay, findings.length, demo]);
+
+  const cancelBusy = () => {
+    cancelToken.current += 1;
+    setBusy("");
+  };
 
   const choose = (next: TestApp | null, options: { attempt?: number; relaunch?: boolean } = {}) => {
-    if (!next) {
-      setPicked(null);
-      setAttempt(1);
-      setRelaunch(false);
-      return;
-    }
-    const nextAttempt = options.attempt ?? 1;
-    const nextRelaunch = Boolean(options.relaunch);
-    setPicked(next);
-    setAttempt(nextAttempt);
-    setRelaunch(nextRelaunch);
-    if (connectApp(next, { attempt: nextAttempt, relaunch: nextRelaunch }).state === "connected") {
-      setRecent((items) => [next, ...items.filter((item) => item.id !== next.id)].slice(0, 4));
-    }
+    const token = ++cancelToken.current;
+    void (async () => {
+      if (!next) {
+        setPicked(null);
+        setAttempt(1);
+        setRelaunch(false);
+        setBusy("");
+        return;
+      }
+      const nextAttempt = options.attempt ?? 1;
+      const nextRelaunch = Boolean(options.relaunch);
+      const preview = connectApp(next, { attempt: nextAttempt, relaunch: nextRelaunch });
+      if (preview.state === "connected" && readWait()) {
+        setBusy("open");
+        const ok = await holdUntilSettled(token, () => cancelToken.current);
+        if (!ok) {
+          setBusy("");
+          return;
+        }
+      }
+      if (token !== cancelToken.current) return;
+      setBusy("");
+      setPicked(next);
+      setAttempt(nextAttempt);
+      setRelaunch(nextRelaunch);
+      if (preview.state === "connected") {
+        setRecent((items) => [next, ...items.filter((item) => item.id !== next.id)].slice(0, 4));
+      }
+    })();
   };
 
   const draftCase = async (note = correction, goalText = goal) => {
+    const token = ++cancelToken.current;
     setDraft(null);
     setDemo(null);
     if (goalText.trim().length === 0) {
@@ -129,14 +150,23 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       setNotice(authorMessages.overBudget);
       return;
     }
+    setBusy("write");
+    const ok = await holdUntilSettled(token, () => cancelToken.current);
+    if (!ok) {
+      setBusy("");
+      return;
+    }
     const prompt = authorPrompt([goalText, note].filter((part) => part.trim()).join("\n"), sampleDom, sceneSnapshotText);
     const result = complete ? await complete(prompt) : { text: readAuthorFake() === "fail" ? failingReplayScript : fixedReplayScript, cost: 0 };
     setSpent((value) => value + result.cost);
     const authored = caseFromScript(result.text);
     if (!authored) {
+      setBusy("");
       setNotice(authorMessages.invalid);
       return;
     }
+    if (token !== cancelToken.current) return;
+    setBusy("");
     setDraft(authored);
     setNotice("");
   };
@@ -198,7 +228,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       <header className="executor-head">
         <div>
           <h1>自动测试</h1>
-          {phase === "result" ? null : <p>选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。</p>}
+          {phase === "result" || (phase === "home" && library.length === 0) ? null : <p>选一个程序，用一句话说要检查什么，再看它做一遍。</p>}
         </div>
       </header>
       {phase === "home" ? (
@@ -232,7 +262,9 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               connection={connection}
               recent={recent}
               installed={sampleApps().filter((item) => !recent.some((entry) => entry.id === item.id))}
+              busy={busy === "open"}
               onChoose={choose}
+              onCancel={cancelBusy}
               onNext={() => setStepIndex(1)}
             />
           ) : null}
@@ -248,6 +280,8 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               onRetry={() => void draftCase(correction)}
               onDemo={showDemo}
               onBack={() => setStepIndex(1)}
+              onCancel={() => { cancelBusy(); setStepIndex(1); }}
+              writing={busy === "write"}
               onLeave={() => rememberWizard(2, picked?.id ?? "", goal)}
             />
           ) : null}
@@ -304,6 +338,31 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       ) : null}
     </section>
   );
+}
+
+function readWait(): boolean {
+  try {
+    return window.sessionStorage.getItem("workbench.author.wait") === "1";
+  } catch {
+    return false;
+  }
+}
+
+function holdUntilSettled(token: number, current: () => number): Promise<boolean> {
+  if (!readWait()) return Promise.resolve(token === current());
+  return new Promise((resolve) => {
+    const timer = window.setInterval(() => {
+      if (token !== current()) {
+        window.clearInterval(timer);
+        resolve(false);
+        return;
+      }
+      if (!readWait()) {
+        window.clearInterval(timer);
+        resolve(true);
+      }
+    }, 30);
+  });
 }
 
 function readPace(fallback: number): number {
@@ -392,26 +451,33 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
   onPause: (id: string) => void;
   onDelete: (id: string) => void;
 }) {
-  const [filter, setFilter] = useState<"all" | "fail" | "pass">(readListFilter);
+  const [filter, setFilter] = useState<"all" | "fail" | "update" | "pass">(readListFilter);
   const [menu, setMenu] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<SavedTest | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [removing, setRemoving] = useState<SavedTest | null>(null);
-  const [showHint, setShowHint] = useState(() => !hintDismissed());
+  useEffect(() => {
+    if (!renaming && !removing) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setRenaming(null);
+      setRemoving(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [renaming, removing]);
   if (library.length === 0) {
     return (
       <div className="wizard-card" aria-label="开始">
         <h2>还没有测试</h2>
-        {showHint ? (
-          <div className="first-hint" role="note" aria-label="第一次使用">
-            <p>先选一个程序。</p>
-            <p>用一句话说明要检查什么。</p>
-            <p>看它做一遍，对了再保存。</p>
-            <button type="button" className="btn" onClick={() => { dismissHint(); setShowHint(false); }}>知道了</button>
-          </div>
-        ) : <p>先选择要测的程序，再用一句话说明要检查什么。</p>}
+        <p>选一个程序，用一句话说要检查什么，再看它做一遍。</p>
+        <ol className="first-steps" aria-label="三步">
+          <li><span>1</span>选择程序</li>
+          <li><span>2</span>说一句</li>
+          <li><span>3</span>看一遍</li>
+        </ol>
         <div className="wizard-actions">
-          <button type="button" className="btn-accent" onClick={onNew}>选择程序</button>
+          <button type="button" className="btn-accent" onClick={onNew}>新建一个测试</button>
         </div>
       </div>
     );
@@ -419,6 +485,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
   const visible = library.filter((item) => {
     const outcome = listedOutcome(item);
     if (filter === "pass") return outcome === "pass";
+    if (filter === "update") return outcome === "needs-update";
     if (filter === "fail") return outcome !== "pass";
     return true;
   });
@@ -430,12 +497,13 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
       </div>
       {library.length > 5 ? (
         <div className="filter-row" role="group" aria-label="筛选">
-          {([["all", "全部"], ["fail", "没通过"], ["pass", "通过"]] as const).map(([value, label]) => (
+          {([["all", "全部"], ["fail", "没通过"], ["update", "需要更新"], ["pass", "通过"]] as const).map(([value, label]) => (
             <button key={value} type="button" className={filter === value ? "is-on" : ""} aria-pressed={filter === value} onClick={() => setFilter(value)}>{label}</button>
           ))}
         </div>
       ) : null}
       {missedNote ? <p role="status">{missedNote}</p> : null}
+      {visible.length === 0 ? <p>没有要看的测试。</p> : null}
       <ul className="saved-list">
         {visible.map((item) => {
           const outcome = listedOutcome(item);
@@ -488,17 +556,27 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
   );
 }
 
-function AppStep({ picked, connection, recent, installed, onChoose, onNext }: {
+function AppStep({ picked, connection, recent, installed, busy, onChoose, onCancel, onNext }: {
   picked: TestApp | null;
   connection: ConnectView;
   recent: TestApp[];
   installed: TestApp[];
+  busy: boolean;
   onChoose: (app: TestApp | null, options?: { attempt?: number; relaunch?: boolean }) => void;
+  onCancel: () => void;
   onNext: () => void;
 }) {
   const [confirm, setConfirm] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
-  const connected = connection.state === "connected";
+  const connected = connection.state === "connected" && !busy;
+  useEffect(() => {
+    if (!confirm) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConfirm(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirm]);
   return (
     <div className="wizard-card" aria-label="选择程序">
       <h2>选择要测的程序</h2>
@@ -517,8 +595,18 @@ function AppStep({ picked, connection, recent, installed, onChoose, onNext }: {
       <ul className="app-grid" aria-label="已安装的程序">
         {installed.map((app) => <AppButton key={app.id} app={app} selected={picked?.id === app.id} onChoose={onChoose} />)}
       </ul>
-      <p role="status">{connection.status}</p>
-      {connection.detail ? <p>{connection.detail}</p> : null}
+      {busy ? (
+        <>
+          <p role="status">正在启动程序。</p>
+          <p>连接中。可以取消。</p>
+          <button type="button" className="btn" onClick={onCancel}>取消</button>
+        </>
+      ) : (
+        <>
+          <p role="status">{connection.status}</p>
+          {connection.detail ? <p>{connection.detail}</p> : null}
+        </>
+      )}
       {connected ? <WindowPreview objects={connection.objects} /> : null}
       {connection.state === "busy" && picked ? (
         <button type="button" className="btn" onClick={() => setConfirm(true)}>关掉并重新打开</button>
@@ -577,7 +665,12 @@ function GoalStep({ goal, onGoal, onBack, onNext }: { goal: string; onGoal: (val
       <p>打开之后会自动看一遍画面和文字，不用你再操作。</p>
       <label>
         要测什么
-        <textarea aria-label="要测什么" value={goal} placeholder="切削工件后，工件变小，旁边的牙不变" onChange={(event) => onGoal(event.target.value)} />
+        <textarea aria-label="要测什么" value={goal} placeholder="切削工件后，工件变小，旁边的牙不变" onChange={(event) => onGoal(event.target.value)} onKeyDown={(event) => {
+          if (event.key === "Enter" && !event.shiftKey) {
+            event.preventDefault();
+            if (goal.trim().length > 0) onNext();
+          }
+        }} />
       </label>
       <div className="wizard-actions">
         <button type="button" className="btn" onClick={onBack}>上一步</button>
@@ -589,18 +682,25 @@ function GoalStep({ goal, onGoal, onBack, onNext }: { goal: string; onGoal: (val
 
 const aiSettingsHref = "/settings/ai?return=/plugin/runner";
 
-function DraftStep({ left, keyReady, draft, notice, correction, onCorrection, onRetry, onDemo, onBack, onLeave }: {
-  left: number; keyReady: boolean; draft: ExecutorCase | null; notice: string; correction: string;
-  onCorrection: (value: string) => void; onRetry: () => void; onDemo: () => void; onBack: () => void; onLeave: () => void;
+function DraftStep({ left, keyReady, draft, notice, correction, writing, onCorrection, onRetry, onDemo, onBack, onCancel, onLeave }: {
+  left: number; keyReady: boolean; draft: ExecutorCase | null; notice: string; correction: string; writing: boolean;
+  onCorrection: (value: string) => void; onRetry: () => void; onDemo: () => void; onBack: () => void; onCancel: () => void; onLeave: () => void;
 }) {
   const plan = draft ? plainPlan(draft) : null;
   return (
     <div className="wizard-card" aria-label="看一遍">
       <h2>看它准备做什么</h2>
       <p className="tiny">今天还能生成 {left} 次。{keyReady ? <a href={aiSettingsHref} onClick={onLeave}>去设置</a> : null}</p>
-      {!keyReady ? <p role="status">{authorMessages.missingKey}<a href={aiSettingsHref} onClick={onLeave}>去设置</a></p> : null}
-      {notice ? <p role="status">{notice}</p> : null}
-      {plan ? (
+      {writing ? (
+        <>
+          <p role="status">正在生成检查。</p>
+          <p>可以取消。</p>
+          <button type="button" className="btn" onClick={onCancel}>取消</button>
+        </>
+      ) : null}
+      {!writing && !keyReady ? <p role="status">{authorMessages.missingKey}<a href={aiSettingsHref} onClick={onLeave}>去设置</a></p> : null}
+      {!writing && notice ? <p role="status">{notice}</p> : null}
+      {!writing && plan ? (
         <div className="plan" aria-label="检查清单">
           <h3>{draft!.name}</h3>
           <div>
@@ -617,17 +717,19 @@ function DraftStep({ left, keyReady, draft, notice, correction, onCorrection, on
           </details>
         </div>
       ) : null}
-      {keyReady ? (
+      {!writing && keyReady ? (
         <label>
           哪里不对？
           <textarea aria-label="哪里不对" value={correction} placeholder="例如：旁边的牙不应该变" onChange={(event) => onCorrection(event.target.value)} />
         </label>
       ) : null}
-      <div className="wizard-actions">
-        <button type="button" className="btn" onClick={onBack}>上一步</button>
-        {keyReady ? <button type="button" className="btn" onClick={onRetry}>重新生成</button> : null}
-        <button type="button" className="btn-accent" disabled={!draft} onClick={onDemo}>演示一遍</button>
-      </div>
+      {!writing ? (
+        <div className="wizard-actions">
+          <button type="button" className="btn" onClick={onBack}>上一步</button>
+          {keyReady ? <button type="button" className="btn" onClick={onRetry}>重新生成</button> : null}
+          <button type="button" className="btn-accent" disabled={!draft} onClick={onDemo}>演示一遍</button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -639,18 +741,22 @@ function DemoRun({ findings, shown, stopped, onStop, onBack }: {
     <div className="wizard-card" aria-label="演示">
       <h2>正在这个程序里做一遍</h2>
       <ol className="live-list" aria-label="演示进度">
-        {findings.slice(0, shown).map((item) => (
-          <li key={item.sentence} data-state={item.kind === "missing" ? "missing" : item.ok ? "ok" : "bad"}>
-            <span>{item.kind === "missing" ? "找不到" : item.ok ? "完成" : "没通过"}</span>
-            <span>{item.sentence}</span>
-          </li>
-        ))}
+        {findings.map((item, index) => {
+          const seen = index < shown;
+          const word = !seen ? "没跑" : item.kind === "missing" ? "需要更新" : item.ok ? "通过" : "没通过";
+          return (
+            <li key={item.sentence} data-state={!seen ? "later" : item.kind === "missing" ? "missing" : item.ok ? "ok" : "bad"}>
+              <span>{word}</span>
+              <span>{item.sentence}</span>
+            </li>
+          );
+        })}
       </ol>
-      {shown < findings.length && !stopped ? <p role="status">正在检查下一项。</p> : null}
-      {stopped ? <p role="status">已停下。可以回去改一句，再重新生成。</p> : null}
+      {shown < findings.length && !stopped ? <p role="status">正在演示。可以取消。</p> : null}
+      {stopped ? <p role="status">已取消。可以回去改一句，再看一遍。</p> : null}
       <div className="wizard-actions">
         <button type="button" className="btn" onClick={onBack}>返回修改</button>
-        {shown < findings.length && !stopped ? <button type="button" className="btn" onClick={onStop}>停止</button> : null}
+        {shown < findings.length && !stopped ? <button type="button" className="btn" onClick={onStop}>取消</button> : null}
       </div>
     </div>
   );
@@ -697,6 +803,14 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
   const [pickedAt, setPickedAt] = useState<string | null>(null);
   const [repairHint, setRepairHint] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
+  useEffect(() => {
+    if (!confirmClear) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setConfirmClear(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [confirmClear]);
   const newest = [...history].reverse();
   const picked = newest.find((entry) => entry.at === pickedAt) ?? null;
   const viewingCurrent = !picked || picked.at === newest[0]?.at;
@@ -852,10 +966,10 @@ function listedOutcome(item: SavedTest): "pass" | "fail" | "needs-update" {
   return item.history.at(-1)?.outcome ?? (item.passed ? "pass" : "fail");
 }
 
-function readListFilter(): "all" | "fail" | "pass" {
+function readListFilter(): "all" | "fail" | "update" | "pass" {
   try {
     const value = new URLSearchParams(window.location.search).get("filter");
-    if (value === "fail" || value === "pass") return value;
+    if (value === "fail" || value === "pass" || value === "update") return value;
   } catch {
     return "all";
   }
