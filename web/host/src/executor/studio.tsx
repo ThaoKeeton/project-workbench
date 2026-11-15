@@ -53,7 +53,7 @@ type SavedTest = SavedTestRecord;
 export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: ScriptCompleter; stepDelay?: number }) {
   const [resumed] = useState(readWizardDraft);
   const resumedApp = sampleApps().find((item) => item.id === resumed.appId) ?? null;
-  const [phase, setPhase] = useState<"home" | "wizard" | "demo" | "result" | "rerecord">(resumed.resume ? "wizard" : "home");
+  const [phase, setPhase] = useState<"home" | "wizard" | "demo" | "result" | "rerecord" | "record">(resumed.resume ? "wizard" : "home");
   const [stepIndex, setStepIndex] = useState(resumed.resume ? resumed.step : 0);
   const [picked, setPicked] = useState<TestApp | null>(resumed.resume ? resumedApp : null);
   const [attempt, setAttempt] = useState(1);
