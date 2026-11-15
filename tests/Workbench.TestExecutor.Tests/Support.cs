@@ -20,6 +20,7 @@ internal sealed class RecordingDeadline : IDeadlineFactory
         Timeouts.Add(timeout);
         var source = CancellationTokenSource.CreateLinkedTokenSource(outer);
         if (CancelImmediately) source.Cancel();
+        else if (timeout > TimeSpan.Zero) source.CancelAfter(timeout);
         return source;
     }
 }

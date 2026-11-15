@@ -402,11 +402,26 @@ public sealed class CdpWebSession : IWebSession
         while (true)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var blocked = await PopupAsync(step, cancellationToken);
-            if (blocked is not null) return blocked;
-            var result = ToResult(step, await EvaluateAsync(RequestFor(step), cancellationToken));
-            if (result.Found && result.Ok) return result;
-            if (!cancellationToken.CanBeCanceled) return result;
+            try
+            {
+                var blocked = await PopupAsync(step, cancellationToken);
+                if (blocked is not null) return blocked;
+                var result = ToResult(step, await EvaluateAsync(RequestFor(step), cancellationToken));
+                if (result.Found && result.Ok) return result;
+            }
+            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException)
+            {
+                if (cancellationToken.IsCancellationRequested) throw;
+                if (_socket is not { State: WebSocketState.Open })
+                {
+                    try { await ActivateAsync(_title, _url, cancellationToken); }
+                    catch (Exception activate) when (activate is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
+                    {
+                        if (cancellationToken.IsCancellationRequested) throw;
+                    }
+                }
+            }
+            if (!cancellationToken.CanBeCanceled) return new WebResult(false, false, ExecutorError.ControlNotFound, true, null);
             await Task.Delay(100, cancellationToken);
         }
     }
@@ -446,10 +461,14 @@ public sealed class CdpWebSession : IWebSession
             await CallAsync("Page.addScriptToEvaluateOnNewDocument", new { source = SceneHook.Source }, cancellationToken);
             if (reload)
             {
-                // The current document is already complete. Mark it so the wait below
-                // cannot return before the reload replaces the page.
-                await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
-                await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
+                // The debugger can answer before loadFile commits. Reloading that
+                // empty document cancels the real navigation, so the sample controls
+                // never appear. Wait until they exist, then reload to run the hook.
+                if (await WaitForSelectorAsync("#start", cancellationToken))
+                {
+                    await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
+                    await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
+                }
                 await WaitForHookAsync(cancellationToken);
             }
         }
@@ -638,9 +657,9 @@ public sealed class CdpWebSession : IWebSession
         }
     }
 
-    private async Task WaitForHookAsync(CancellationToken cancellationToken)
+    private async Task<bool> WaitForSelectorAsync(string selector, CancellationToken cancellationToken)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(15);
+        var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -648,7 +667,40 @@ public sealed class CdpWebSession : IWebSession
             {
                 var result = await CallAsync("Runtime.evaluate", new
                 {
-                    expression = "({marker: window.__WB_RELOAD_MARKER === 1, hook: typeof window.__THREE_DEVTOOLS__, ready: document.readyState})",
+                    expression = "!!document.querySelector(" + JsonSerializer.Serialize(selector) + ")",
+                    returnByValue = true
+                }, cancellationToken);
+                if (result.TryGetProperty("result", out var inner) && inner.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.True)
+                    return true;
+            }
+            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+            {
+                if (cancellationToken.IsCancellationRequested) throw;
+                if (_socket is not { State: WebSocketState.Open })
+                {
+                    try { await ActivateAsync(_title, _url, cancellationToken); }
+                    catch (Exception activate) when (activate is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
+                    {
+                        if (cancellationToken.IsCancellationRequested) throw;
+                    }
+                }
+            }
+            await Task.Delay(100, cancellationToken);
+        }
+        return false;
+    }
+
+    private async Task WaitForHookAsync(CancellationToken cancellationToken)
+    {
+        var deadline = DateTime.UtcNow.AddSeconds(20);
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                var result = await CallAsync("Runtime.evaluate", new
+                {
+                    expression = "({marker: window.__WB_RELOAD_MARKER === 1, hook: typeof window.__THREE_DEVTOOLS__, ready: document.readyState, page: !!document.querySelector('#start')})",
                     returnByValue = true
                 }, cancellationToken);
                 if (result.TryGetProperty("result", out var inner) && inner.TryGetProperty("value", out var value))
@@ -656,7 +708,8 @@ public sealed class CdpWebSession : IWebSession
                     var marker = value.TryGetProperty("marker", out var marked) && marked.ValueKind == JsonValueKind.True;
                     var hook = value.TryGetProperty("hook", out var kind) && kind.GetString() == "object";
                     var ready = value.TryGetProperty("ready", out var state) && state.GetString() == "complete";
-                    if (!marker && hook && ready) return;
+                    var page = value.TryGetProperty("page", out var hasPage) && hasPage.ValueKind == JsonValueKind.True;
+                    if (!marker && hook && ready && page) return;
                 }
             }
             catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
