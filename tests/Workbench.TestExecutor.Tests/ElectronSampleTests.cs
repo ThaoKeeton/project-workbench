@@ -218,7 +218,7 @@ public sealed class ElectronSampleTests
         Assert.NotNull(session);
         await using var connected = session;
         var started = DateTime.UtcNow;
-        await connected.InstallSceneHookAsync(true, CancellationToken.None, TimeSpan.FromMilliseconds(250));
+        await connected.InstallSceneHookAsync(true, TimeSpan.FromMilliseconds(250), CancellationToken.None);
         var result = await connected.PerformAsync(new TestStep("wait-start", StepKind.Web, "wait-for", new ElementSelector(null, null, null, "开始"), null, null, 120, false, false), CancellationToken.None);
         Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(3), "a missing sample page must not use the two-minute renderer wait");
         Assert.Equal(ExecutorError.WindowNotFound, result.Error);

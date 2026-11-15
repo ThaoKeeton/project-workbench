@@ -489,9 +489,9 @@ public sealed class CdpWebSession : IWebSession
     }
 
     public Task InstallSceneHookAsync(bool reload, CancellationToken cancellationToken)
-        => InstallSceneHookAsync(reload, cancellationToken, TimeSpan.FromSeconds(20));
+        => InstallSceneHookAsync(reload, TimeSpan.FromSeconds(20), cancellationToken);
 
-    internal async Task InstallSceneHookAsync(bool reload, CancellationToken cancellationToken, TimeSpan budget)
+    internal async Task InstallSceneHookAsync(bool reload, TimeSpan budget, CancellationToken cancellationToken)
     {
         if (_startupFault is not null) return;
         var deadline = DateTime.UtcNow.Add(budget);
@@ -502,13 +502,13 @@ public sealed class CdpWebSession : IWebSession
         }, cancellationToken);
         if (!reload)
         {
-            if (!await WaitForHookAsync(cancellationToken, deadline)) _startupFault = PageFault();
+            if (!await WaitForHookAsync(deadline, cancellationToken)) _startupFault = PageFault();
             return;
         }
         // The debugger can answer before loadFile commits. Reloading that empty
         // document cancels the real navigation, so the sample controls never appear.
         // Reload only a real file page. If that page never comes back, stop here.
-        if (await WaitForSelectorAsync("location.protocol === 'file:' && !!document.querySelector('#start')", cancellationToken, deadline))
+        if (await WaitForSelectorAsync("location.protocol === 'file:' && !!document.querySelector('#start')", deadline, cancellationToken))
         {
             await TryDebuggerAsync(async () =>
             {
@@ -517,7 +517,7 @@ public sealed class CdpWebSession : IWebSession
             }, cancellationToken);
             deadline = DateTime.UtcNow.Add(budget);
         }
-        if (!await WaitForHookAsync(cancellationToken, deadline)) _startupFault = PageFault();
+        if (!await WaitForHookAsync(deadline, cancellationToken)) _startupFault = PageFault();
     }
 
     private string PageFault()
@@ -704,7 +704,7 @@ public sealed class CdpWebSession : IWebSession
         }
     }
 
-    private async Task<bool> WaitForSelectorAsync(string selector, CancellationToken cancellationToken, DateTime deadline)
+    private async Task<bool> WaitForSelectorAsync(string selector, DateTime deadline, CancellationToken cancellationToken)
     {
         while (DateTime.UtcNow < deadline)
         {
@@ -736,7 +736,7 @@ public sealed class CdpWebSession : IWebSession
         return false;
     }
 
-    private async Task<bool> WaitForHookAsync(CancellationToken cancellationToken, DateTime deadline)
+    private async Task<bool> WaitForHookAsync(DateTime deadline, CancellationToken cancellationToken)
     {
         while (DateTime.UtcNow < deadline)
         {
