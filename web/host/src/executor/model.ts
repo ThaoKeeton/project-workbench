@@ -161,9 +161,9 @@ export const authorRules = [
 
 export const authorMessages = {
   empty: "请先用一句话说明要测什么。",
-  disabled: "需要先设置 AI 密钥。",
-  missingKey: "需要先设置 AI 密钥。",
-  overBudget: "今天已经问得够多了。先用保存好的检查，或把每天的次数调大。",
+  disabled: "要把这句话写成检查，需要先填一个密钥。只有写检查和修改检查时才会用到，每天重跑不用。",
+  missingKey: "要把这句话写成检查，需要先填一个密钥。只有写检查和修改检查时才会用到，每天重跑不用。",
+  overBudget: "今天的次数用完了，明天 0 点会重新开始。已经保存的测试照常重跑。",
   review: "看一遍下面要做的事。看着演示确认后，再保存。",
   invalid: "这次没有写成可以执行的检查。请改一句说明，再试一次。",
   saved: "已保存。之后重跑不会再问。",
@@ -189,6 +189,31 @@ export function readDailyCap(): number {
 export function writeDailyCap(value: number) {
   const next = Number.isFinite(value) ? Math.min(100, Math.max(0, Math.round(value))) : 20;
   localStorage.setItem(capStorageKey, String(next));
+}
+
+const spentStorageKey = "workbench.author.spent";
+
+function spentDay(now: Date): string {
+  return `${now.getFullYear()}-${now.getMonth() + 1}-${now.getDate()}`;
+}
+
+/** Today's count. A new calendar day starts again at 0. */
+export function readSpent(now = new Date()): number {
+  try {
+    const raw = sessionStorage.getItem(spentStorageKey) ?? "";
+    const [day, count] = raw.split("|");
+    if (day !== spentDay(now)) return 0;
+    const value = Number(count);
+    if (Number.isFinite(value) && value >= 0) return value;
+  } catch {
+    return 0;
+  }
+  return 0;
+}
+
+export function writeSpent(value: number, now = new Date()) {
+  const next = Number.isFinite(value) && value > 0 ? Math.round(value) : 0;
+  sessionStorage.setItem(spentStorageKey, `${spentDay(now)}|${next}`);
 }
 
 /** Today and tomorrow stay relative. Any other day uses the month and date. */

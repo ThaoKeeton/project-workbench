@@ -5,6 +5,7 @@ import {
   appFromFileName,
   authorPrompt,
   caseFromScript,
+  compatiblePresets,
   connectApp,
   failingReplayScript,
   fixedReplayScript,
@@ -19,8 +20,11 @@ import {
   outcomeWord,
   pageChangedFindings,
   plainPlan,
+  probeAi,
+  readAiSettings,
   readAuthorFake,
   readDailyCap,
+  readSpent,
   replay,
   resultSentence,
   sampleAppName,
@@ -28,6 +32,9 @@ import {
   sampleDom,
   sampleLibrary,
   sceneSnapshotText,
+  writeAiSettings,
+  writeSpent,
+  type CompatiblePresetId,
   type ConnectView,
   type ExecutorCase,
   type ExecutorRun,
@@ -55,7 +62,10 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [goal, setGoal] = useState(resumed.resume ? resumed.goal : "");
   const [correction, setCorrection] = useState("");
   const [cap] = useState(readDailyCap);
-  const [spent, setSpent] = useState(0);
+  const [spent, setSpent] = useState(readSpent);
+  const [keyMark, setKeyMark] = useState(0);
+  const [recorded, setRecorded] = useState(false);
+  const [recordStep, setRecordStep] = useState(0);
   const [draft, setDraft] = useState<ExecutorCase | null>(null);
   const [notice, setNotice] = useState("");
   const [demo, setDemo] = useState<ExecutorRun | null>(null);
@@ -76,8 +86,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [launch, setLaunch] = useState<{ app: TestApp; phase: "opening" | "connecting" } | null>(null);
   const cancelToken = useRef(0);
   const [scheduled, setScheduled] = useState(false);
-  const fakeMode = readAuthorFake();
-  const keyReady = authorKeyReady(fakeMode, Boolean(complete));
+  const keyReady = authorKeyReady(readAuthorFake(), Boolean(complete)) || keyMark > 0 && authorKeyReady(readAuthorFake(), Boolean(complete));
   const connection = connectApp(picked, { attempt, relaunch });
   const left = Math.max(0, cap - spent);
 
@@ -157,19 +166,21 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
     })();
   };
 
+  const readyNow = () => authorKeyReady(readAuthorFake(), Boolean(complete));
+
   const draftCase = async (note = correction, goalText = goal) => {
     const token = ++cancelToken.current;
-    setDraft(null);
     setDemo(null);
     if (goalText.trim().length === 0) {
       setNotice(authorMessages.empty);
       return;
     }
-    if (!keyReady) return;
+    if (!readyNow()) return;
     if (spent >= cap) {
       setNotice(authorMessages.overBudget);
       return;
     }
+    setDraft(null);
     setBusy("write");
     const ok = await holdUntilSettled(token, () => cancelToken.current);
     if (!ok) {
@@ -178,7 +189,11 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
     }
     const prompt = authorPrompt([goalText, note].filter((part) => part.trim()).join("\n"), sampleDom, sceneSnapshotText);
     const result = complete ? await complete(prompt) : { text: readAuthorFake() === "fail" ? failingReplayScript : fixedReplayScript, cost: 0 };
-    setSpent((value) => value + result.cost);
+    setSpent((value) => {
+      const next = value + result.cost;
+      writeSpent(next);
+      return next;
+    });
     const authored = caseFromScript(result.text);
     if (!authored) {
       setBusy("");
@@ -300,11 +315,32 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               onNext={() => setStepIndex(1)}
             />
           ) : null}
-          {stepIndex === 1 ? <GoalStep goal={goal} onGoal={setGoal} onBack={() => setStepIndex(0)} onNext={() => { setStepIndex(2); void draftCase(""); }} /> : null}
+          {stepIndex === 1 ? (
+            <GoalStep
+              goal={goal}
+              keyReady={keyReady}
+              onGoal={setGoal}
+              onBack={() => setStepIndex(0)}
+              onNext={() => {
+                if (!readyNow()) return;
+                setStepIndex(2);
+                if (spent >= cap) setNotice(authorMessages.overBudget);
+                else void draftCase("");
+              }}
+              onSkip={() => { setRecordStep(0); setPhase("record"); }}
+              onSaved={() => {
+                setKeyMark((value) => value + 1);
+                setStepIndex(2);
+                if (spent >= cap) setNotice(authorMessages.overBudget);
+                else void draftCase("");
+              }}
+            />
+          ) : null}
           {stepIndex === 2 ? (
             <DraftStep
               left={left}
               keyReady={keyReady}
+              recorded={recorded}
               draft={draft}
               notice={repairNote || notice}
               correction={correction}
@@ -313,8 +349,8 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
               onDemo={showDemo}
               onBack={() => setStepIndex(1)}
               onCancel={() => { cancelBusy(); setStepIndex(1); }}
+              onSkip={() => { setRecordStep(0); setPhase("record"); }}
               writing={busy === "write"}
-              onLeave={() => rememberWizard(2, picked?.id ?? "", goal)}
             />
           ) : null}
           {stepIndex === 3 ? (
@@ -324,6 +360,21 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
             }} onHome={() => setPhase("home")} />
           ) : null}
         </div>
+      ) : null}
+      {phase === "record" ? (
+        <RecordFirst
+          appName={picked?.name || sampleAppName}
+          step={recordStep}
+          onAdvance={() => setRecordStep((value) => value + 1)}
+          onDone={() => {
+            const authored = caseFromScript(fixedReplayScript);
+            if (authored) setDraft(authored);
+            setRecorded(true);
+            setNotice("");
+            setStepIndex(2);
+            setPhase("wizard");
+          }}
+        />
       ) : null}
       {phase === "demo" && draft ? (
         <DemoRun findings={findings} shown={shown} stopped={stopped} onStop={() => setStopped(true)} onBack={() => setPhase("wizard")} />
@@ -356,6 +407,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
           history={opened?.history ?? []}
           keyReady={keyReady}
           canRepair={left > 0}
+          onKeySaved={() => setKeyMark((value) => value + 1)}
           onRepair={() => { const text = goal || draft.name; setRepairNote("这是建议的修改，还没保存。"); setGoal(text); setStepIndex(2); setPhase("wizard"); void draftCase("", text); }}
           onRerecord={() => { setRerecordStep(0); setPhase("rerecord"); }}
           onClearImages={() => {
@@ -370,6 +422,17 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       ) : null}
     </section>
   );
+}
+
+function readProbeFake(): "off" | "pass" | "fail" | "changed" {
+  try {
+    const value = window.sessionStorage.getItem("workbench.author.probe");
+    if (value === "1" || value === "pass") return "pass";
+    if (value === "fail") return "fail";
+  } catch {
+    return readAuthorFake();
+  }
+  return readAuthorFake();
 }
 
 function readWaitMode(): "" | "open" | "connect" | "hold" {
@@ -727,7 +790,18 @@ function WindowPreview({ objects }: { objects: number | null }) {
   );
 }
 
-function GoalStep({ goal, onGoal, onBack, onNext }: { goal: string; onGoal: (value: string) => void; onBack: () => void; onNext: () => void }) {
+function GoalStep({ goal, keyReady, onGoal, onBack, onNext, onSkip, onSaved }: {
+  goal: string; keyReady: boolean; onGoal: (value: string) => void; onBack: () => void; onNext: () => void; onSkip: () => void; onSaved: () => void;
+}) {
+  const [ask, setAsk] = useState(false);
+  const [setup, setSetup] = useState(false);
+  const go = () => {
+    if (!keyReady) {
+      setAsk(true);
+      return;
+    }
+    onNext();
+  };
   return (
     <div className="wizard-card" aria-label="说一句">
       <h2>用一句话说明要测什么</h2>
@@ -737,29 +811,80 @@ function GoalStep({ goal, onGoal, onBack, onNext }: { goal: string; onGoal: (val
         <textarea aria-label="要测什么" value={goal} placeholder="切削工件后，工件变小，旁边的牙不变" onChange={(event) => onGoal(event.target.value)} onKeyDown={(event) => {
           if (event.key === "Enter" && !event.shiftKey) {
             event.preventDefault();
-            if (goal.trim().length > 0) onNext();
+            if (goal.trim().length > 0) go();
           }
         }} />
       </label>
+      {ask && !keyReady ? (
+        <div className="key-ask">
+          <p role="status">{authorMessages.missingKey}</p>
+          {setup ? <KeySetup onSaved={onSaved} onCancel={() => setSetup(false)} /> : (
+            <div className="wizard-actions">
+              <button type="button" className="btn-accent" onClick={() => setSetup(true)}>在这里填写</button>
+              <button type="button" className="btn" onClick={onSkip}>先不填，我来演示</button>
+            </div>
+          )}
+        </div>
+      ) : null}
       <div className="wizard-actions">
         <button type="button" className="btn" onClick={onBack}>上一步</button>
-        <button type="button" className="btn-accent" disabled={goal.trim().length === 0} onClick={onNext}>下一步</button>
+        <button type="button" className={ask && !keyReady ? "btn" : "btn-accent"} disabled={goal.trim().length === 0} onClick={go}>下一步</button>
       </div>
     </div>
   );
 }
 
-const aiSettingsHref = "/settings/ai?return=/plugin/runner";
+function KeySetup({ onSaved, onCancel }: { onSaved: () => void; onCancel: () => void }) {
+  const [preset, setPreset] = useState<CompatiblePresetId>("deepseek");
+  const [secret, setSecret] = useState("");
+  const [notice, setNotice] = useState("");
+  const [ok, setOk] = useState(false);
+  const chosen = compatiblePresets.find((item) => item.id === preset) ?? compatiblePresets[0];
+  return (
+    <div className="key-setup" aria-label="在这里设置">
+      <div className="filter-row" role="group" aria-label="选一个">
+        {compatiblePresets.filter((item) => item.id !== "custom").map((item) => (
+          <button key={item.id} type="button" className={preset === item.id ? "is-on" : ""} aria-pressed={preset === item.id} onClick={() => { setPreset(item.id); setOk(false); }}>{item.label}</button>
+        ))}
+      </div>
+      <label>
+        密钥
+        <input aria-label="密钥" type="password" autoComplete="off" value={secret} onChange={(event) => { setSecret(event.target.value); setOk(false); }} />
+      </label>
+      {notice ? <p role="status">{notice}</p> : null}
+      <div className="wizard-actions">
+        <button type="button" className="btn" onClick={() => void probeAi({ key: secret, fake: readProbeFake() }).then((result) => { setNotice(result.message); setOk(result.ok); })}>测试一下</button>
+        <button type="button" className="btn-accent" disabled={!ok} onClick={() => {
+          writeAiSettings({ provider: "compatible", key: secret, base: chosen.base, model: chosen.model, preset, cap: readDailyCap() });
+          if (readAiSettings().key.length < 8) {
+            setNotice("先填写密钥。");
+            setOk(false);
+            return;
+          }
+          sessionStorage.setItem("workbench.author.key", "1");
+          onSaved();
+        }}>用这个继续</button>
+        <button type="button" className="btn" onClick={onCancel}>取消</button>
+      </div>
+      <details>
+        <summary>详情</summary>
+        <p>{chosen.label} · {chosen.model}</p>
+        <p>{chosen.base}</p>
+      </details>
+    </div>
+  );
+}
 
-function DraftStep({ left, keyReady, draft, notice, correction, writing, onCorrection, onRetry, onDemo, onBack, onCancel, onLeave }: {
-  left: number; keyReady: boolean; draft: ExecutorCase | null; notice: string; correction: string; writing: boolean;
-  onCorrection: (value: string) => void; onRetry: () => void; onDemo: () => void; onBack: () => void; onCancel: () => void; onLeave: () => void;
+function DraftStep({ left, keyReady, recorded, draft, notice, correction, writing, onCorrection, onRetry, onDemo, onBack, onCancel, onSkip }: {
+  left: number; keyReady: boolean; recorded: boolean; draft: ExecutorCase | null; notice: string; correction: string; writing: boolean;
+  onCorrection: (value: string) => void; onRetry: () => void; onDemo: () => void; onBack: () => void; onCancel: () => void; onSkip: () => void;
 }) {
   const plan = draft ? plainPlan(draft) : null;
+  const blocked = !writing && !draft && notice === authorMessages.overBudget;
   return (
     <div className="wizard-card" aria-label="看一遍">
       <h2>看它准备做什么</h2>
-      <p className="tiny">今天还能生成 {left} 次。{keyReady ? <a href={aiSettingsHref} onClick={onLeave}>去设置</a> : null}</p>
+      {keyReady ? <p className="tiny">今天还能生成 {left} 次。</p> : null}
       {writing ? (
         <>
           <p role="status">正在生成检查。</p>
@@ -767,8 +892,8 @@ function DraftStep({ left, keyReady, draft, notice, correction, writing, onCorre
           <button type="button" className="btn" onClick={onCancel}>取消</button>
         </>
       ) : null}
-      {!writing && !keyReady ? <p role="status">{authorMessages.missingKey}<a href={aiSettingsHref} onClick={onLeave}>去设置</a></p> : null}
       {!writing && notice ? <p role="status">{notice}</p> : null}
+      {blocked ? <button type="button" className="btn-accent" onClick={onSkip}>先不填，我来演示</button> : null}
       {!writing && plan ? (
         <div className="plan" aria-label="检查清单">
           {draft!.steps.some((item) => isSceneAction(item.action)) ? <p>已经看过画面里的物体。下面是它会做的事，以及要核对的结果。</p> : null}
@@ -787,19 +912,47 @@ function DraftStep({ left, keyReady, draft, notice, correction, writing, onCorre
           </details>
         </div>
       ) : null}
-      {!writing && keyReady ? (
+      {!writing && keyReady && draft ? (
         <label>
           哪里不对？
           <textarea aria-label="哪里不对" value={correction} placeholder="例如：旁边的牙不应该变" onChange={(event) => onCorrection(event.target.value)} />
         </label>
       ) : null}
-      {!writing ? (
-        <div className="wizard-actions">
-          <button type="button" className="btn" onClick={onBack}>上一步</button>
-          {keyReady ? <button type="button" className="btn" onClick={onRetry}>重新生成</button> : null}
-          <button type="button" className="btn-accent" disabled={!draft} onClick={onDemo}>演示一遍</button>
-        </div>
+      {!writing && !blocked ? (
+        <>
+          <div className="wizard-actions is-main">
+            <button type="button" className="btn-accent" disabled={!draft} onClick={onDemo}>演示一遍</button>
+          </div>
+          <div className="wizard-actions">
+            <button type="button" className="btn" onClick={onBack}>上一步</button>
+            {keyReady && !recorded ? <button type="button" className="btn" onClick={onRetry}>重新生成</button> : null}
+          </div>
+        </>
       ) : null}
+      {!writing && blocked ? <button type="button" className="btn" onClick={onBack}>上一步</button> : null}
+    </div>
+  );
+}
+
+function RecordFirst({ appName, step, onAdvance, onDone }: {
+  appName: string; step: number; onAdvance: () => void; onDone: () => void;
+}) {
+  const titles = ["打开程序", "在画面上做一遍", "记下检查"];
+  return (
+    <div className="wizard-card" aria-label="我来演示">
+      <h2>你来做一遍</h2>
+      <p>不填密钥也可以。在画面上做一遍，这里记下要核对的结果。每天重跑不用密钥。</p>
+      <ol className="rerecord-steps" aria-label="演示的步骤">
+        {titles.map((title, index) => (
+          <li key={title} aria-current={index === step ? "step" : undefined}>{title}</li>
+        ))}
+      </ol>
+      {step === 0 ? <p role="status">会打开「{appName}」。</p> : null}
+      {step === 1 ? <p role="status">请在画面上做到你刚才说的那一步。</p> : null}
+      {step === 2 ? <p role="status">已经按现在的画面记下要核对的结果。</p> : null}
+      <div className="wizard-actions is-main">
+        {step < 2 ? <button type="button" className="btn-accent" onClick={onAdvance}>{step === 0 ? "打开" : "这一步做好了"}</button> : <button type="button" className="btn-accent" onClick={onDone}>看检查</button>}
+      </div>
     </div>
   );
 }
@@ -866,13 +1019,14 @@ function ScheduleStep({ dailyAt, weekdays, autostart, scheduled, onTime, onWeekd
   );
 }
 
-function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, history, keyReady, canRepair, onRepair, onRerecord, onClearImages }: {
+function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, history, keyReady, canRepair, onRepair, onRerecord, onClearImages, onKeySaved }: {
   passed: boolean; findings: Finding[]; onSave: () => void; saveLabel: string; onAgain: () => void; onEdit: () => void; note?: string;
-  history: RunRecord[]; keyReady: boolean; canRepair: boolean; onRepair: () => void; onRerecord: () => void; onClearImages: () => void;
+  history: RunRecord[]; keyReady: boolean; canRepair: boolean; onRepair: () => void; onRerecord: () => void; onClearImages: () => void; onKeySaved: () => void;
 }) {
   const [pickedAt, setPickedAt] = useState<string | null>(null);
   const [repairHint, setRepairHint] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
+  const [setup, setSetup] = useState(false);
   useEffect(() => {
     if (!confirmClear) return;
     const onKey = (event: KeyboardEvent) => {
@@ -892,7 +1046,7 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
   const repair = () => {
     if (!keyReady) return;
     if (!canRepair) {
-      setRepairHint("今天已经问得够多了。先用保存好的检查，或把每天的次数调大。");
+      setRepairHint(authorMessages.overBudget);
       return;
     }
     onRepair();
@@ -957,7 +1111,9 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
         {outcome === "needs-update" ? (
           <>
             <button type="button" className="btn" disabled={!keyReady} onClick={repair}>用 AI 修一下</button>
-            {!keyReady ? <p className="repair-hint">需要先设置 AI 密钥<a href="/settings/ai?return=/plugin/runner">去设置</a></p> : null}
+            {!keyReady ? <p className="repair-hint">{authorMessages.missingKey}</p> : null}
+            {!keyReady && !setup ? <button type="button" className="btn" onClick={() => setSetup(true)}>在这里填写</button> : null}
+            {!keyReady && setup ? <KeySetup onSaved={() => { setSetup(false); onKeySaved(); }} onCancel={() => setSetup(false)} /> : null}
             {repairHint ? <p className="repair-hint">{repairHint}</p> : null}
             <button type="button" className="btn-accent" onClick={onRerecord}>重新演示并更新</button>
           </>
