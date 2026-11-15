@@ -365,6 +365,8 @@
 .piece { fill: var(--accent); }
 .changed { fill: none; stroke: var(--warn); stroke-width: 4; }
 .stuck-target { fill: none; stroke: var(--warn); stroke-width: 3; stroke-dasharray: 6 4; }
+.text-chip { fill: var(--surface-1); stroke: var(--danger); stroke-width: 3; }
+.screen-text { fill: var(--danger); font-size: 16px; font-family: inherit; }
 .frames figcaption { color: var(--text-secondary); font-size: 12px; }
 .setting-cap { display: grid; gap: 8px; max-width: 240px; color: var(--text-secondary); font-size: 12px; }
 .setting-cap input {

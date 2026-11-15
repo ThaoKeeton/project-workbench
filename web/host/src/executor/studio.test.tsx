@@ -1,7 +1,7 @@
 import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
-import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorKeyReady, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, dismissHint, formatDailySummary, formatWhen, hintDismissed, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, outcomeWord, pageChangedFindings, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, stuckStepSentence, writeAiSettings, writeDailyCap } from "./model";
+import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorKeyReady, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, textMismatch, volumeFailingReplayScript, dismissHint, formatDailySummary, formatWhen, hintDismissed, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, outcomeWord, pageChangedFindings, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, stuckStepSentence, writeAiSettings, writeDailyCap } from "./model";
 import { ExecutorStudio } from "./studio";
 
 afterEach(() => {
@@ -184,6 +184,7 @@ describe("executor wizard", () => {
     expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看一遍。")).toBeNull();
     expect(rowMore("切削后旁边的牙保持不变").querySelector("[aria-hidden]")?.textContent).toBe("⋯");
     expect(screen.getByText("这次旁边的牙也变了")).toBeTruthy();
+    expect(screen.getAllByText("应该从 8 变成 1，这次是 4").length).toBeGreaterThan(0);
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "需要更新", pressed: false }));
     expect(screen.getByText("画面显示「已开始」")).toBeTruthy();
@@ -243,11 +244,27 @@ describe("executor wizard", () => {
     expect(await screen.findByRole("button", { name: "再看一遍" })).toBeTruthy();
     expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("status").some((node) => node.textContent === "画面上的文字不对。")).toBe(true);
-    expect(screen.getByText("期望看到「不会出现」")).toBeTruthy();
-    expect(screen.getByText("实际看到「已开始」")).toBeTruthy();
+    expect(screen.getAllByRole("status").some((node) => node.textContent === "应该不出现「已开始」，这次却出现了")).toBe(true);
+    expect(screen.getByText("框出不对的文字。只留在这台电脑上。")).toBeTruthy();
+    expect(screen.queryByText("框出变小的部分。只留在这台电脑上。")).toBeNull();
+    expect(screen.queryByText("期望看到「不会出现」")).toBeNull();
+    expect(screen.getByText("已开始")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "修改检查" }));
     expect(screen.getByRole("heading", { name: "先看一遍它会做什么" })).toBeTruthy();
+  });
+
+  it("shows the shrink picture only when the volume check failed", async () => {
+    sessionStorage.setItem("workbench.author.fake", "fail");
+    sessionStorage.setItem("workbench.author.fail", "volume");
+    const user = userEvent.setup();
+    render(<ExecutorStudio stepDelay={0} />);
+    await openSample(user);
+    await user.click(screen.getByRole("button", { name: "开始看一遍" }));
+    await user.click(await screen.findByRole("button", { name: "看这次结果" }));
+    expect(screen.getAllByRole("status").some((node) => node.textContent === "应该从 8 变成 1，这次是 4")).toBe(true);
+    expect(screen.getByText("之后。框出变小的部分。只留在这台电脑上。")).toBeTruthy();
+    expect(screen.queryByText("框出不对的文字。只留在这台电脑上。")).toBeNull();
+    expect(screen.getAllByText("应该从 8 变成 1，这次是 4").length).toBeGreaterThan(0);
   });
 
   it("treats a changed page as an update and can re-record without AI", async () => {
@@ -406,6 +423,22 @@ describe("executor script", () => {
     expect(plan.checks).toContain("只有被切的工件变了，旁边的物体不动");
     const findings = humanFindings(saved!, replay(saved!, sampleDom));
     expect(findings.some((item) => item.sentence.includes("小了 50%"))).toBe(true);
+    const failedText = humanFindings(caseFromScript(failingReplayScript)!, replay(caseFromScript(failingReplayScript)!, sampleDom));
+    expect(describeStep(caseFromScript(failingReplayScript)!.steps.find((item) => item.action === "assert-text")!).check).toBe("不该出现多余的文字");
+    expect(failedText[0]?.sentence).toBe("应该不出现「已开始」，这次却出现了");
+    expect(failedText[0]?.shot).toBe("text");
+    expect(failedText[0]?.mark).toBe("已开始");
+    const shown = replay(saved!, sampleDom);
+    const status = shown.steps.find((item) => item.id === "status");
+    if (status) {
+      status.status = "failed";
+      status.detail = "未开始";
+    }
+    expect(humanFindings(saved!, shown)[0]?.sentence).toBe("应该显示「已开始」，这次显示的是「未开始」");
+    expect(textMismatch("完成", "")).toBe("应该显示「完成」，这次没有显示");
+    const shrunk = humanFindings(caseFromScript(volumeFailingReplayScript)!, replay(caseFromScript(volumeFailingReplayScript)!, sampleDom));
+    expect(shrunk.find((item) => item.shot === "volume")?.sentence).toBe("应该从 8 变成 1，这次是 4");
+    expect(sampleLibrary().find((item) => item.id === "size")?.history.at(-1)?.reason).toBe("应该从 8 变成 1，这次是 4");
     expect(replay(caseFromScript(failingReplayScript)!, sampleDom).passed).toBe(false);
     expect(connectChoice("Cutter.exe").ok).toBe(true);
     expect(connectChoice("notes.txt").ok).toBe(false);

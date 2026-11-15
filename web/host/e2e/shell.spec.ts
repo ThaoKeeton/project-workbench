@@ -455,11 +455,47 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "开始看一遍" }).click();
       await page.getByRole("button", { name: "看这次结果" }).click();
       await expect(page.getByText("没通过", { exact: true }).first()).toBeVisible();
-      await expect(page.getByText("期望看到「不会出现」")).toBeVisible();
-      await expect(page.getByText("实际看到「已开始」")).toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "应该不出现「已开始」，这次却出现了" })).toBeVisible();
+      await expect(page.getByText("框出不对的文字。只留在这台电脑上。")).toBeVisible();
+      await expect(page.getByText("框出变小的部分")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "再看一遍" })).toBeVisible();
       await expect(page.getByRole("button", { name: "修改检查" })).toBeVisible();
       await shot(page, `wizard-fail-${theme}`);
+    });
+
+    test("1100 failure pictures follow the failed check", async ({ page }) => {
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await page.addInitScript(() => sessionStorage.setItem("workbench.author.fake", "fail"));
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("画面上不该出现已开始。");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("button", { name: "开始看一遍" }).click();
+      await page.getByRole("button", { name: "看这次结果" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "应该不出现「已开始」，这次却出现了" })).toBeVisible();
+      await expect(page.getByText("框出不对的文字。只留在这台电脑上。")).toBeVisible();
+      await expect(page.getByText("框出变小的部分")).toHaveCount(0);
+      const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
+      expect(overflow).toBeLessThanOrEqual(1);
+      await shot(page, `fail-text-1100-${theme}`);
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.fake", "fail");
+        sessionStorage.setItem("workbench.author.fail", "volume");
+      });
+      await page.goto("/plugin/runner");
+      await page.getByRole("button", { name: "新建一个测试" }).click();
+      await page.getByRole("button", { name: "合成电子样品" }).click();
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByLabel("要测什么").fill("切削后工件应该变得更小。");
+      await page.getByRole("button", { name: "下一步" }).click();
+      await page.getByRole("button", { name: "开始看一遍" }).click();
+      await page.getByRole("button", { name: "看这次结果" }).click();
+      await expect(page.getByRole("status").filter({ hasText: "应该从 8 变成 1，这次是 4" })).toBeVisible();
+      await expect(page.getByText("之后。框出变小的部分。只留在这台电脑上。")).toBeVisible();
+      await expect(page.getByText("框出不对的文字")).toHaveCount(0);
+      await shot(page, `fail-volume-1100-${theme}`);
     });
 
     test("plugin, diagnostics, settings, pairing, offline, and crash", async ({ page }) => {

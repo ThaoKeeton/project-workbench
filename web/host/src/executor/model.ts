@@ -339,15 +339,15 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
     ["cut", "切削后工件变小", true, 0, 3, 26, "07:30", false, ""],
     ["tooth", "切削后旁边的牙保持不变", false, 0, 2, 10, "08:00", false, "这次旁边的牙也变了"],
     ["start", "点开始后画面有反应", true, 1, 18, 4, "09:00", false, ""],
-    ["size", "切削后工件体积变小", false, 1, 11, 2, "18:00", true, "这次工件没有变小"],
+    ["size", "切削后工件体积变小", false, 1, 11, 2, "18:00", true, "应该从 8 变成 1，这次是 4"],
     ["path", "在画面里切一刀", true, 2, 9, 15, "07:30", false, ""],
     ["text", "画面显示「已开始」", false, 3, 16, 40, "12:00", false, "第 2 步找不到「开始」按钮"],
     ["keep", "切削后旁边的物体保持原样", true, 0, 1, 5, pastClock(now), false, ""],
-    ["again", "再切一次后工件继续变小", false, 4, 8, 8, "07:30", false, "这次再切，工件没有变小"],
+    ["again", "再切一次后工件继续变小", false, 4, 8, 8, "07:30", false, "应该从 8 变成 1，这次是 4"],
   ];
   return rows.map(([id, name, passed, daysAgo, hour, minute, dailyAt, paused, problem]) => ({
     id, name, passed, lastRun: last(daysAgo, hour, minute), dailyAt, paused,
-    script: passed ? fixedReplayScript : failingReplayScript,
+    script: passed ? fixedReplayScript : id === "size" || id === "again" ? volumeFailingReplayScript : failingReplayScript,
     appId: "sample",
     appName: sampleAppName,
     weekdays: allWeekdays,
@@ -540,7 +540,7 @@ export async function probeAi(input: { key: string; fake: "off" | "pass" | "fail
 export function describeStep(item: ExecutorStep): { will: string; check: string } {
   if (item.action === "wait-for") return { will: `等待画面上出现「${item.text || "要看的内容"}」`, check: "出现之后才继续" };
   if (item.action === "click") return { will: `点击「${item.text || "按钮"}」`, check: item.expected ? `画面应变成「${item.expected}」` : "点完再继续" };
-  if (item.action === "assert-text") return { will: "查看画面上的文字", check: item.expected ? `应显示「${item.expected}」` : "文字应和你说的一致" };
+  if (item.action === "assert-text") return { will: "查看画面上的文字", check: textCheck(item.expected) };
   if (item.action === "snapshot" || item.action === "screenshot") return { will: "记下现在的样子", check: "只留在这台电脑上" };
   if (item.action === "drag-path") return { will: "在画面里切一刀", check: item.expected ? `工件体积变成大约 ${item.expected}，旁边的牙保持原样` : "工件变小，旁边的牙保持原样" };
   if (item.action === "assert-mesh" && item.text.includes("sphere")) return { will: "看旁边的牙", check: "形状保持不变" };
@@ -568,7 +568,7 @@ export function plainPlan(testCase: ExecutorCase): PlainPlan {
     if (item.action === "click") push(does, `点击「${item.text || "按钮"}」`);
     if (item.action === "drag-path") push(does, "在画面里切一刀");
     if (item.action === "wait-for" && does.length === 0) push(does, `等到出现「${item.text || "开始"}」`);
-    if (item.action === "assert-text" && item.expected) push(checks, `画面显示「${item.expected}」`);
+    if (item.action === "assert-text" && item.expected) push(checks, item.expected === "不会出现" ? "画面上不该出现多余的文字" : `画面显示「${item.expected}」`);
     if (item.action === "drag-path") push(checks, beforeVolume && afterVolume ? `工件体积从 ${beforeVolume} 变成大约 ${afterVolume}` : "工件变小");
     if (item.action === "assert-mesh" && item.text.includes("sphere")) push(checks, "旁边的牙保持原样");
     if (item.action === "diff-scene") push(checks, "只有被切的工件变了，旁边的物体不动");
@@ -578,7 +578,25 @@ export function plainPlan(testCase: ExecutorCase): PlainPlan {
   return { does, checks };
 }
 
-export type Finding = { ok: boolean; sentence: string; expected?: string; seen?: string; kind?: "check" | "missing" };
+export type Finding = { ok: boolean; sentence: string; expected?: string; seen?: string; kind?: "check" | "missing"; shot?: "text" | "volume"; mark?: string };
+
+function textCheck(expected: string): string {
+  if (!expected) return "文字应和你说的一致";
+  if (expected === "不会出现") return "不该出现多余的文字";
+  return `应显示「${expected}」`;
+}
+
+/** One sentence for what the screen should say and what it said this time. */
+export function textMismatch(expected: string, seen: string): string {
+  if (expected === "不会出现") return seen ? `应该不出现「${seen}」，这次却出现了` : "不应该出现多余的文字，这次却出现了";
+  if (!seen) return `应该显示「${expected}」，这次没有显示`;
+  return `应该显示「${expected}」，这次显示的是「${seen}」`;
+}
+
+function readCutVolume(detail: string | undefined, fallback: number): number {
+  const match = detail?.match(/volume=(\d+(?:\.\d+)?)/);
+  return match ? Number(match[1]) : fallback;
+}
 
 export function pageChangedFindings(testCase?: { steps: Array<{ action: string; text: string }> } | null): Finding[] {
   return [{ ok: false, kind: "missing", sentence: stuckStepSentence(testCase) }];
@@ -590,13 +608,11 @@ export function humanFindings(testCase: ExecutorCase, run: ExecutorRun): Finding
   const text = testCase.steps.find((item) => item.action === "assert-text");
   const textResult = run.steps.find((item) => item.id === text?.id);
   if (text && textResult) {
-    if (textResult.status === "passed") findings.push({ ok: true, sentence: `画面显示「${text.expected}」` });
-    else findings.push({
-      ok: false,
-      sentence: "画面上的文字不对。",
-      expected: `期望看到「${text.expected}」`,
-      seen: `实际看到「${textResult.detail || "别的内容"}」`,
-    });
+    if (textResult.status === "passed") findings.push({ ok: true, sentence: text.expected === "不会出现" ? "画面上没有多余的文字" : `画面显示「${text.expected}」` });
+    else {
+      const seen = textResult.detail || "";
+      findings.push({ ok: false, sentence: textMismatch(text.expected, seen), shot: "text", mark: seen || "文字" });
+    }
   }
   const before = testCase.steps.find((item) => item.action === "assert-mesh" && item.text === "stock.volume");
   const cut = testCase.steps.find((item) => item.action === "drag-path");
@@ -606,11 +622,11 @@ export function humanFindings(testCase: ExecutorCase, run: ExecutorRun): Finding
     const cutResult = run.steps.find((item) => item.id === cut.id);
     const ok = cutResult?.status !== "failed";
     const pct = from > 0 ? Math.round(((from - to) / from) * 100) : 0;
+    const actual = readCutVolume(cutResult?.detail, ok ? to : from);
     findings.push({
       ok,
-      sentence: ok ? `工件体积从 ${from} 变成 ${to}，小了 ${pct}%` : `工件体积没有变成 ${to}。`,
-      expected: ok ? undefined : `期望变成 ${to}`,
-      seen: ok ? undefined : `实际仍是 ${from}`,
+      sentence: ok ? `工件体积从 ${from} 变成 ${to}，小了 ${pct}%` : actual === from ? `应该从 ${from} 变成 ${to}，这次没有变小` : `应该从 ${from} 变成 ${to}，这次是 ${actual}`,
+      shot: ok ? undefined : "volume",
     });
   }
   if (testCase.steps.some((item) => item.action === "assert-mesh" && item.text.includes("sphere"))) {
@@ -653,6 +669,8 @@ export const failingReplayScript = fixedReplayScript.replace(
   '{"id":"status","type":"web","action":"assert-text","target":{"selector":"#status"},"expected":"已开始"',
   '{"id":"status","type":"web","action":"assert-text","target":{"selector":"#status"},"expected":"不会出现"',
 );
+
+export const volumeFailingReplayScript = fixedReplayScript.replace("mesh.stock.volume=4±0.3", "mesh.stock.volume=1±0.3");
 
 const scriptActions = new Set([
   "click", "type", "set-value", "invoke", "expand", "wait-for", "read", "assert-text", "assert-visible", "assert-network",

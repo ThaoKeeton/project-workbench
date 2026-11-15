@@ -9,6 +9,7 @@ import {
   connectApp,
   failingReplayScript,
   fixedReplayScript,
+  volumeFailingReplayScript,
   allWeekdays,
   authorKeyReady,
   formatWhen,
@@ -185,7 +186,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       return;
     }
     const prompt = authorPrompt([goalText, note].filter((part) => part.trim()).join("\n"), sampleDom, sceneSnapshotText);
-    const result = complete ? await complete(prompt) : { text: readAuthorFake() === "fail" ? failingReplayScript : fixedReplayScript, cost: 0 };
+    const result = complete ? await complete(prompt) : { text: readAuthorFake() === "fail" ? failScript() : fixedReplayScript, cost: 0 };
     setSpent((value) => {
       const next = value + result.cost;
       writeSpent(next);
@@ -245,7 +246,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       ...item,
       passed: outcome === "pass",
       lastRun: new Date().toISOString(),
-      history: [...(item.history ?? []), { at: new Date().toISOString(), outcome, reason: findingsForRun[0]?.sentence ?? "", image: true }],
+      history: [...(item.history ?? []), { at: new Date().toISOString(), outcome, reason: findingsForRun.find((entry) => !entry.ok)?.sentence ?? findingsForRun[0]?.sentence ?? "", image: true }],
     } : item;
     if (rerun) setLibrary((items) => items.map((entry) => entry.id === item.id ? next : entry));
     setRelaunchNote(rerun ? `已重新打开「${item.appName || sampleAppName}」，跑完后已关掉。` : "");
@@ -1102,6 +1103,8 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
       : outcome === "fail" && failedLine
         ? failedLine
         : resultSentence(outcome === "pass");
+  const failedShot = failedLine ? findings.find((item) => !item.ok && item.kind !== "missing") : undefined;
+  const shot = outcome === "needs-update" ? "stuck" : outcome === "fail" ? failedShot?.shot ?? "none" : "volume";
   const showPicture = (picked ?? newest[0])?.image ?? true;
   const repair = () => {
     if (!keyReady) return;
@@ -1116,7 +1119,8 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
       <p className={outcome === "pass" ? "result-mark pass" : outcome === "needs-update" ? "result-mark update" : "result-mark fail"}>{outcomeWord(outcome)}</p>
       <p role="status">{sentence}</p>
       {note && viewingCurrent ? <p>{note}</p> : null}
-      {showPicture ? <ResultFrames stuck={outcome === "needs-update"} /> : <p>这一次的画面已经清掉。</p>}
+      {showPicture && shot !== "none" ? <ResultFrames shot={shot} mark={failedShot?.mark} /> : null}
+      {!showPicture ? <p>这一次的画面已经清掉。</p> : null}
       {viewingCurrent ? (
         <ul className="finding-list" aria-label="核对结果">
           {findings.map((item) => (
@@ -1190,8 +1194,9 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
   );
 }
 
-function ResultFrames({ stuck }: { stuck: boolean }) {
-  if (stuck) {
+function ResultFrames({ shot, mark }: { shot: "stuck" | "text" | "volume" | "none"; mark?: string }) {
+  if (shot === "none") return null;
+  if (shot === "stuck") {
     return (
       <div className="frames frames-one" aria-label="停住的画面">
         <figure>
@@ -1200,6 +1205,20 @@ function ResultFrames({ stuck }: { stuck: boolean }) {
             <rect className="stuck-target" x="70" y="78" width="180" height="44" rx="6" />
           </svg>
           <figcaption>停在这一步。这张画面只留在这台电脑上。</figcaption>
+        </figure>
+      </div>
+    );
+  }
+  if (shot === "text") {
+    return (
+      <div className="frames frames-one" aria-label="不对的文字">
+        <figure>
+          <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="画面上的文字">
+            <rect className="frame-bg" width="320" height="200" />
+            <rect className="text-chip" x="70" y="78" width="180" height="44" rx="6" />
+            <text className="screen-text" x="160" y="100" textAnchor="middle" dominantBaseline="middle">{mark || "文字"}</text>
+          </svg>
+          <figcaption>框出不对的文字。只留在这台电脑上。</figcaption>
         </figure>
       </div>
     );
@@ -1246,6 +1265,15 @@ function Rerecord({ appName, sentence, step, onAdvance, onSave }: {
       </div>
     </div>
   );
+}
+
+function failScript(): string {
+  try {
+    if (window.sessionStorage.getItem("workbench.author.fail") === "volume") return volumeFailingReplayScript;
+  } catch {
+    return failingReplayScript;
+  }
+  return failingReplayScript;
 }
 
 function listedOutcome(item: SavedTest): "pass" | "fail" | "needs-update" {
