@@ -104,10 +104,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   useEffect(() => {
     if (phase !== "demo" || stopped || !demo) return;
     const pace = readPace(stepDelay);
-    if (shown >= findings.length) {
-      const timer = window.setTimeout(() => setPhase("result"), pace);
-      return () => window.clearTimeout(timer);
-    }
+    if (shown >= findings.length) return;
     const timer = window.setTimeout(() => setShown((count) => count + 1), pace);
     return () => window.clearTimeout(timer);
   }, [phase, shown, stopped, stepDelay, findings.length, demo]);
@@ -265,7 +262,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
         <div>
           <h1>自动测试</h1>
           {phase === "home" && library.length > 0 ? <p>每天自动跑这些测试，有问题会提醒你。</p> : null}
-          {phase === "wizard" ? <p>选一个程序，用一句话说要检查什么，再看它做一遍。</p> : null}
+          {phase === "wizard" ? <p>选一个程序，用一句话说要检查什么，再看一遍。</p> : null}
         </div>
       </header>
       {phase === "home" ? (
@@ -377,7 +374,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
         />
       ) : null}
       {phase === "demo" && draft ? (
-        <DemoRun findings={findings} shown={shown} stopped={stopped} onStop={() => setStopped(true)} onBack={() => setPhase("wizard")} />
+        <DemoRun findings={findings} shown={shown} stopped={stopped} onStop={() => setStopped(true)} onBack={() => setPhase("wizard")} onDone={() => setPhase("result")} />
       ) : null}
       {phase === "rerecord" && draft ? (
         <Rerecord
@@ -597,7 +594,7 @@ function Home({ library, missedNote, removed, onNew, onOpen, onRun, onRename, on
     return (
       <div className="wizard-card" aria-label="开始">
         <h2>还没有测试</h2>
-        <p>选一个程序，用一句话说要检查什么，再看它做一遍。</p>
+        <p>选一个程序，用一句话说要检查什么，再看一遍。</p>
         <ol className="first-steps" aria-label="三步">
           <li><span>1</span>选择程序</li>
           <li><span>2</span>说一句</li>
@@ -934,8 +931,8 @@ function DraftStep({ left, keyReady, recorded, draft, notice, correction, writin
   const blocked = !writing && !draft && notice === authorMessages.overBudget;
   return (
     <div className="wizard-card" aria-label="看一遍">
-      <h2>看它准备做什么</h2>
-      {keyReady ? <p className="tiny">今天还能生成 {left} 次。</p> : null}
+      <h2>先看一遍它会做什么</h2>
+      {keyReady && left <= 3 ? <p className="tiny">{`今天还能再写 ${left} 次。用完要到明天。`}</p> : null}
       {writing ? (
         <>
           <p role="status">正在生成检查。</p>
@@ -963,22 +960,22 @@ function DraftStep({ left, keyReady, recorded, draft, notice, correction, writin
           </details>
         </div>
       ) : null}
-      {!writing && keyReady && draft ? (
-        <label>
-          哪里不对？
-          <textarea aria-label="哪里不对" value={correction} placeholder="例如：旁边的牙不应该变" onChange={(event) => onCorrection(event.target.value)} />
-        </label>
-      ) : null}
       {!writing && !blocked ? (
         <>
           <div className="wizard-actions is-main">
-            <button type="button" className="btn-accent" disabled={!draft} onClick={onDemo}>演示一遍</button>
+            <button type="button" className="btn-accent" disabled={!draft} onClick={onDemo}>开始看一遍</button>
           </div>
           <div className="wizard-actions">
             <button type="button" className="btn" onClick={onBack}>上一步</button>
             {keyReady && !recorded ? <button type="button" className="btn" onClick={onRetry}>重新生成</button> : null}
           </div>
         </>
+      ) : null}
+      {!writing && keyReady && draft ? (
+        <label>
+          看完如果要改
+          <textarea aria-label="哪里不对" value={correction} placeholder="例如：旁边的牙不应该变" onChange={(event) => onCorrection(event.target.value)} />
+        </label>
       ) : null}
       {!writing && blocked ? <button type="button" className="btn" onClick={onBack}>上一步</button> : null}
     </div>
@@ -1008,12 +1005,13 @@ function RecordFirst({ appName, step, onAdvance, onDone }: {
   );
 }
 
-function DemoRun({ findings, shown, stopped, onStop, onBack }: {
-  findings: Finding[]; shown: number; stopped: boolean; onStop: () => void; onBack: () => void;
+function DemoRun({ findings, shown, stopped, onStop, onBack, onDone }: {
+  findings: Finding[]; shown: number; stopped: boolean; onStop: () => void; onBack: () => void; onDone: () => void;
 }) {
+  const done = shown >= findings.length && !stopped;
   return (
     <div className="wizard-card" aria-label="演示">
-      <h2>正在这个程序里做一遍</h2>
+      <h2>{done ? "这一遍看完了" : "正在看一遍"}</h2>
       <ol className="live-list" aria-label="演示进度">
         {findings.map((item, index) => {
           const seen = index < shown;
@@ -1026,8 +1024,14 @@ function DemoRun({ findings, shown, stopped, onStop, onBack }: {
           );
         })}
       </ol>
-      {shown < findings.length && !stopped ? <p role="status">正在演示。可以取消。</p> : null}
+      {shown < findings.length && !stopped ? <p role="status">正在看。可以取消。</p> : null}
+      {done ? <p role="status">看完了。接下来看这次过没过。</p> : null}
       {stopped ? <p role="status">已取消。可以回去改一句，再看一遍。</p> : null}
+      {done ? (
+        <div className="wizard-actions is-main">
+          <button type="button" className="btn-accent" onClick={onDone}>看这次结果</button>
+        </div>
+      ) : null}
       <div className="wizard-actions">
         <button type="button" className="btn" onClick={onBack}>返回修改</button>
         {shown < findings.length && !stopped ? <button type="button" className="btn" onClick={onStop}>取消</button> : null}
@@ -1050,7 +1054,7 @@ function ScheduleStep({ dailyAt, weekdays, autostart, scheduled, onTime, onWeekd
   return (
     <div className="wizard-card" aria-label="每天重跑">
       <h2>每天自动再跑一遍</h2>
-      <p>到点只重跑这一份，不会再问。到点时这台电脑要开着，工作台也要开着。关着就不会跑。</p>
+      <p>到点会再跑这一份。这台电脑要开着，工作台也要开着。不用再写新的检查。</p>
       <label>
         每天重跑的时间
         <input aria-label="每天重跑的时间" type="time" value={dailyAt} onChange={(event) => onTime(event.target.value)} />
@@ -1061,11 +1065,11 @@ function ScheduleStep({ dailyAt, weekdays, autostart, scheduled, onTime, onWeekd
         ))}
       </div>
       <button type="button" className="btn" aria-pressed={autostart} onClick={() => onAutostart(!autostart)}>{autostart ? "开机时自动启动工作台：开" : "开机时自动启动工作台：关"}</button>
+      {scheduled ? <p role="status">已记下。到 {dailyAt} 会再跑一遍。</p> : null}
       <div className="wizard-actions">
-        <button type="button" className="btn" onClick={onHome}>回到首页</button>
-        <button type="button" className="btn-accent" onClick={onSave}>保存安排</button>
+        <button type="button" className={scheduled ? "btn-accent" : "btn"} onClick={onHome}>回到首页</button>
+        <button type="button" className={scheduled ? "btn" : "btn-accent"} onClick={onSave}>保存安排</button>
       </div>
-      {scheduled ? <p role="status">已记下。到 {dailyAt} 会再跑一遍，不会再问。</p> : null}
     </div>
   );
 }
@@ -1090,9 +1094,14 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
   const picked = newest.find((entry) => entry.at === pickedAt) ?? null;
   const viewingCurrent = !picked || picked.at === newest[0]?.at;
   const outcome = picked?.outcome ?? outcomeOf(findings);
+  const failedLine = findings.find((item) => !item.ok && item.kind !== "missing")?.sentence;
   const sentence = picked && !viewingCurrent
     ? (picked.outcome === "needs-update" ? picked.reason : resultSentence(picked.outcome === "pass"))
-    : (outcome === "needs-update" ? findings.find((item) => item.kind === "missing")?.sentence ?? "第 2 步找不到「开始」按钮" : resultSentence(outcome === "pass"));
+    : outcome === "needs-update"
+      ? findings.find((item) => item.kind === "missing")?.sentence ?? "第 2 步找不到「开始」按钮"
+      : outcome === "fail" && failedLine
+        ? failedLine
+        : resultSentence(outcome === "pass");
   const showPicture = (picked ?? newest[0])?.image ?? true;
   const repair = () => {
     if (!keyReady) return;
@@ -1123,7 +1132,7 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
       {viewingCurrent ? (
         <details>
           <summary>详情</summary>
-          <pre>{findings.map((item) => `${item.kind === "missing" ? "missing" : item.ok ? "ok" : "bad"} ${item.sentence}`).join("\n")}</pre>
+          <pre>{findings.map((item) => `${item.kind === "missing" ? "需要更新" : item.ok ? "通过" : "没通过"} ${item.sentence}`).join("\n")}</pre>
         </details>
       ) : null}
       {newest.length > 0 ? (
@@ -1172,8 +1181,8 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
         {outcome === "pass" ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : null}
         {outcome === "fail" ? (
           <>
+            <button type="button" className="btn-accent" onClick={onAgain}>再看一遍</button>
             <button type="button" className="btn" onClick={onEdit}>修改检查</button>
-            <button type="button" className="btn-accent" onClick={onAgain}>重新演示</button>
           </>
         ) : null}
       </div>

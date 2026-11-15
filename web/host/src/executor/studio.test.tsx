@@ -33,7 +33,7 @@ describe("executor wizard", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio stepDelay={10000} />);
     expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
-    expect(screen.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeTruthy();
+    expect(screen.getByText("选一个程序，用一句话说要检查什么，再看一遍。")).toBeTruthy();
     expect(screen.getByRole("list", { name: "三步" }).textContent).toContain("选择程序");
     expect(screen.getByRole("button", { name: "新建一个测试" })).toBeTruthy();
     const file = new File(["x"], "notes.txt", { type: "text/plain" });
@@ -82,7 +82,7 @@ describe("executor wizard", () => {
     expect(await screen.findByText("可以用")).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "它会做" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "它会核对" })).toBeTruthy();
-    expect((screen.getByRole("button", { name: "演示一遍" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "开始看一遍" }) as HTMLButtonElement).disabled).toBe(false);
     unmount();
     sessionStorage.removeItem("workbench.author.key");
     render(<ExecutorStudio />);
@@ -98,7 +98,7 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "看检查" }));
     expect(screen.getByRole("heading", { name: "它会做" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "它会核对" })).toBeTruthy();
-    expect((screen.getByRole("button", { name: "演示一遍" }) as HTMLButtonElement).disabled).toBe(false);
+    expect((screen.getByRole("button", { name: "开始看一遍" }) as HTMLButtonElement).disabled).toBe(false);
   });
 
   it("shows a short checklist, a live demo, and a saved home", async () => {
@@ -119,9 +119,9 @@ describe("executor wizard", () => {
     await user.type(screen.getByLabelText("哪里不对"), "牙不要变");
     await user.click(screen.getByRole("button", { name: "重新生成" }));
     expect(calls).toBe(2);
-    await user.click(screen.getByRole("button", { name: "演示一遍" }));
+    await user.click(screen.getByRole("button", { name: "开始看一遍" }));
     expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
-    expect(screen.getByText("正在演示。可以取消。")).toBeTruthy();
+    expect(screen.getByText("正在看。可以取消。")).toBeTruthy();
     expect(screen.getAllByText("没跑").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "取消" }));
     expect(screen.getByText(/已取消/)).toBeTruthy();
@@ -131,7 +131,8 @@ describe("executor wizard", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio stepDelay={0} complete={async () => ({ text: fixedReplayScript, cost: 0 })} />);
     await openSample(user);
-    await user.click(screen.getByRole("button", { name: "演示一遍" }));
+    await user.click(screen.getByRole("button", { name: "开始看一遍" }));
+    await user.click(await screen.findByRole("button", { name: "看这次结果" }));
     expect(await screen.findByRole("button", { name: "保存并设置每天重跑" })).toBeTruthy();
     expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     expect(screen.getAllByText("通过").length).toBeGreaterThan(0);
@@ -146,7 +147,7 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "回到首页" }));
     expect(screen.getByRole("heading", { name: "已保存的测试" })).toBeTruthy();
     expect(screen.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeTruthy();
-    expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeNull();
+    expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看一遍。")).toBeNull();
     expect(screen.getByRole("button", { name: "新建一个测试" })).toBeTruthy();
     expect(screen.getByText("通过")).toBeTruthy();
     expect(screen.getByText(/下次 (今天|明天) 07:30/)).toBeTruthy();
@@ -180,7 +181,7 @@ describe("executor wizard", () => {
     render(<ExecutorStudio />);
     expect(screen.getByRole("group", { name: "筛选" })).toBeTruthy();
     expect(screen.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeTruthy();
-    expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeNull();
+    expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看一遍。")).toBeNull();
     expect(rowMore("切削后旁边的牙保持不变").querySelector("[aria-hidden]")?.textContent).toBe("⋯");
     expect(screen.getByText("这次旁边的牙也变了")).toBeTruthy();
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
@@ -237,15 +238,16 @@ describe("executor wizard", () => {
     const user = userEvent.setup();
     render(<ExecutorStudio stepDelay={0} />);
     await openSample(user);
-    await user.click(screen.getByRole("button", { name: "演示一遍" }));
-    expect(await screen.findByRole("button", { name: "重新演示" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "开始看一遍" }));
+    await user.click(await screen.findByRole("button", { name: "看这次结果" }));
+    expect(await screen.findByRole("button", { name: "再看一遍" })).toBeTruthy();
     expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
-    expect(screen.getByText("画面上的文字不对。")).toBeTruthy();
+    expect(screen.getAllByRole("status").some((node) => node.textContent === "画面上的文字不对。")).toBe(true);
     expect(screen.getByText("期望看到「不会出现」")).toBeTruthy();
     expect(screen.getByText("实际看到「已开始」")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "修改检查" }));
-    expect(screen.getByRole("heading", { name: "看它准备做什么" })).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "先看一遍它会做什么" })).toBeTruthy();
   });
 
   it("treats a changed page as an update and can re-record without AI", async () => {
@@ -373,7 +375,7 @@ describe("executor wizard", () => {
     render(<ExecutorStudio complete={async () => ({ text: fixedReplayScript, cost: 0 })} />);
     await openSample(user);
     expect(screen.getByText(authorMessagesOver())).toBeTruthy();
-    expect(screen.getByText("今天还能生成 0 次。")).toBeTruthy();
+    expect(screen.getByText("今天还能再写 0 次。用完要到明天。")).toBeTruthy();
   });
 });
 

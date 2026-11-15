@@ -145,18 +145,19 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "下一步" }).click();
       await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
       await page.getByRole("button", { name: "下一步" }).click();
-      await expect(page.getByRole("heading", { name: "它会做" })).toBeVisible();
-      await expect(page.getByRole("heading", { name: "它会核对" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "它会做", exact: true })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "它会核对", exact: true })).toBeVisible();
       await expect(page.getByText("旁边的牙保持原样")).toHaveCount(1);
-      await expect(page.getByText("今天还能生成 20 次。")).toBeVisible();
+      await expect(page.getByText("今天还能再写 20 次。")).toHaveCount(0);
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
       expect(overflow).toBeLessThanOrEqual(1);
       await shot(page, `wizard-checklist-${theme}`);
-      await page.getByRole("button", { name: "演示一遍" }).click();
-      await expect(page.getByText("正在演示。可以取消。")).toBeVisible();
+      await page.getByRole("button", { name: "开始看一遍" }).click();
+      await expect(page.getByText("正在看。可以取消。")).toBeVisible();
       await expect(page.getByText("没跑").first()).toBeVisible();
       await shot(page, `wizard-demo-${theme}`);
       await expect(page.getByText("通过", { exact: true }).first()).toBeVisible();
+      await page.getByRole("button", { name: "看这次结果" }).click();
       await expect(page.getByText("工件体积从 8 变成 4，小了 50%", { exact: true })).toBeVisible();
       await expect(page.getByRole("img", { name: "之后" })).toBeVisible();
       await shot(page, `wizard-pass-${theme}`);
@@ -167,7 +168,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "回到首页" }).click();
       await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
       await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
-      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看一遍。")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
       await expect(page.getByText(/下次 (今天|明天) 07:30/)).toBeVisible();
       await shot(page, `wizard-home-${theme}`);
@@ -182,7 +183,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.goto("/plugin/runner");
       await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
       await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
-      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看一遍。")).toHaveCount(0);
       await expect(page.getByRole("button", { name: "更多" }).first()).toHaveText("⋯");
       await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
       await expect(page.getByText(/上次 今天/).first()).toBeVisible();
@@ -201,7 +202,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
 
     test("app picker, a live connection, an already-open app, and AI settings", async ({ page }) => {
       await page.goto("/plugin/runner");
-      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toBeVisible();
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看一遍。")).toBeVisible();
       await expect(page.getByRole("list", { name: "三步" })).toBeVisible();
       await expect(page.getByRole("button", { name: "新建一个测试" })).toBeVisible();
       await page.setViewportSize({ width: 1100, height: 640 });
@@ -281,9 +282,10 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "下一步" }).click();
       await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
       await page.getByRole("button", { name: "下一步" }).click();
-      await page.getByRole("button", { name: "演示一遍" }).click();
+      await page.getByRole("button", { name: "开始看一遍" }).click();
+      await page.getByRole("button", { name: "看这次结果" }).click();
       await page.getByRole("button", { name: "保存并设置每天重跑" }).click();
-      await expect(page.getByText("到点时这台电脑要开着，工作台也要开着。")).toBeVisible();
+      await expect(page.getByText("不用再写新的检查。")).toBeVisible();
       await expect(page.getByRole("button", { name: "周一" })).toHaveAttribute("aria-pressed", "true");
       await expect(page.getByRole("button", { name: "开机时自动启动工作台：关" })).toBeVisible();
       await shot(page, `wizard-schedule-days-${theme}`);
@@ -404,13 +406,14 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "取消" }).click();
       await page.evaluate(() => sessionStorage.removeItem("workbench.author.wait"));
       await page.getByLabel("要测什么").press("Enter");
-      await expect(page.getByRole("heading", { name: "它会做" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "它会做", exact: true })).toBeVisible();
       await shot(page, `journey-07-checklist-${theme}`);
       await page.evaluate(() => sessionStorage.setItem("workbench.author.pace", "400"));
-      await page.getByRole("button", { name: "演示一遍" }).click();
-      await expect(page.getByText("正在演示。可以取消。")).toBeVisible();
+      await page.getByRole("button", { name: "开始看一遍" }).click();
+      await expect(page.getByText("正在看。可以取消。")).toBeVisible();
       await expect(page.getByText("通过", { exact: true }).first()).toBeVisible();
       await shot(page, `journey-08-demo-${theme}`);
+      await page.getByRole("button", { name: "看这次结果" }).click();
       await expect(page.getByRole("button", { name: "保存并设置每天重跑" })).toBeVisible();
       await shot(page, `journey-09-pass-${theme}`);
       await page.getByRole("button", { name: "保存并设置每天重跑" }).click();
@@ -421,7 +424,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.evaluate(() => sessionStorage.setItem("workbench.author.fake", "changed"));
       await page.getByRole("button", { name: "现在跑一次" }).click();
       await expect(page.getByText("需要更新", { exact: true }).first()).toBeVisible();
-      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看它做一遍。")).toHaveCount(0);
+      await expect(page.getByText("选一个程序，用一句话说要检查什么，再看一遍。")).toHaveCount(0);
       await shot(page, `journey-12-needs-update-${theme}`);
       await page.getByRole("button", { name: "重新演示并更新" }).click();
       await expect(page.getByRole("heading", { name: "重新演示并更新" })).toBeVisible();
@@ -433,8 +436,9 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "下一步" }).click();
       await page.getByLabel("要测什么").fill("切削工件后，工件变小，旁边的牙不变");
       await page.getByRole("button", { name: "下一步" }).click();
-      await page.getByRole("button", { name: "演示一遍" }).click();
-      await expect(page.getByRole("button", { name: "重新演示" })).toBeVisible();
+      await page.getByRole("button", { name: "开始看一遍" }).click();
+      await page.getByRole("button", { name: "看这次结果" }).click();
+      await expect(page.getByRole("button", { name: "再看一遍" })).toBeVisible();
       await shot(page, `journey-14-fail-${theme}`);
     });
 
@@ -448,11 +452,12 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "下一步" }).click();
       await page.getByLabel("哪里不对").fill("文字不该停在已开始");
       await page.getByRole("button", { name: "重新生成" }).click();
-      await page.getByRole("button", { name: "演示一遍" }).click();
+      await page.getByRole("button", { name: "开始看一遍" }).click();
+      await page.getByRole("button", { name: "看这次结果" }).click();
       await expect(page.getByText("没通过", { exact: true }).first()).toBeVisible();
       await expect(page.getByText("期望看到「不会出现」")).toBeVisible();
       await expect(page.getByText("实际看到「已开始」")).toBeVisible();
-      await expect(page.getByRole("button", { name: "重新演示" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "再看一遍" })).toBeVisible();
       await expect(page.getByRole("button", { name: "修改检查" })).toBeVisible();
       await shot(page, `wizard-fail-${theme}`);
     });
@@ -590,7 +595,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByText("可以用")).toBeVisible();
       await shot(page, `key-ok-1100-${theme}`);
       await page.evaluate(() => sessionStorage.removeItem("workbench.author.probeStay"));
-      await expect(page.getByRole("heading", { name: "它会做" })).toBeVisible();
+      await expect(page.getByRole("heading", { name: "它会做", exact: true })).toBeVisible();
     });
   });
 }
