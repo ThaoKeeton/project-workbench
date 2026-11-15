@@ -394,8 +394,28 @@ public sealed class CdpWebSession : IWebSession
         return PngImage.Create(width, height, pixels).Encode();
     }
 
-    private Task<JsonElement> WaitUntilResponsiveAsync(CancellationToken cancellationToken)
-        => EvaluateAsync(new { op = "ping", selector = "", text = "", role = "", name = "", value = "", expected = "", strategy = "element", popup = _popup, objectName = "", allowPopup = true }, cancellationToken);
+    private async Task WaitUntilResponsiveAsync(CancellationToken cancellationToken)
+    {
+        // A reload drops the socket. One failed ping used to become ControlNotFound
+        // before the step's own wait started, so a slow page looked missing at once.
+        while (true)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                await EvaluateAsync(new { op = "ping", selector = "", text = "", role = "", name = "", value = "", expected = "", strategy = "element", popup = _popup, objectName = "", allowPopup = true }, cancellationToken);
+                return;
+            }
+            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException)
+            {
+                if (cancellationToken.IsCancellationRequested) throw;
+                if (_socket is not { State: WebSocketState.Open })
+                    await TryDebuggerAsync(() => ActivateAsync(_title, _url, cancellationToken), cancellationToken);
+            }
+            if (!cancellationToken.CanBeCanceled) throw new ExecutorDataException(ExecutorError.DebugPortMissing);
+            await Task.Delay(100, cancellationToken);
+        }
+    }
 
     private async Task<WebResult> WaitForAsync(TestStep step, CancellationToken cancellationToken)
     {
@@ -455,33 +475,31 @@ public sealed class CdpWebSession : IWebSession
 
     public async Task InstallSceneHookAsync(bool reload, CancellationToken cancellationToken)
     {
-        try
+        await TryDebuggerAsync(async () =>
         {
             await CallAsync("Page.enable", new { }, cancellationToken);
             await CallAsync("Page.addScriptToEvaluateOnNewDocument", new { source = SceneHook.Source }, cancellationToken);
-            if (reload)
+        }, cancellationToken);
+        if (!reload) return;
+        // The debugger can answer before loadFile commits. Reloading that empty
+        // document cancels the real navigation, so the sample controls never appear.
+        // Reload only a real file page, then keep waiting if the socket drops.
+        if (await WaitForSelectorAsync("location.protocol === 'file:' && !!document.querySelector('#start')", cancellationToken))
+        {
+            await TryDebuggerAsync(async () =>
             {
-                // The debugger can answer before loadFile commits. Reloading that
-                // empty document cancels the real navigation, so the sample controls
-                // never appear. Wait until they exist, then reload to run the hook.
-                if (await WaitForSelectorAsync("#start", cancellationToken))
-                {
-                    await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
-                    await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
-                }
-                await WaitForHookAsync(cancellationToken);
-            }
+                await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
+                await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
+            }, cancellationToken);
         }
-        catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
-        {
-            if (cancellationToken.IsCancellationRequested) throw;
-        }
-        // A reload often drops the debugger socket. Reattach so the next step still has a page.
+        await WaitForHookAsync(cancellationToken);
         if (_socket is { State: WebSocketState.Open }) return;
-        try
-        {
-            await ActivateAsync(_title, _url, cancellationToken);
-        }
+        await TryDebuggerAsync(() => ActivateAsync(_title, _url, cancellationToken), cancellationToken);
+    }
+
+    private async Task TryDebuggerAsync(Func<Task> action, CancellationToken cancellationToken)
+    {
+        try { await action(); }
         catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
         {
             if (cancellationToken.IsCancellationRequested) throw;
@@ -667,7 +685,7 @@ public sealed class CdpWebSession : IWebSession
             {
                 var result = await CallAsync("Runtime.evaluate", new
                 {
-                    expression = "!!document.querySelector(" + JsonSerializer.Serialize(selector) + ")",
+                    expression = selector.Contains(' ', StringComparison.Ordinal) ? selector : "!!document.querySelector(" + JsonSerializer.Serialize(selector) + ")",
                     returnByValue = true
                 }, cancellationToken);
                 if (result.TryGetProperty("result", out var inner) && inner.TryGetProperty("value", out var value) && value.ValueKind == JsonValueKind.True)
@@ -700,7 +718,7 @@ public sealed class CdpWebSession : IWebSession
             {
                 var result = await CallAsync("Runtime.evaluate", new
                 {
-                    expression = "({marker: window.__WB_RELOAD_MARKER === 1, hook: typeof window.__THREE_DEVTOOLS__, ready: document.readyState, page: !!document.querySelector('#start')})",
+                    expression = "({marker: window.__WB_RELOAD_MARKER === 1, hook: typeof window.__THREE_DEVTOOLS__, ready: document.readyState, page: location.protocol === 'file:' && !!document.querySelector('#start') && document.querySelector('#start').getBoundingClientRect().width > 0})",
                     returnByValue = true
                 }, cancellationToken);
                 if (result.TryGetProperty("result", out var inner) && inner.TryGetProperty("value", out var value))
@@ -712,9 +730,11 @@ public sealed class CdpWebSession : IWebSession
                     if (!marker && hook && ready && page) return;
                 }
             }
-            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or OperationCanceledException)
+            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
             {
                 if (cancellationToken.IsCancellationRequested) throw;
+                if (_socket is not { State: WebSocketState.Open })
+                    await TryDebuggerAsync(() => ActivateAsync(_title, _url, cancellationToken), cancellationToken);
             }
             await Task.Delay(100, cancellationToken);
         }
