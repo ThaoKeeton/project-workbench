@@ -195,6 +195,70 @@ public sealed class ElectronSampleTests
         Directory.Delete(root, true);
     }
 
+    [Fact]
+    public void Debugger_attaches_to_the_requested_file_not_a_blank_window_with_the_same_title()
+    {
+        const string socket = "ws://127.0.0.1:9/devtools/page/";
+        var pages = new CdpWebSession.CdpPage[]
+        {
+            new("blank", "合成电子样品", "about:blank", "page", socket + "blank"),
+            new("tools", "DevTools - 合成电子样品", "devtools://devtools/bundled/inspector.html", "page", socket + "tools"),
+            new("file", "合成电子样品", "file:///tmp/index.html", "page", socket + "file")
+        };
+        Assert.Equal("file", CdpWebSession.Pick(pages, "合成电子样品", "index.html")?.Id);
+        Assert.Null(CdpWebSession.Pick(pages.Take(2).ToArray(), "合成电子样品", "index.html"));
+        Assert.Equal("file", CdpWebSession.Pick(pages, "合成电子样品", null)?.Id);
+    }
+
+    [Fact]
+    public async Task A_page_that_never_shows_the_sample_fails_at_once_with_what_is_open()
+    {
+        await using var host = SyntheticCdpHost.StartOn(0, "合成电子样品", null);
+        var session = await CdpWebSession.ConnectAsync(host.Port, "合成电子样品", null, CancellationToken.None);
+        Assert.NotNull(session);
+        await using var connected = session;
+        var started = DateTime.UtcNow;
+        await connected.InstallSceneHookAsync(true, CancellationToken.None, TimeSpan.FromMilliseconds(250));
+        var result = await connected.PerformAsync(new TestStep("wait-start", StepKind.Web, "wait-for", new ElementSelector(null, null, null, "开始"), null, null, 120, false, false), CancellationToken.None);
+        Assert.True(DateTime.UtcNow - started < TimeSpan.FromSeconds(3), "a missing sample page must not use the two-minute renderer wait");
+        Assert.Equal(ExecutorError.WindowNotFound, result.Error);
+        Assert.Contains("要测的画面没有出现", result.Actual, StringComparison.Ordinal);
+        Assert.Contains("synthetic.local", result.Actual, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task A_missing_sample_page_is_not_retried()
+    {
+        var root = Fixtures.Temp();
+        var reports = Path.Combine(root, "reports");
+        var runner = Fixtures.Runner(new ScriptedFactory(), new FakeComputerUseProvider(), new RecordingExporter(), new RecordingDeadline(), root, reports, web: new ClosedPageSource());
+        var suite = new TestSuite("suite-closed", "没打开", false, true, new ApplicationTarget(null, "合成电子样品", 1, Attach: true), [], [
+            Fixtures.Case("CASE-1", false, new TestStep("wait-start", StepKind.Web, "wait-for", new ElementSelector(null, null, null, "开始"), null, null, 120, false, false))
+        ]);
+        var sink = new ListSink();
+        await runner.RunAsync(suite, new RunRequest("closed-page", Fixtures.Policy(), reports), sink, CancellationToken.None);
+        Assert.DoesNotContain(sink.Steps, step => step.Status == "retrying");
+        Assert.Contains(sink.Steps, step => step.Status == "failed" && step.ErrorType == ExecutorError.WindowNotFound && step.Message.Contains("要测的画面没有出现", StringComparison.Ordinal));
+        Directory.Delete(root, true);
+    }
+
+    private sealed class ClosedPageSource : IWebSessionSource
+    {
+        public Task<IWebSession> OpenAsync(TestSuite suite, CancellationToken cancellationToken)
+            => Task.FromResult<IWebSession>(new ClosedPage());
+
+        private sealed class ClosedPage : IWebSession
+        {
+            public bool IsConnected => true;
+            public Task<WebResult> PerformAsync(TestStep step, CancellationToken cancellationToken)
+                => Task.FromResult(new WebResult(false, false, "要测的画面没有出现。现在开着的是：合成电子样品 about:blank。", false, null, ExecutorError.WindowNotFound));
+            public Task<byte[]?> CapturePngAsync(CancellationToken cancellationToken) => Task.FromResult<byte[]?>(null);
+            public Task<string> SnapshotAsync(int maxBytes, CancellationToken cancellationToken) => Task.FromResult("");
+            public Task<string> SceneTextAsync(CancellationToken cancellationToken) => Task.FromResult("");
+            public ValueTask DisposeAsync() => ValueTask.CompletedTask;
+        }
+    }
+
     private static string? FindElectron()
     {
         var directory = FixtureDirectory();

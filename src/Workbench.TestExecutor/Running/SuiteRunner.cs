@@ -294,7 +294,8 @@ public sealed partial class SuiteRunner
     private static async Task<StepOutcome> FailAsync(TestSuite suite, TestCase testCase, TestStep step, RunRequest request, IRunSink sink, string engine, string error, string actual, int attempts, bool review, List<string> log, MaskedImage? masked, CancellationToken cancellationToken)
     {
         var status = review && error == ExecutorError.NeedsReview ? "needs-review" : "failed";
-        Publish(sink, request, suite, testCase, step, status, engine, error, attempts, review, error);
+        var message = error == ExecutorError.WindowNotFound && actual is { Length: > 0 } ? actual : error;
+        Publish(sink, request, suite, testCase, step, status, engine, error, attempts, review, message);
         var report = await WriteFailureAsync(testCase, step, request, engine, error, actual, attempts, review, log, masked, cancellationToken);
         return new StepOutcome(status != "needs-review", review, masked, report);
     }

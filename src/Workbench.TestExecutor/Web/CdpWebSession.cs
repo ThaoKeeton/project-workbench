@@ -230,10 +230,13 @@ public sealed class CdpWebSession : IWebSession
     private string? _title;
     private string? _url;
     private string? _sceneBaseline;
+    private string? _startupFault;
+    private string _seenPages = "";
+    private bool _sawHttpList;
 
     private CdpWebSession(int port) => _port = port;
 
-    public bool IsConnected => _port > 0;
+    public bool IsConnected => _startupFault is not null || _port > 0;
 
     public static async Task<CdpWebSession?> ConnectAsync(int port, string? title, string? url, CancellationToken cancellationToken, string? popupSelector = null)
     {
@@ -260,6 +263,13 @@ public sealed class CdpWebSession : IWebSession
                 }
                 await Task.Delay(100, cancellationToken);
             }
+            // The port answered, but the only match was a blank or devtools page with the same title.
+            // Return the session so the run can say what was open, instead of waiting out every step.
+            if (session._sawHttpList)
+            {
+                session._startupFault = session.PageFault();
+                return session;
+            }
             session.ReleaseSocket();
             return null;
         }
@@ -275,6 +285,8 @@ public sealed class CdpWebSession : IWebSession
 
     public async Task<WebResult> PerformAsync(TestStep step, CancellationToken cancellationToken)
     {
+        if (_startupFault is { Length: > 0 } fault)
+            return new WebResult(false, false, fault, false, null, ExecutorError.WindowNotFound);
         await WaitUntilResponsiveAsync(cancellationToken);
         if (step.Action == "switch-window")
         {
@@ -298,7 +310,7 @@ public sealed class CdpWebSession : IWebSession
 
     public async Task<byte[]?> CapturePngAsync(CancellationToken cancellationToken)
     {
-        if (!IsConnected) return null;
+        if (_startupFault is not null || _port <= 0) return null;
         try
         {
             return await ScreenshotAsync(cancellationToken);
@@ -359,6 +371,9 @@ public sealed class CdpWebSession : IWebSession
     {
         using var response = await _http.GetAsync(VersionUrl("/json/list"), cancellationToken);
         var pages = JsonSerializer.Deserialize<List<CdpPage>>(await response.Content.ReadAsStringAsync(cancellationToken), Json) ?? [];
+        _sawHttpList = true;
+        var listed = pages.Where(page => page.Type is null or "page").ToArray();
+        _seenPages = string.Join("；", listed.Select(page => (string.IsNullOrEmpty(page.Title) ? "未命名" : page.Title) + " " + (string.IsNullOrEmpty(page.Url) ? "无地址" : page.Url)));
         var page = Pick(pages, title, url);
         if (page?.WebSocketDebuggerUrl is not { Length: > 0 } socketUrl) return false;
         if (!IsLoopback(socketUrl)) throw new ExecutorDataException(ExecutorError.DebugPortMissing);
@@ -473,28 +488,42 @@ public sealed class CdpWebSession : IWebSession
         return after ?? last ?? new WebResult(false, false, ExecutorError.ActionFailed, false, null);
     }
 
-    public async Task InstallSceneHookAsync(bool reload, CancellationToken cancellationToken)
+    public Task InstallSceneHookAsync(bool reload, CancellationToken cancellationToken)
+        => InstallSceneHookAsync(reload, cancellationToken, TimeSpan.FromSeconds(20));
+
+    internal async Task InstallSceneHookAsync(bool reload, CancellationToken cancellationToken, TimeSpan budget)
     {
+        if (_startupFault is not null) return;
+        var deadline = DateTime.UtcNow.Add(budget);
         await TryDebuggerAsync(async () =>
         {
             await CallAsync("Page.enable", new { }, cancellationToken);
             await CallAsync("Page.addScriptToEvaluateOnNewDocument", new { source = SceneHook.Source }, cancellationToken);
         }, cancellationToken);
-        if (!reload) return;
+        if (!reload)
+        {
+            if (!await WaitForHookAsync(cancellationToken, deadline)) _startupFault = PageFault();
+            return;
+        }
         // The debugger can answer before loadFile commits. Reloading that empty
         // document cancels the real navigation, so the sample controls never appear.
-        // Reload only a real file page, then keep waiting if the socket drops.
-        if (await WaitForSelectorAsync("location.protocol === 'file:' && !!document.querySelector('#start')", cancellationToken))
+        // Reload only a real file page. If that page never comes back, stop here.
+        if (await WaitForSelectorAsync("location.protocol === 'file:' && !!document.querySelector('#start')", cancellationToken, deadline))
         {
             await TryDebuggerAsync(async () =>
             {
                 await CallAsync("Runtime.evaluate", new { expression = "window.__WB_RELOAD_MARKER = 1", returnByValue = true }, cancellationToken);
                 await CallAsync("Page.reload", new { ignoreCache = true }, cancellationToken);
             }, cancellationToken);
+            deadline = DateTime.UtcNow.Add(budget);
         }
-        await WaitForHookAsync(cancellationToken);
-        if (_socket is { State: WebSocketState.Open }) return;
-        await TryDebuggerAsync(() => ActivateAsync(_title, _url, cancellationToken), cancellationToken);
+        if (!await WaitForHookAsync(cancellationToken, deadline)) _startupFault = PageFault();
+    }
+
+    private string PageFault()
+    {
+        if (_seenPages.Length == 0) return "要测的画面没有出现。程序没有留下可看的页面。";
+        return "要测的画面没有出现。现在开着的是：" + _seenPages + "。";
     }
 
     private static async Task TryDebuggerAsync(Func<Task> action, CancellationToken cancellationToken)
@@ -675,9 +704,8 @@ public sealed class CdpWebSession : IWebSession
         }
     }
 
-    private async Task<bool> WaitForSelectorAsync(string selector, CancellationToken cancellationToken)
+    private async Task<bool> WaitForSelectorAsync(string selector, CancellationToken cancellationToken, DateTime deadline)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -708,9 +736,8 @@ public sealed class CdpWebSession : IWebSession
         return false;
     }
 
-    private async Task WaitForHookAsync(CancellationToken cancellationToken)
+    private async Task<bool> WaitForHookAsync(CancellationToken cancellationToken, DateTime deadline)
     {
-        var deadline = DateTime.UtcNow.AddSeconds(20);
         while (DateTime.UtcNow < deadline)
         {
             cancellationToken.ThrowIfCancellationRequested();
@@ -727,7 +754,7 @@ public sealed class CdpWebSession : IWebSession
                     var hook = value.TryGetProperty("hook", out var kind) && kind.GetString() == "object";
                     var ready = value.TryGetProperty("ready", out var state) && state.GetString() == "complete";
                     var page = value.TryGetProperty("page", out var hasPage) && hasPage.ValueKind == JsonValueKind.True;
-                    if (!marker && hook && ready && page) return;
+                    if (!marker && hook && ready && page) return true;
                 }
             }
             catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
@@ -738,6 +765,7 @@ public sealed class CdpWebSession : IWebSession
             }
             await Task.Delay(100, cancellationToken);
         }
+        return false;
     }
 
     private async Task<WebResult?> PopupAsync(TestStep step, CancellationToken cancellationToken)
@@ -807,17 +835,26 @@ public sealed class CdpWebSession : IWebSession
 
     private string VersionUrl(string path) => "http" + "://127.0.0.1:" + _port.ToString(System.Globalization.CultureInfo.InvariantCulture) + path;
 
-    private static CdpPage? Pick(IReadOnlyList<CdpPage> pages, string? title, string? url)
+    internal static CdpPage? Pick(IReadOnlyList<CdpPage> pages, string? title, string? url)
     {
         var candidates = pages.Where(page => page.Type is null or "page").ToArray();
         if (url is { Length: > 0 })
-        {
-            var byUrl = candidates.FirstOrDefault(page => page.Url?.Contains(url, StringComparison.Ordinal) == true);
-            if (byUrl is not null) return byUrl;
-        }
+            return candidates.FirstOrDefault(page => IsRequestedDocument(page.Url, url));
         if (title is { Length: > 0 })
-            return candidates.FirstOrDefault(page => page.Title?.Contains(title, StringComparison.Ordinal) == true);
-        return candidates.FirstOrDefault();
+            return candidates.FirstOrDefault(page => page.Title?.Contains(title, StringComparison.Ordinal) == true && IsDocument(page.Url));
+        return candidates.FirstOrDefault(page => IsDocument(page.Url));
+    }
+
+    private static bool IsRequestedDocument(string? pageUrl, string fragment)
+        => pageUrl?.Contains(fragment, StringComparison.Ordinal) == true && IsDocument(pageUrl);
+
+    private static bool IsDocument(string? pageUrl)
+    {
+        if (string.IsNullOrEmpty(pageUrl)) return false;
+        return !pageUrl.StartsWith("about:", StringComparison.Ordinal)
+            && !pageUrl.StartsWith("devtools:", StringComparison.Ordinal)
+            && !pageUrl.StartsWith("chrome-error:", StringComparison.Ordinal)
+            && !pageUrl.StartsWith("chrome:", StringComparison.Ordinal);
     }
 
     private static string? ReadText(JsonElement value, string name)
@@ -863,5 +900,5 @@ public sealed class CdpWebSession : IWebSession
         return new WebResult(true, ok, actual, false, null);
     }
 
-    private sealed record CdpPage(string? Id, string? Title, string? Url, string? Type, string? WebSocketDebuggerUrl);
+    internal sealed record CdpPage(string? Id, string? Title, string? Url, string? Type, string? WebSocketDebuggerUrl);
 }

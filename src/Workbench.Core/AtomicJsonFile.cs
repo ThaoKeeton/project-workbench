@@ -31,9 +31,8 @@ internal static class AtomicJsonFile
             }
             finally
             {
-                // DisposeAsync can return before Windows drops this handle. The replace then
-                // fails with a sharing violation and the temp file stays locked.
-                stream.Dispose();
+                // The replace below retries when Windows still reports the file busy.
+                await stream.DisposeAsync();
             }
             cancellationToken.ThrowIfCancellationRequested();
             await ReplaceAsync(temporary, path, cancellationToken);

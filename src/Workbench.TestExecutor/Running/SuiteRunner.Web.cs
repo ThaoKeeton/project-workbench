@@ -56,7 +56,7 @@ public sealed partial class SuiteRunner
             var after = await CaptureSurfaceAsync(suite, session, web, log, cancellationToken);
             if (after is not null) masked = after;
             log.Add(Line(attempt, engine, result.Actual + " " + Describe(current)));
-            if (result.Error == ExecutorError.UnexpectedPopup)
+            if (result.Error is ExecutorError.UnexpectedPopup or ExecutorError.WindowNotFound)
                 return new WebTry(true, null, result.Error, result.Actual, attempt, false, log, masked);
             if (result.Actual == "native-dialog")
                 return new WebTry(true, null, ExecutorError.ControlNotFound, result.Actual, attempt, true, log, masked);

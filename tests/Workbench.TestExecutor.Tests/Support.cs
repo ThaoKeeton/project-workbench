@@ -129,7 +129,7 @@ internal static class Fixtures
     public static TestCase Case(string id, bool allowFallback, params TestStep[] steps)
         => new(id, "用例", allowFallback, steps);
 
-    public static SuiteRunner Runner(ScriptedFactory automation, IComputerUseProvider computer, RecordingExporter exporter, RecordingDeadline deadlines, string root, string reports, ILocatorRepairProvider? repair = null)
+    public static SuiteRunner Runner(ScriptedFactory automation, IComputerUseProvider computer, RecordingExporter exporter, RecordingDeadline deadlines, string root, string reports, ILocatorRepairProvider? repair = null, IWebSessionSource? web = null)
     {
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(reports);
@@ -142,7 +142,8 @@ internal static class Fixtures
             Artifacts = new RunArtifactStore(),
             Exporter = exporter,
             Deadlines = deadlines,
-            Repair = repair ?? new DisabledLocatorRepair()
+            Repair = repair ?? new DisabledLocatorRepair(),
+            Web = web ?? new DefaultWebSessionSource()
         });
     }
 
