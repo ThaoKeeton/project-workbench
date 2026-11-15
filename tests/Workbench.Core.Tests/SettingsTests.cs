@@ -177,6 +177,29 @@ public sealed class SettingsTests
     }
 
     [Fact]
+    public async Task A_transient_sharing_violation_still_saves_settings_and_removes_the_temp_file()
+    {
+        using var disk = new TestDirectory();
+        disk.Package("com.example.fixture");
+        await using var manager = disk.Manager();
+        await manager.DiscoverAsync();
+        var directory = Path.Combine(disk.User, "settings", "com.example.fixture");
+        AtomicJsonFile.TransientSharingViolations.Value = 1;
+        try
+        {
+            await manager.GetSettings("com.example.fixture").SetAsync("draft", "kept");
+        }
+        finally
+        {
+            AtomicJsonFile.TransientSharingViolations.Value = 0;
+        }
+
+        Assert.Equal("kept", await manager.GetSettings("com.example.fixture").GetAsync("draft", "missing"));
+        Assert.Empty(Directory.EnumerateFiles(directory, ".*.tmp"));
+        Assert.Contains("kept", await File.ReadAllTextAsync(Path.Combine(directory, "settings.json")));
+    }
+
+    [Fact]
     public async Task Canceled_writes_preserve_the_previous_json_file()
     {
         using var disk = new TestDirectory();

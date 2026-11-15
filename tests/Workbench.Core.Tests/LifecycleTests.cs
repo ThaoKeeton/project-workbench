@@ -105,22 +105,28 @@ public sealed class LifecycleTests
     {
         foreach (var length in new[] { 259, 261 })
         {
-            using var disk = new TestDirectory();
-            const string entry = "Workbench.TestPlugin.dll";
-            var folder = new string('p', length - disk.Plugins.Length - entry.Length - 2);
-            var package = disk.Package(Id, folder);
-            Assert.Equal(length, Path.Combine(package, entry).Length);
-            var resolver = new AssemblyDependencyResolver(Path.Combine(package, entry));
-            var dependency = resolver.ResolveAssemblyToPath(new("Workbench.TestDependency"));
-            Assert.NotNull(dependency);
-            Assert.Equal(length >= 260, dependency.StartsWith(@"\\?\", StringComparison.Ordinal));
-            await using var manager = disk.Manager();
-            await manager.DiscoverAsync();
-            var enabled = await manager.EnableAsync(Id, confirmTrust: true);
-            Assert.True(enabled.Succeeded, enabled.Message);
-            Assert.Equal("com.example.fixture:dependency-ok:demo draft", (await manager.ExecuteCommandAsync(Id, "ping")).Message);
-            Assert.StartsWith("Workbench:", (await manager.ExecuteCommandAsync(Id, "dependency-context")).Message);
-            Assert.True((await manager.DisableAsync(Id)).Succeeded);
+            var disk = new TestDirectory();
+            var manager = disk.Manager();
+            // Disable can return while Stop is still writing settings. Join that write before
+            // the directory is removed; deleting it early leaves the temp file locked.
+            await RuntimeTest.WithCleanupAsync([manager], async () =>
+            {
+                const string entry = "Workbench.TestPlugin.dll";
+                var folder = new string('p', length - disk.Plugins.Length - entry.Length - 2);
+                var package = disk.Package(Id, folder);
+                Assert.Equal(length, Path.Combine(package, entry).Length);
+                var resolver = new AssemblyDependencyResolver(Path.Combine(package, entry));
+                var dependency = resolver.ResolveAssemblyToPath(new("Workbench.TestDependency"));
+                Assert.NotNull(dependency);
+                Assert.Equal(length >= 260, dependency.StartsWith(@"\\?\", StringComparison.Ordinal));
+                await manager.DiscoverAsync();
+                var enabled = await manager.EnableAsync(Id, confirmTrust: true);
+                Assert.True(enabled.Succeeded, enabled.Message);
+                Assert.Equal("com.example.fixture:dependency-ok:demo draft", (await manager.ExecuteCommandAsync(Id, "ping")).Message);
+                Assert.StartsWith("Workbench:", (await manager.ExecuteCommandAsync(Id, "dependency-context")).Message);
+                var disabled = await RuntimeTest.CompleteDisableAsync(manager, Id);
+                Assert.True(disabled.Succeeded, disabled.Message);
+            }, disk);
         }
     }
 
