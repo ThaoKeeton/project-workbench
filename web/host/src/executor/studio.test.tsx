@@ -184,7 +184,7 @@ describe("executor wizard", () => {
     expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看一遍。")).toBeNull();
     expect(rowMore("切削后旁边的牙保持不变").querySelector("[aria-hidden]")?.textContent).toBe("⋯");
     expect(screen.getByText("这次旁边的牙也变了")).toBeTruthy();
-    expect(screen.getAllByText("应该从 8 变成 1，这次是 4").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("工件体积应该从 8 变成 1，这次是 4").length).toBeGreaterThan(0);
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
     await user.click(screen.getByRole("button", { name: "需要更新", pressed: false }));
     expect(screen.getByText("画面显示「已开始」")).toBeTruthy();
@@ -261,10 +261,10 @@ describe("executor wizard", () => {
     await openSample(user);
     await user.click(screen.getByRole("button", { name: "开始看一遍" }));
     await user.click(await screen.findByRole("button", { name: "看这次结果" }));
-    expect(screen.getAllByRole("status").some((node) => node.textContent === "应该从 8 变成 1，这次是 4")).toBe(true);
-    expect(screen.getByText("之后。框出变小的部分。只留在这台电脑上。")).toBeTruthy();
+    expect(screen.getAllByRole("status").some((node) => node.textContent === "工件体积应该从 8 变成 1，这次是 4")).toBe(true);
+    expect(screen.getByText("红框里是切掉的部分。只留在这台电脑上。")).toBeTruthy();
     expect(screen.queryByText("框出不对的文字。只留在这台电脑上。")).toBeNull();
-    expect(screen.getAllByText("应该从 8 变成 1，这次是 4").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("工件体积应该从 8 变成 1，这次是 4").length).toBeGreaterThan(0);
   });
 
   it("treats a changed page as an update and can re-record without AI", async () => {
@@ -437,8 +437,8 @@ describe("executor script", () => {
     expect(humanFindings(saved!, shown)[0]?.sentence).toBe("应该显示「已开始」，这次显示的是「未开始」");
     expect(textMismatch("完成", "")).toBe("应该显示「完成」，这次没有显示");
     const shrunk = humanFindings(caseFromScript(volumeFailingReplayScript)!, replay(caseFromScript(volumeFailingReplayScript)!, sampleDom));
-    expect(shrunk.find((item) => item.shot === "volume")?.sentence).toBe("应该从 8 变成 1，这次是 4");
-    expect(sampleLibrary().find((item) => item.id === "size")?.history.at(-1)?.reason).toBe("应该从 8 变成 1，这次是 4");
+    expect(shrunk.find((item) => item.shot === "volume")?.sentence).toBe("工件体积应该从 8 变成 1，这次是 4");
+    expect(sampleLibrary().find((item) => item.id === "size")?.history.at(-1)?.reason).toBe("工件体积应该从 8 变成 1，这次是 4");
     expect(replay(caseFromScript(failingReplayScript)!, sampleDom).passed).toBe(false);
     expect(connectChoice("Cutter.exe").ok).toBe(true);
     expect(connectChoice("notes.txt").ok).toBe(false);

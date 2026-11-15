@@ -497,7 +497,7 @@ public sealed class CdpWebSession : IWebSession
         await TryDebuggerAsync(() => ActivateAsync(_title, _url, cancellationToken), cancellationToken);
     }
 
-    private async Task TryDebuggerAsync(Func<Task> action, CancellationToken cancellationToken)
+    private static async Task TryDebuggerAsync(Func<Task> action, CancellationToken cancellationToken)
     {
         try { await action(); }
         catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)

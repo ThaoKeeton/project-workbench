@@ -339,11 +339,11 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
     ["cut", "切削后工件变小", true, 0, 3, 26, "07:30", false, ""],
     ["tooth", "切削后旁边的牙保持不变", false, 0, 2, 10, "08:00", false, "这次旁边的牙也变了"],
     ["start", "点开始后画面有反应", true, 1, 18, 4, "09:00", false, ""],
-    ["size", "切削后工件体积变小", false, 1, 11, 2, "18:00", true, "应该从 8 变成 1，这次是 4"],
+    ["size", "切削后工件体积变小", false, 1, 11, 2, "18:00", true, "工件体积应该从 8 变成 1，这次是 4"],
     ["path", "在画面里切一刀", true, 2, 9, 15, "07:30", false, ""],
     ["text", "画面显示「已开始」", false, 3, 16, 40, "12:00", false, "第 2 步找不到「开始」按钮"],
     ["keep", "切削后旁边的物体保持原样", true, 0, 1, 5, pastClock(now), false, ""],
-    ["again", "再切一次后工件继续变小", false, 4, 8, 8, "07:30", false, "应该从 8 变成 1，这次是 4"],
+    ["again", "再切一次后工件继续变小", false, 4, 8, 8, "07:30", false, "工件体积应该从 8 变成 1，这次是 4"],
   ];
   return rows.map(([id, name, passed, daysAgo, hour, minute, dailyAt, paused, problem]) => ({
     id, name, passed, lastRun: last(daysAgo, hour, minute), dailyAt, paused,
@@ -625,7 +625,7 @@ export function humanFindings(testCase: ExecutorCase, run: ExecutorRun): Finding
     const actual = readCutVolume(cutResult?.detail, ok ? to : from);
     findings.push({
       ok,
-      sentence: ok ? `工件体积从 ${from} 变成 ${to}，小了 ${pct}%` : actual === from ? `应该从 ${from} 变成 ${to}，这次没有变小` : `应该从 ${from} 变成 ${to}，这次是 ${actual}`,
+      sentence: ok ? `工件体积从 ${from} 变成 ${to}，小了 ${pct}%` : actual === from ? `工件体积应该从 ${from} 变成 ${to}，这次没有变小` : `工件体积应该从 ${from} 变成 ${to}，这次是 ${actual}`,
       shot: ok ? undefined : "volume",
     });
   }

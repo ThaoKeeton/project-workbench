@@ -1226,19 +1226,19 @@ function ResultFrames({ shot, mark }: { shot: "stuck" | "text" | "volume" | "non
   return (
     <div className="frames" aria-label="前后画面">
       <figure>
-        <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="之前">
+        <svg viewBox="0 0 320 200" role="img" aria-label="之前">
           <rect className="frame-bg" width="320" height="200" />
-          <rect className="piece" x="70" y="30" width="180" height="140" />
+          <rect className="piece" x="50" y="30" width="220" height="140" />
         </svg>
-        <figcaption>之前。只留在这台电脑上。</figcaption>
+        <figcaption><strong>之前</strong>只留在这台电脑上。</figcaption>
       </figure>
       <figure>
-        <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="之后">
+        <svg viewBox="0 0 320 200" role="img" aria-label="之后">
           <rect className="frame-bg" width="320" height="200" />
-          <rect className="piece" x="110" y="60" width="100" height="80" />
-          <rect className="changed" x="100" y="50" width="120" height="100" />
+          <rect className="piece" x="50" y="86" width="220" height="84" />
+          <rect className="cut-box" x="50" y="30" width="220" height="56" rx="4" />
         </svg>
-        <figcaption>之后。框出变小的部分。只留在这台电脑上。</figcaption>
+        <figcaption><strong>之后</strong>红框里是切掉的部分。只留在这台电脑上。</figcaption>
       </figure>
     </div>
   );

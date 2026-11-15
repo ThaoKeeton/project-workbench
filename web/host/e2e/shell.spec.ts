@@ -492,8 +492,10 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "下一步" }).click();
       await page.getByRole("button", { name: "开始看一遍" }).click();
       await page.getByRole("button", { name: "看这次结果" }).click();
-      await expect(page.getByRole("status").filter({ hasText: "应该从 8 变成 1，这次是 4" })).toBeVisible();
-      await expect(page.getByText("之后。框出变小的部分。只留在这台电脑上。")).toBeVisible();
+      await expect(page.getByRole("status").filter({ hasText: "工件体积应该从 8 变成 1，这次是 4" })).toBeVisible();
+      await expect(page.getByText("红框里是切掉的部分。只留在这台电脑上。")).toBeVisible();
+      await expect(page.getByRole("img", { name: "之前" })).toBeVisible();
+      await expect(page.getByRole("img", { name: "之后" })).toBeVisible();
       await expect(page.getByText("框出不对的文字")).toHaveCount(0);
       await shot(page, `fail-volume-1100-${theme}`);
     });
