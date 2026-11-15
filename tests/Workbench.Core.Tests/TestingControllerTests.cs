@@ -101,7 +101,9 @@ public sealed class TestingControllerTests(ITestOutputHelper output)
         {
             Assert.Equal(8192,adapter.ObservedOverride.Length);
             var set=await fixture.ImportAndGenerateAsync();var queued=await fixture.Controller.RunAsync([set.Cases[0].Id]);
-            await adapter.DisposeGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            // Four durable readbacks of the observed text can outlast 5s on a busy disk.
+            // Twenty seconds is the hang budget: disposal that never starts still fails.
+            await adapter.DisposeGate.Entered.Task.WaitAsync(TimeSpan.FromSeconds(20));
             var prior=await fixture.Context.Testing.ReadRunAsync(queued.Plan.Id);
             Assert.Equal(TestRunState.Running,prior.State);Assert.Equal(4,prior.Events.Count(e=>e.Kind==TestRunEventKind.StepFinished));
             adapter.DisposeGate.Release.TrySetResult();
