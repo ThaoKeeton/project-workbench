@@ -441,7 +441,9 @@ public sealed class PluginProjectTests(ITestOutputHelper output)
             await manager.DiscoverAsync();
             var settings = manager.GetSettings(Id);
             Assert.True((await manager.EnableAsync(Id, confirmTrust: true)).Succeeded);
-            Assert.True((await manager.PrepareProjectLeaveAsync(Id)).Succeeded);
+            // The 100ms budget can end while the hook is still writing settings.
+            // That result stays owned; joining it is the same run, not a second hook.
+            Assert.True((await RuntimeTest.CompletePreparationAsync(manager, Id, output)).Succeeded);
             Assert.Equal("workbench-project-prepare", await settings.GetAsync("prepareThread", ""));
         }, disk);
     }
