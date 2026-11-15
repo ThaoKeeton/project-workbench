@@ -58,7 +58,7 @@ describe("executor wizard", () => {
   });
 
   it("fills a key in place and can skip into a recorded checklist", async () => {
-    sessionStorage.setItem("workbench.author.probe", "pass");
+    sessionStorage.setItem("workbench.author.probe", "fail");
     const user = userEvent.setup();
     const { unmount } = render(<ExecutorStudio />);
     await user.click(screen.getByRole("button", { name: "新建一个测试" }));
@@ -68,12 +68,18 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "下一步" }));
     await user.click(screen.getByRole("button", { name: "在这里填写" }));
     expect(screen.getByRole("button", { name: "DeepSeek", pressed: true })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "上一步" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "下一步" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "测试一下" })).toBeNull();
+    expect(screen.getByRole("button", { name: "取消" })).toBeTruthy();
+    expect(screen.getByRole("button", { name: "先不填，我来演示" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "通义千问" }));
     await user.type(screen.getByLabelText("密钥"), "sample-key-0001");
-    await user.click(screen.getByRole("button", { name: "测试一下" }));
-    expect(screen.getByText("可以用")).toBeTruthy();
-    expect(screen.getByLabelText("要测什么")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "用这个继续" }));
+    expect(await screen.findByText("密钥不对，请重新复制一次。")).toBeTruthy();
+    sessionStorage.setItem("workbench.author.probe", "pass");
+    await user.click(screen.getByRole("button", { name: "用这个继续" }));
+    expect(await screen.findByText("可以用")).toBeTruthy();
     expect(await screen.findByRole("heading", { name: "它会做" })).toBeTruthy();
     expect(screen.getByRole("heading", { name: "它会核对" })).toBeTruthy();
     expect((screen.getByRole("button", { name: "演示一遍" }) as HTMLButtonElement).disabled).toBe(false);

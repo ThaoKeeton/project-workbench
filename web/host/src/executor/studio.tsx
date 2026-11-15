@@ -424,6 +424,18 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   );
 }
 
+async function waitForProbe(): Promise<"off" | "pass" | "fail" | "changed"> {
+  for (;;) {
+    try {
+      if (window.sessionStorage.getItem("workbench.author.probe") !== "hold") break;
+    } catch {
+      break;
+    }
+    await new Promise((resolve) => window.setTimeout(resolve, 40));
+  }
+  return readProbeFake();
+}
+
 function readProbeFake(): "off" | "pass" | "fail" | "changed" {
   try {
     const value = window.sessionStorage.getItem("workbench.author.probe");
@@ -818,7 +830,7 @@ function GoalStep({ goal, keyReady, onGoal, onBack, onNext, onSkip, onSaved }: {
       {ask && !keyReady ? (
         <div className="key-ask">
           <p role="status">{authorMessages.missingKey}</p>
-          {setup ? <KeySetup onSaved={onSaved} onCancel={() => setSetup(false)} /> : (
+          {setup ? <KeySetup onSaved={onSaved} onCancel={() => setSetup(false)} onSkip={onSkip} /> : (
             <div className="wizard-actions">
               <button type="button" className="btn-accent" onClick={() => setSetup(true)}>在这里填写</button>
               <button type="button" className="btn" onClick={onSkip}>先不填，我来演示</button>
@@ -826,45 +838,84 @@ function GoalStep({ goal, keyReady, onGoal, onBack, onNext, onSkip, onSaved }: {
           )}
         </div>
       ) : null}
-      <div className="wizard-actions">
-        <button type="button" className="btn" onClick={onBack}>上一步</button>
-        <button type="button" className={ask && !keyReady ? "btn" : "btn-accent"} disabled={goal.trim().length === 0} onClick={go}>下一步</button>
-      </div>
+      {setup ? null : (
+        <div className="wizard-actions">
+          <button type="button" className="btn" onClick={onBack}>上一步</button>
+          <button type="button" className={ask && !keyReady ? "btn" : "btn-accent"} disabled={goal.trim().length === 0} onClick={go}>下一步</button>
+        </div>
+      )}
     </div>
   );
 }
 
-function KeySetup({ onSaved, onCancel }: { onSaved: () => void; onCancel: () => void }) {
+function KeySetup({ onSaved, onCancel, onSkip }: { onSaved: () => void; onCancel: () => void; onSkip?: () => void }) {
   const [preset, setPreset] = useState<CompatiblePresetId>("deepseek");
   const [secret, setSecret] = useState("");
   const [notice, setNotice] = useState("");
-  const [ok, setOk] = useState(false);
+  const [tone, setTone] = useState<"" | "ok" | "bad" | "wait">("");
+  const [testing, setTesting] = useState(false);
   const chosen = compatiblePresets.find((item) => item.id === preset) ?? compatiblePresets[0];
+  const clear = () => { setNotice(""); setTone(""); };
+  const useThis = async () => {
+    if (testing) return;
+    if (secret.trim().length < 8) {
+      setTone("bad");
+      setNotice("先把密钥粘贴进来。");
+      return;
+    }
+    setTesting(true);
+    setTone("wait");
+    setNotice("正在试这个密钥…");
+    const fake = await waitForProbe();
+    const result = await probeAi({ key: secret, fake });
+    if (!result.ok) {
+      setTesting(false);
+      setTone("bad");
+      setNotice(result.message === "连不上" ? "连不上，请稍后再试一次。" : "密钥不对，请重新复制一次。");
+      return;
+    }
+    setTone("ok");
+    setNotice("可以用");
+    setTesting(false);
+    await new Promise((resolve) => window.setTimeout(resolve, 40));
+    while (window.sessionStorage.getItem("workbench.author.probeStay") === "1") {
+      await new Promise((resolve) => window.setTimeout(resolve, 50));
+    }
+    writeAiSettings({ provider: "compatible", key: secret, base: chosen.base, model: chosen.model, preset, cap: readDailyCap() });
+    if (readAiSettings().key.length < 8) {
+      setTesting(false);
+      setTone("bad");
+      setNotice("先把密钥粘贴进来。");
+      return;
+    }
+    sessionStorage.setItem("workbench.author.key", "1");
+    setTesting(false);
+    onSaved();
+  };
   return (
     <div className="key-setup" aria-label="在这里设置">
       <div className="filter-row" role="group" aria-label="选一个">
         {compatiblePresets.filter((item) => item.id !== "custom").map((item) => (
-          <button key={item.id} type="button" className={preset === item.id ? "is-on" : ""} aria-pressed={preset === item.id} onClick={() => { setPreset(item.id); setOk(false); }}>{item.label}</button>
+          <button key={item.id} type="button" className={preset === item.id ? "is-on" : ""} aria-pressed={preset === item.id} disabled={testing} onClick={() => { setPreset(item.id); clear(); }}>{item.label}</button>
         ))}
       </div>
       <label>
         密钥
-        <input aria-label="密钥" type="password" autoComplete="off" value={secret} onChange={(event) => { setSecret(event.target.value); setOk(false); }} />
+        <input aria-label="密钥" type="password" autoComplete="off" value={secret} disabled={testing} onChange={(event) => { setSecret(event.target.value); clear(); }} />
       </label>
-      {notice ? <p role="status">{notice}</p> : null}
+      {notice ? (
+        <p role="status" className={`probe-note is-${tone}`}>
+          {tone === "ok" ? <span className="probe-mark" aria-hidden="true">✓</span> : null}
+          {tone === "bad" ? <span className="probe-mark" aria-hidden="true">!</span> : null}
+          {notice}
+        </p>
+      ) : null}
+      <div className="wizard-actions is-main">
+        <button type="button" className="btn-accent" disabled={testing || tone === "ok"} onClick={() => void useThis()}>{testing ? "正在试…" : "用这个继续"}</button>
+      </div>
       <div className="wizard-actions">
-        <button type="button" className="btn" onClick={() => void probeAi({ key: secret, fake: readProbeFake() }).then((result) => { setNotice(result.message); setOk(result.ok); })}>测试一下</button>
-        <button type="button" className="btn-accent" disabled={!ok} onClick={() => {
-          writeAiSettings({ provider: "compatible", key: secret, base: chosen.base, model: chosen.model, preset, cap: readDailyCap() });
-          if (readAiSettings().key.length < 8) {
-            setNotice("先填写密钥。");
-            setOk(false);
-            return;
-          }
-          sessionStorage.setItem("workbench.author.key", "1");
-          onSaved();
-        }}>用这个继续</button>
-        <button type="button" className="btn" onClick={onCancel}>取消</button>
+        <button type="button" className="btn" disabled={testing} onClick={onCancel}>取消</button>
+        {onSkip ? <button type="button" className="btn" disabled={testing} onClick={onSkip}>先不填，我来演示</button> : null}
       </div>
       <details>
         <summary>详情</summary>

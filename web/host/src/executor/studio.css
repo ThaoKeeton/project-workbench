@@ -161,6 +161,23 @@
 .wizard-actions.is-main .btn-accent { min-width: 160px; min-height: 40px; }
 .key-ask, .key-setup { display: grid; gap: 12px; width: 100%; }
 .key-setup .filter-row { flex-wrap: wrap; }
+.probe-note { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 14px; }
+.probe-note.is-ok { color: var(--success); font-weight: 500; }
+.probe-note.is-bad { color: var(--danger); }
+.probe-note.is-wait { color: var(--text-secondary); }
+.probe-mark {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  display: inline-grid;
+  place-items: center;
+  flex: none;
+  color: var(--surface-1);
+  font-size: 12px;
+  line-height: 1;
+}
+.probe-note.is-ok .probe-mark { background: var(--success); }
+.probe-note.is-bad .probe-mark { background: var(--danger); }
 .plan li { font-size: 14px; line-height: 1.45; }
 .wizard-actions h2 { margin-right: auto; }
 .executor .btn, .executor .btn-accent, .case-list button {
