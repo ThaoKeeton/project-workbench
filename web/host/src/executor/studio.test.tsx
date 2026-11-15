@@ -167,6 +167,8 @@ describe("executor wizard", () => {
     expect(screen.getByRole("menuitem", { name: "恢复每天重跑" })).toBeTruthy();
     await user.click(rowMore("牙的检查"));
     await user.click(screen.getByRole("menuitem", { name: "删除" }));
+    expect(screen.getByRole("button", { name: /^牙的检查/ }).closest("li")?.querySelector("[aria-label='确认删除']")).toBeTruthy();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "留下" }));
     expect(screen.getByRole("dialog", { name: "确认删除" })).toBeTruthy();
     fireEvent.keyDown(window, { key: "Escape" });
     expect(screen.queryByRole("dialog", { name: "确认删除" })).toBeNull();

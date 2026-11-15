@@ -502,6 +502,11 @@ function Home({ library, missedNote, removed, onNew, onOpen, onRun, onRename, on
   const [renaming, setRenaming] = useState<SavedTest | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [removing, setRemoving] = useState<SavedTest | null>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    if (!removing) return;
+    keepRef.current?.focus();
+  }, [removing]);
   useEffect(() => {
     if (!renaming && !removing && !menu) return;
     const onKey = (event: KeyboardEvent) => {
@@ -560,29 +565,43 @@ function Home({ library, missedNote, removed, onNew, onOpen, onRun, onRename, on
         {visible.map((item) => {
           const outcome = listedOutcome(item);
           const problem = rowProblem(item, outcome);
-          const next = item.paused ? "每天重跑已暂停" : `下次 ${formatWhen(nextDailyInstant(item.dailyAt, readClock(), item.weekdays ?? allWeekdays), readClock())}`;
+          const when = formatWhen(nextDailyInstant(item.dailyAt, readClock(), item.weekdays ?? allWeekdays), readClock());
           return (
             <li key={item.id} className={[outcome === "fail" ? "is-fail" : outcome === "needs-update" ? "is-update" : "", item.paused ? "is-paused" : ""].filter(Boolean).join(" ")}>
-              <button type="button" className="row-open" onClick={() => onOpen(item)}>
-                <span className="row-title">
-                  <strong>{item.name}</strong>
-                  {problem ? <span className="row-problem">{problem}</span> : null}
-                </span>
-                <span className="result-label">{outcomeWord(outcome)}</span>
-                <span>上次 {formatWhen(new Date(item.lastRun))}</span>
-                <span className={item.paused ? "is-paused-note" : ""}>{next}</span>
-              </button>
-              <button type="button" className="btn" onClick={() => onRun(item)}>现在跑一次</button>
-              <div className="more-menu">
-                <button type="button" className="icon-more" aria-haspopup="menu" aria-expanded={menu === item.id} aria-label="更多" onClick={() => setMenu(menu === item.id ? null : item.id)}><span aria-hidden="true">⋯</span></button>
-                {menu === item.id ? (
-                  <div role="menu">
-                    <button type="button" role="menuitem" onClick={() => { setRenaming(item); setRenameValue(item.name); setMenu(null); }}>重命名</button>
-                    <button type="button" role="menuitem" onClick={() => { onPause(item.id); setMenu(null); }}>{item.paused ? "恢复每天重跑" : "暂停每天重跑"}</button>
-                    <button type="button" role="menuitem" className="is-danger" onClick={() => { setRemoving(item); setMenu(null); }}>删除</button>
-                  </div>
-                ) : null}
+              <div className="saved-row">
+                <button type="button" className="row-open" onClick={() => onOpen(item)}>
+                  <span className="row-title">
+                    <strong>{item.name}</strong>
+                    {problem ? <span className="row-problem">{problem}</span> : null}
+                  </span>
+                  <span className="row-meta">
+                    <span className="result-label">{outcomeWord(outcome)}</span>
+                    <span>上次 {formatWhen(new Date(item.lastRun))}</span>
+                    <span aria-hidden="true">·</span>
+                    <span className={item.paused ? "is-paused-note" : ""}>{item.paused ? "每天重跑已暂停" : `下次 ${when}`}</span>
+                  </span>
+                </button>
+                <button type="button" className="btn" onClick={() => onRun(item)}>现在跑一次</button>
+                <div className="more-menu">
+                  <button type="button" className="icon-more" aria-haspopup="menu" aria-expanded={menu === item.id} aria-label="更多" onClick={() => setMenu(menu === item.id ? null : item.id)}><span aria-hidden="true">⋯</span></button>
+                  {menu === item.id ? (
+                    <div role="menu">
+                      <button type="button" role="menuitem" onClick={() => { setRenaming(item); setRenameValue(item.name); setMenu(null); }}>重命名</button>
+                      <button type="button" role="menuitem" onClick={() => { onPause(item.id); setMenu(null); }}>{item.paused ? "恢复每天重跑" : "暂停每天重跑"}</button>
+                      <button type="button" role="menuitem" className="is-danger" onClick={() => { setRemoving(item); setMenu(null); }}>删除</button>
+                    </div>
+                  ) : null}
+                </div>
               </div>
+              {removing?.id === item.id ? (
+                <div role="dialog" aria-label="确认删除" className="row-confirm">
+                  <p>删掉「{removing.name}」？这份测试和以前的结果会一起去掉。按「留下」或 Esc 还能留下。</p>
+                  <div className="wizard-actions">
+                    <button ref={keepRef} type="button" className="btn" onClick={() => setRemoving(null)}>留下</button>
+                    <button type="button" className="btn-danger" onClick={() => { onDelete(removing.id); setRemoving(null); }}>删掉</button>
+                  </div>
+                </div>
+              ) : null}
             </li>
           );
         })}
@@ -596,15 +615,6 @@ function Home({ library, missedNote, removed, onNew, onOpen, onRun, onRename, on
           <div className="wizard-actions">
             <button type="button" className="btn" onClick={() => setRenaming(null)}>取消</button>
             <button type="button" className="btn-accent" onClick={() => { onRename(renaming.id, renameValue.trim() || renaming.name); setRenaming(null); }}>保存名称</button>
-          </div>
-        </div>
-      ) : null}
-      {removing ? (
-        <div role="dialog" aria-label="确认删除">
-          <p>删掉「{removing.name}」？这份测试和以前的结果会一起去掉。按「留下」或 Esc 还能留下。</p>
-          <div className="wizard-actions">
-            <button type="button" className="btn" onClick={() => setRemoving(null)}>留下</button>
-            <button type="button" className="btn-danger" onClick={() => { onDelete(removing.id); setRemoving(null); }}>删掉</button>
           </div>
         </div>
       ) : null}
