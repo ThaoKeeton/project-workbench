@@ -164,7 +164,7 @@ describe("launcher pages", () => {
     expect(screen.getByRole("heading", { name: "还没有测试" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     await user.click(screen.getByRole("button", { name: "合成电子样品" }));
-    expect(screen.getByRole("status").textContent).toContain("已连接");
+    expect(screen.getByRole("status").textContent).toContain("已经打开");
     cleanup();
     URL.createObjectURL = () => "blob:preview";
     URL.revokeObjectURL = () => undefined;

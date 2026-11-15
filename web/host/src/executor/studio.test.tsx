@@ -22,7 +22,7 @@ function rowMore(name: string) {
 async function openSample(user: ReturnType<typeof userEvent.setup>, start = "新建一个测试") {
   await user.click(screen.getByRole("button", { name: start }));
   await user.click(screen.getByRole("button", { name: sampleAppName }));
-  expect(screen.getByRole("status").textContent).toContain("已连接");
+  expect(screen.getByRole("status").textContent).toContain("已经打开");
   await user.click(screen.getByRole("button", { name: "下一步" }));
   await user.type(screen.getByLabelText("要测什么"), "切削工件后，工件变小，旁边的牙不变");
   await user.click(screen.getByRole("button", { name: "下一步" }));
@@ -40,9 +40,9 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     fireEvent.change(screen.getByLabelText("浏览程序"), { target: { files: [file] } });
     expect(screen.getByRole("status").textContent).toContain("还不能自动测试");
-    await user.click(screen.getByRole("button", { name: "重新选择" }));
+    await user.click(screen.getByRole("button", { name: "换一个程序" }));
     await user.click(screen.getByRole("button", { name: sampleAppName }));
-    expect(screen.getByRole("status").textContent).toContain("已连接：合成电子样品");
+    expect(screen.getByRole("status").textContent).toContain("已经打开「合成电子样品」");
     expect(screen.getByText("认出了 3D 画面，里面有 2 个物体")).toBeTruthy();
     expect(screen.getByRole("img", { name: "程序画面" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "下一步" }));
@@ -160,19 +160,19 @@ describe("executor wizard", () => {
     render(<ExecutorStudio />);
     await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     await user.click(screen.getByRole("button", { name: "已经开着的样品" }));
-    expect(screen.getByRole("status").textContent).toBe("这个程序已经开着，需要由工作台重新打开它。");
+    expect(screen.getByRole("status").textContent).toBe("「已经开着的样品」正在开着。");
     await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
     expect(screen.getByRole("dialog", { name: "确认重新打开" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "取消" }));
     await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
-    await user.click(screen.getAllByRole("button", { name: "关掉并重新打开" })[1]);
-    expect(screen.getByRole("status").textContent).toContain("已连接：已经开着的样品");
+    await user.click(within(screen.getByRole("dialog", { name: "确认重新打开" })).getByRole("button", { name: "关掉并重新打开" }));
+    expect(screen.getByRole("status").textContent).toContain("已经打开「已经开着的样品」");
     await user.click(screen.getByRole("button", { name: "记事本" }));
     expect(screen.getByRole("status").textContent).toContain("还不能自动测试");
     fireEvent.change(screen.getByLabelText("浏览程序"), { target: { files: [new File(["x"], "连不上的样品.exe")] } });
-    expect(screen.getByRole("status").textContent).toContain("连上用的时间太长了");
+    expect(screen.getByRole("status").textContent).toContain("没能打开「连不上的样品」");
     await user.click(screen.getByRole("button", { name: "再试一次" }));
-    expect(screen.getByRole("status").textContent).toContain("已连接：连不上的样品");
+    expect(screen.getByRole("status").textContent).toContain("已经打开「连不上的样品」");
   });
 
   it("filters, renames, pauses, and deletes a longer list", async () => {
@@ -181,6 +181,7 @@ describe("executor wizard", () => {
     render(<ExecutorStudio />);
     expect(screen.getByRole("group", { name: "筛选" })).toBeTruthy();
     expect(screen.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeTruthy();
+    expect(screen.getByText("最近一次每天重跑：4 个通过，2 个没通过，1 个需要更新。")).toBeTruthy();
     expect(screen.queryByText("选一个程序，用一句话说要检查什么，再看一遍。")).toBeNull();
     expect(rowMore("切削后旁边的牙保持不变").querySelector("[aria-hidden]")?.textContent).toBe("⋯");
     expect(screen.getByText("这次旁边的牙也变了")).toBeTruthy();
@@ -245,7 +246,8 @@ describe("executor wizard", () => {
     expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     expect(screen.getAllByText("没通过").length).toBeGreaterThan(0);
     expect(screen.getAllByRole("status").some((node) => node.textContent === "应该不出现「已开始」，这次却出现了")).toBe(true);
-    expect(screen.getByText("框出不对的文字。只留在这台电脑上。")).toBeTruthy();
+    expect(screen.getByText("框出不对的文字。")).toBeTruthy();
+    expect(screen.getAllByText("这些画面只留在这台电脑上。")).toHaveLength(1);
     expect(screen.queryByText("框出变小的部分。只留在这台电脑上。")).toBeNull();
     expect(screen.queryByText("期望看到「不会出现」")).toBeNull();
     expect(screen.getByText("已开始")).toBeTruthy();
@@ -262,9 +264,27 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "开始看一遍" }));
     await user.click(await screen.findByRole("button", { name: "看这次结果" }));
     expect(screen.getAllByRole("status").some((node) => node.textContent === "工件体积应该从 8 变成 1，这次是 4")).toBe(true);
-    expect(screen.getByText("红框里是切掉的部分。只留在这台电脑上。")).toBeTruthy();
+    expect(screen.getByText("红框里是切掉的部分。")).toBeTruthy();
+    expect(screen.getAllByText("这些画面只留在这台电脑上。")).toHaveLength(1);
     expect(screen.queryByText("框出不对的文字。只留在这台电脑上。")).toBeNull();
     expect(screen.getAllByText("工件体积应该从 8 变成 1，这次是 4").length).toBeGreaterThan(0);
+  });
+
+  it("says the program did not open and points back to running it again", async () => {
+    sessionStorage.setItem("workbench.author.samples", "1");
+    sessionStorage.setItem("workbench.author.closed", "1");
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    await user.click(screen.getAllByRole("button", { name: "现在跑一次" })[0]);
+    expect(screen.getByRole("status").textContent).toBe("没能打开「合成电子样品」。请先打开这个程序，回到首页后再点「现在跑一次」。");
+    expect(screen.queryByText(/已重新打开/)).toBeNull();
+    expect(screen.queryByRole("button", { name: "重新演示并更新" })).toBeNull();
+    expect(screen.queryByText("这一次的画面已经清掉。")).toBeNull();
+    expect(screen.getByRole("button", { name: "返回首页" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "返回首页" }));
+    expect(screen.getByText(/1 个没能打开程序/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /切削后工件变小/ }));
+    expect(screen.getByRole("status").textContent).toBe("没能打开「合成电子样品」。请先打开这个程序，回到首页后再点「现在跑一次」。");
   });
 
   it("treats a changed page as an update and can re-record without AI", async () => {
@@ -282,7 +302,8 @@ describe("executor wizard", () => {
     expect(screen.getByRole("button", { name: "在这里填写" })).toBeTruthy();
     expect(screen.queryByRole("link", { name: "去设置" })).toBeNull();
     expect(screen.getByRole("img", { name: "停在这里" })).toBeTruthy();
-    expect(screen.getByText("停在这一步。这张画面只留在这台电脑上。")).toBeTruthy();
+    expect(screen.getByText("停在这一步。")).toBeTruthy();
+    expect(screen.getAllByText("这些画面只留在这台电脑上。")).toHaveLength(1);
     expect(screen.queryByText("选一个程序，用一句话说要测什么。看它做一遍，再决定要不要留下。")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "用 AI 修一下" }));
     expect(screen.getByRole("status").textContent).toBe("第 2 步找不到「开始」按钮");
@@ -374,10 +395,10 @@ describe("executor wizard", () => {
     expect(next().disabled).toBe(true);
     expect(next().tabIndex).toBe(-1);
     await user.click(screen.getByRole("button", { name: "取消" }));
-    expect(screen.queryByText(/已连接/)).toBeNull();
+    expect(screen.queryByText(/已经打开/)).toBeNull();
     sessionStorage.removeItem("workbench.author.wait");
     await user.click(screen.getByRole("button", { name: sampleAppName }));
-    expect((await screen.findByRole("status")).textContent).toContain("已连接");
+    expect((await screen.findByRole("status")).textContent).toContain("已经打开");
     expect(next().disabled).toBe(false);
     expect(next().tabIndex).toBe(0);
     await user.click(screen.getByRole("button", { name: "下一步" }));

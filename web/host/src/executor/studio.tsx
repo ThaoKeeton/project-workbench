@@ -238,21 +238,26 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const openSaved = (item: SavedTest, rerun: boolean) => {
     const saved = caseFromScript(item.script);
     if (!saved) return;
-    const changed = rerun ? readAuthorFake() === "changed" : item.history.at(-1)?.outcome === "needs-update";
+    const closed = readClosed();
+    const closedSentence = `没能打开「${item.appName || sampleAppName}」。请先打开这个程序，回到首页后再点「现在跑一次」。`;
+    const storedClosed = !rerun && (item.history.at(-1)?.reason ?? "").startsWith("没能打开");
+    const changed = !closed && !storedClosed && (rerun ? readAuthorFake() === "changed" : item.history.at(-1)?.outcome === "needs-update");
     const result = replay(saved, sampleDom);
-    const findingsForRun = changed ? pageChangedFindings(saved) : humanFindings(saved, result);
-    const outcome = changed ? "needs-update" as const : outcomeOf(findingsForRun);
+    const findingsForRun = closed || storedClosed
+      ? [{ ok: false, kind: "missing" as const, sentence: storedClosed ? item.history.at(-1)?.reason ?? closedSentence : closedSentence }]
+      : changed ? pageChangedFindings(saved) : humanFindings(saved, result);
+    const outcome = closed || storedClosed || changed ? "needs-update" as const : outcomeOf(findingsForRun);
     const next = rerun ? {
       ...item,
       passed: outcome === "pass",
       lastRun: new Date().toISOString(),
-      history: [...(item.history ?? []), { at: new Date().toISOString(), outcome, reason: findingsForRun.find((entry) => !entry.ok)?.sentence ?? findingsForRun[0]?.sentence ?? "", image: true }],
+      history: [...(item.history ?? []), { at: new Date().toISOString(), outcome, reason: findingsForRun.find((entry) => !entry.ok)?.sentence ?? findingsForRun[0]?.sentence ?? "", image: !closed }],
     } : item;
     if (rerun) setLibrary((items) => items.map((entry) => entry.id === item.id ? next : entry));
-    setRelaunchNote(rerun ? `已重新打开「${item.appName || sampleAppName}」，跑完后已关掉。` : "");
+    setRelaunchNote(rerun && !closed ? `已重新打开「${item.appName || sampleAppName}」，跑完后已关掉。` : "");
     setDraft(saved);
     setDemo(changed ? { ...result, passed: false } : result);
-    setFindings(rerun ? findingsForRun : humanFindings(saved, result));
+    setFindings(rerun || storedClosed ? findingsForRun : humanFindings(saved, result));
     setOpened(next);
     setPhase("result");
   };
@@ -482,6 +487,14 @@ function holdUntilSettled(token: number, current: () => number): Promise<boolean
   return holdUntil(token, current, () => !readWait());
 }
 
+function readClosed(): boolean {
+  try {
+    return window.sessionStorage.getItem("workbench.author.closed") === "1";
+  } catch {
+    return false;
+  }
+}
+
 function readPace(fallback: number): number {
   try {
     const raw = window.sessionStorage.getItem("workbench.author.pace");
@@ -632,6 +645,7 @@ function Home({ library, missedNote, removed, onNew, onOpen, onRun, onRename, on
         </div>
       ) : null}
       {removed ? <p role="status">已删掉「{removed.name}」。<button type="button" className="text-btn" onClick={onUndo}>撤销</button></p> : null}
+      {morningLine(library) ? <p>{morningLine(library)}</p> : null}
       {missedNote ? <p role="status">{missedNote}</p> : null}
       {visible.length === 0 ? <p>这个筛选下没有测试。点「全部」可以看全部。</p> : null}
       <ul className="saved-list">
@@ -741,13 +755,21 @@ function AppStep({ picked, connection, recent, installed, launch, onChoose, onCa
         </>
       )}
       {connected ? <WindowPreview objects={connection.objects} /> : null}
-      {connection.state === "busy" && picked ? (
-        <button type="button" className="btn" onClick={() => setConfirm(true)}>关掉并重新打开</button>
+      {connection.state === "busy" && picked && !confirm ? (
+        <div className="wizard-actions is-main">
+          <button type="button" className="btn-accent" onClick={() => setConfirm(true)}>关掉并重新打开</button>
+        </div>
       ) : null}
       {connection.state === "timeout" && picked ? (
-        <button type="button" className="btn" onClick={() => onChoose(picked, { attempt: 2 })}>再试一次</button>
+        <div className="wizard-actions is-main">
+          <button type="button" className="btn-accent" onClick={() => onChoose(picked, { attempt: 2 })}>再试一次</button>
+        </div>
       ) : null}
-      {connection.state === "unsupported" ? <button type="button" className="btn" onClick={() => onChoose(null)}>重新选择</button> : null}
+      {connection.state === "unsupported" ? (
+        <div className="wizard-actions is-main">
+          <button type="button" className="btn-accent" onClick={() => onChoose(null)}>换一个程序</button>
+        </div>
+      ) : null}
       {confirm && picked ? (
         <div role="dialog" aria-label="确认重新打开">
           <p>关掉并重新打开「{picked.name}」？正在用的窗口会关掉。</p>
@@ -757,9 +779,11 @@ function AppStep({ picked, connection, recent, installed, launch, onChoose, onCa
           </div>
         </div>
       ) : null}
-      <div className="wizard-actions">
-        <button type="button" className="btn-accent" disabled={!connected} tabIndex={connected ? 0 : -1} onClick={onNext}>下一步</button>
-      </div>
+      {connected || connection.state === "empty" ? (
+        <div className="wizard-actions">
+          <button type="button" className="btn-accent" disabled={!connected} tabIndex={connected ? 0 : -1} onClick={onNext}>下一步</button>
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -1103,8 +1127,9 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
       : outcome === "fail" && failedLine
         ? failedLine
         : resultSentence(outcome === "pass");
+  const closed = sentence.startsWith("没能打开");
   const failedShot = failedLine ? findings.find((item) => !item.ok && item.kind !== "missing") : undefined;
-  const shot = outcome === "needs-update" ? "stuck" : outcome === "fail" ? failedShot?.shot ?? "none" : "volume";
+  const shot = closed ? "none" : outcome === "needs-update" ? "stuck" : outcome === "fail" ? failedShot?.shot ?? "none" : "volume";
   const showPicture = (picked ?? newest[0])?.image ?? true;
   const repair = () => {
     if (!keyReady) return;
@@ -1120,7 +1145,7 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
       <p role="status">{sentence}</p>
       {note && viewingCurrent ? <p>{note}</p> : null}
       {showPicture && shot !== "none" ? <ResultFrames shot={shot} mark={failedShot?.mark} /> : null}
-      {!showPicture ? <p>这一次的画面已经清掉。</p> : null}
+      {!showPicture && !closed ? <p>这一次的画面已经清掉。</p> : null}
       {viewingCurrent ? (
         <ul className="finding-list" aria-label="核对结果">
           {findings.map((item) => (
@@ -1172,7 +1197,7 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
         </div>
       ) : null}
       <div className="wizard-actions">
-        {outcome === "needs-update" ? (
+        {outcome === "needs-update" && !closed ? (
           <>
             <button type="button" className="btn" disabled={!keyReady} onClick={repair}>用 AI 修一下</button>
             {!keyReady ? <p className="repair-hint">{authorMessages.missingKey}</p> : null}
@@ -1182,7 +1207,7 @@ function ResultPage({ findings, onSave, saveLabel, onAgain, onEdit, note, histor
             <button type="button" className="btn-accent" onClick={onRerecord}>重新演示并更新</button>
           </>
         ) : null}
-        {outcome === "pass" ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : null}
+        {outcome === "pass" || closed ? <button type="button" className="btn-accent" onClick={onSave}>{saveLabel}</button> : null}
         {outcome === "fail" ? (
           <>
             <button type="button" className="btn-accent" onClick={onAgain}>再看一遍</button>
@@ -1198,19 +1223,23 @@ function ResultFrames({ shot, mark }: { shot: "stuck" | "text" | "volume" | "non
   if (shot === "none") return null;
   if (shot === "stuck") {
     return (
+      <>
       <div className="frames frames-one" aria-label="停住的画面">
         <figure>
           <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="停在这里">
             <rect className="frame-bg" width="320" height="200" />
             <rect className="stuck-target" x="70" y="78" width="180" height="44" rx="6" />
           </svg>
-          <figcaption>停在这一步。这张画面只留在这台电脑上。</figcaption>
+          <figcaption>停在这一步。</figcaption>
         </figure>
       </div>
+      <PictureNote />
+      </>
     );
   }
   if (shot === "text") {
     return (
+      <>
       <div className="frames frames-one" aria-label="不对的文字">
         <figure>
           <svg viewBox="0 0 320 200" preserveAspectRatio="xMidYMid slice" role="img" aria-label="画面上的文字">
@@ -1218,19 +1247,22 @@ function ResultFrames({ shot, mark }: { shot: "stuck" | "text" | "volume" | "non
             <rect className="text-chip" x="70" y="78" width="180" height="44" rx="6" />
             <text className="screen-text" x="160" y="100" textAnchor="middle" dominantBaseline="middle">{mark || "文字"}</text>
           </svg>
-          <figcaption>框出不对的文字。只留在这台电脑上。</figcaption>
+          <figcaption>框出不对的文字。</figcaption>
         </figure>
       </div>
+      <PictureNote />
+      </>
     );
   }
   return (
+    <>
     <div className="frames" aria-label="前后画面">
       <figure>
         <svg viewBox="0 0 320 200" role="img" aria-label="之前">
           <rect className="frame-bg" width="320" height="200" />
           <rect className="piece" x="50" y="30" width="220" height="140" />
         </svg>
-        <figcaption><strong>之前</strong>只留在这台电脑上。</figcaption>
+        <figcaption><strong>之前</strong></figcaption>
       </figure>
       <figure>
         <svg viewBox="0 0 320 200" role="img" aria-label="之后">
@@ -1238,10 +1270,16 @@ function ResultFrames({ shot, mark }: { shot: "stuck" | "text" | "volume" | "non
           <rect className="piece" x="50" y="86" width="220" height="84" />
           <rect className="cut-box" x="50" y="30" width="220" height="56" rx="4" />
         </svg>
-        <figcaption><strong>之后</strong>红框里是切掉的部分。只留在这台电脑上。</figcaption>
+        <figcaption><strong>之后</strong>红框里是切掉的部分。</figcaption>
       </figure>
     </div>
+    <PictureNote />
+    </>
   );
+}
+
+function PictureNote() {
+  return <p className="tiny">这些画面只留在这台电脑上。</p>;
 }
 
 function Rerecord({ appName, sentence, step, onAdvance, onSave }: {
@@ -1274,6 +1312,29 @@ function failScript(): string {
     return failingReplayScript;
   }
   return failingReplayScript;
+}
+
+function morningLine(library: SavedTest[]): string | null {
+  const counts = { pass: 0, fail: 0, update: 0, closed: 0 };
+  for (const item of library) {
+    if (item.paused) continue;
+    const outcome = listedOutcome(item);
+    const reason = item.history.at(-1)?.reason ?? "";
+    if (reason.startsWith("没能打开")) counts.closed += 1;
+    else if (outcome === "pass") counts.pass += 1;
+    else if (outcome === "fail") counts.fail += 1;
+    else if (outcome === "needs-update") counts.update += 1;
+  }
+  const problems = counts.fail + counts.update + counts.closed;
+  if (counts.pass + problems === 0) return null;
+  if (problems === 0) return "最近一次每天重跑都通过了。";
+  const parts = [
+    counts.pass ? `${counts.pass} 个通过` : "",
+    counts.fail ? `${counts.fail} 个没通过` : "",
+    counts.closed ? `${counts.closed} 个没能打开程序` : "",
+    counts.update ? `${counts.update} 个需要更新` : "",
+  ].filter((part) => part.length > 0);
+  return `最近一次每天重跑：${parts.join("，")}。`;
 }
 
 function listedOutcome(item: SavedTest): "pass" | "fail" | "needs-update" {

@@ -413,20 +413,20 @@ export function connectApp(app: TestApp | null, options: { attempt?: number; rel
     return { state: "empty", status: "还没有选择。", detail: "请点一个程序。", objects: null };
   }
   if (app.kind !== "electron") {
-    return { state: "unsupported", status: "这个程序还不能自动测试。", detail: "请换一个程序。", objects: null };
+    return { state: "unsupported", status: `「${app.name}」还不能自动测试。`, detail: "请换一个程序。", objects: null };
   }
   const attempt = options.attempt ?? 1;
   if (app.running === "timeout" && attempt < 2) {
-    return { state: "timeout", status: "连上用的时间太长了。", detail: "请再试一次。", objects: null };
+    return { state: "timeout", status: `没能打开「${app.name}」。`, detail: "可能是程序没开，或这一次太慢。点「再试一次」。", objects: null };
   }
   if (app.running === "busy" && !options.relaunch) {
-    return { state: "busy", status: "这个程序已经开着，需要由工作台重新打开它。", detail: "请点关掉并重新打开。正在用的窗口会先关掉。", objects: null };
+    return { state: "busy", status: `「${app.name}」正在开着。`, detail: "要接着测，需要先关掉它，再由这里重新打开。", objects: null };
   }
   const objects = app.objects;
   const detail = objects !== null && objects > 0
     ? `认出了 3D 画面，里面有 ${objects} 个物体`
-    : "已经打开，并连上了。接下来用一句话说明要测什么。";
-  return { state: "connected", status: `已连接：${app.name}`, detail, objects };
+    : "接下来用一句话说明要检查什么。";
+  return { state: "connected", status: `已经打开「${app.name}」。`, detail, objects };
 }
 
 export type ConnectResult = { ok: boolean; status: string; hint: string };
