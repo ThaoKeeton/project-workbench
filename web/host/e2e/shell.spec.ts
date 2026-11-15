@@ -174,7 +174,11 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
     });
 
     test("home shows dated saved tests and can hide the ones that passed", async ({ page }) => {
-      await page.addInitScript(() => sessionStorage.setItem("workbench.author.samples", "1"));
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.samples", "1");
+        // 10:00 keeps both a later run today (12:00, 18:00) and earlier clocks tomorrow.
+        sessionStorage.setItem("workbench.author.now", "2026-11-13T10:00:00");
+      });
       await page.goto("/plugin/runner");
       await expect(page.getByRole("heading", { name: "已保存的测试" })).toBeVisible();
       await expect(page.getByText("每天自动跑这些测试，有问题会提醒你。")).toBeVisible();
