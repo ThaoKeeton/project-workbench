@@ -195,8 +195,8 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await shot(page, `wizard-library-${theme}`);
       await shot(page, `saved-list-${theme}`);
       await page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" }).click();
-      await expect(page.locator(".row-open", { hasText: "切削后体积减小" })).toHaveCount(0);
-      await expect(page.locator(".row-open", { hasText: "旁边的牙变了" })).toBeVisible();
+      await expect(page.locator(".row-open", { hasText: "切削后工件变小" })).toHaveCount(0);
+      await expect(page.locator(".row-open", { hasText: "切削后旁边的牙保持不变" })).toBeVisible();
     });
 
     test("app picker, a live connection, an already-open app, and AI settings", async ({ page }) => {
@@ -313,10 +313,11 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page).toHaveURL(/filter=todo/);
       await expect(page.getByRole("button", { name: "要处理的", pressed: true })).toBeVisible();
       await expect(page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" })).toHaveAttribute("aria-pressed", "false");
-      await expect(page.getByText("旁边的牙变了")).toBeVisible();
-      await expect(page.getByText("画面文字不对")).toBeVisible();
+      await expect(page.getByText("切削后旁边的牙保持不变")).toBeVisible();
+      await expect(page.getByText("这次旁边的牙也变了")).toBeVisible();
+      await expect(page.getByText("画面显示「已开始」")).toBeVisible();
       await expect(page.locator(".saved-list .is-update .result-label")).toHaveText("需要更新");
-      await expect(page.getByText("切削后体积减小")).toHaveCount(0);
+      await expect(page.getByText("切削后工件变小", { exact: true })).toHaveCount(0);
       const todoLabels = await page.locator(".saved-list .result-label").allTextContents();
       expect(todoLabels.lastIndexOf("没通过")).toBeGreaterThanOrEqual(0);
       expect(todoLabels.lastIndexOf("没通过")).toBeLessThan(todoLabels.indexOf("需要更新"));
@@ -363,7 +364,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
         sessionStorage.setItem("workbench.author.now", "2026-11-13T12:00:00");
       });
       await page.goto("/plugin/runner");
-      await page.locator(".row-open", { hasText: "切削后体积减小" }).click();
+      await page.locator(".row-open", { hasText: "切削后工件变小" }).click();
       await expect(page.getByRole("list", { name: "以前的结果" })).toBeVisible();
       await expect(page.getByText("前后画面只留最近 30 次")).toBeVisible();
       const past = page.getByRole("list", { name: "以前的结果" }).getByRole("button");
@@ -534,6 +535,37 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByText("正在连上…")).toBeVisible();
       await expect(page.getByRole("button", { name: "下一步" })).toBeDisabled();
       await shot(page, `connect-connecting-1100-${theme}`);
+    });
+
+    test("1100px list names, failure sentences, delete, and a paused row", async ({ page }) => {
+      await page.setViewportSize({ width: 1100, height: 900 });
+      await page.addInitScript(() => {
+        sessionStorage.setItem("workbench.author.samples", "1");
+        sessionStorage.setItem("workbench.author.now", "2026-11-13T10:00:00");
+      });
+      await page.goto("/plugin/runner");
+      await expect(page.getByText("切削后旁边的牙保持不变")).toBeVisible();
+      await expect(page.getByText("这次旁边的牙也变了")).toBeVisible();
+      await expect(page.getByText("每天重跑已暂停")).toBeVisible();
+      expect(await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth)).toBeLessThanOrEqual(1);
+      await shot(page, `list-names-1100-${theme}`);
+      await page.getByRole("group", { name: "筛选" }).getByRole("button", { name: "没通过" }).click();
+      await expect(page.getByText("这次工件没有变小")).toBeVisible();
+      await expect(page.getByText("这次旁边的牙也变了")).toBeVisible();
+      await shot(page, `failed-row-1100-${theme}`);
+      await page.getByRole("button", { name: "全部" }).click();
+      await page.locator(".saved-list li.is-paused").getByRole("button", { name: "更多" }).click();
+      await expect(page.getByRole("menuitem", { name: "恢复每天重跑" })).toBeVisible();
+      await shot(page, `paused-row-1100-${theme}`);
+      await page.keyboard.press("Escape");
+      await page.getByRole("button", { name: "更多" }).first().click();
+      await page.getByRole("menuitem", { name: "删除" }).click();
+      await expect(page.getByRole("dialog", { name: "确认删除" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "留下" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "删掉" })).toBeVisible();
+      await shot(page, `delete-confirm-1100-${theme}`);
+      await page.keyboard.press("Escape");
+      await expect(page.getByRole("dialog", { name: "确认删除" })).toHaveCount(0);
     });
   });
 }

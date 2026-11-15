@@ -63,6 +63,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [shown, setShown] = useState(0);
   const [stopped, setStopped] = useState(false);
   const [library, setLibrary] = useState<SavedTest[]>(() => (readSamples() ? sampleLibrary() : []));
+  const [removed, setRemoved] = useState<SavedTest | null>(null);
   const [opened, setOpened] = useState<SavedTest | null>(null);
   const [relaunchNote, setRelaunchNote] = useState("");
   const [dailyAt, setDailyAt] = useState("09:00");
@@ -202,6 +203,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
 
   const saveAndSchedule = () => {
     if (!draft || !demo) return;
+    const problem = findings.find((item) => !item.ok)?.sentence ?? "有一项没有达到预期。";
     setLibrary([{
       id: draft.id,
       name: draft.name,
@@ -213,7 +215,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
       appId: picked?.id ?? "sample",
       appName: picked?.name ?? sampleAppName,
       weekdays,
-      history: [{ at: new Date().toISOString(), outcome: demo.passed ? "pass" : "fail", reason: demo.passed ? "通过" : "没通过", image: true }],
+      history: [{ at: new Date().toISOString(), outcome: demo.passed ? "pass" : "fail", reason: demo.passed ? "通过" : problem, image: true }],
     }, ...library.filter((item) => item.id !== draft.id)]);
     setScheduled(false);
     setStepIndex(3);
@@ -260,7 +262,17 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
           onRun={(item) => openSaved(item, true)}
           onRename={(id, name) => setLibrary((items) => items.map((item) => item.id === id ? { ...item, name } : item))}
           onPause={(id) => setLibrary((items) => items.map((item) => item.id === id ? { ...item, paused: !item.paused } : item))}
-          onDelete={(id) => setLibrary((items) => items.filter((item) => item.id !== id))}
+          onDelete={(id) => {
+            const found = library.find((item) => item.id === id);
+            if (found) setRemoved(found);
+            setLibrary((items) => items.filter((item) => item.id !== id));
+          }}
+          removed={removed}
+          onUndo={() => {
+            if (!removed) return;
+            setLibrary((items) => items.some((item) => item.id === removed.id) ? items : [removed, ...items]);
+            setRemoved(null);
+          }}
         />
       ) : null}
       {phase === "wizard" ? (
@@ -473,15 +485,17 @@ function rememberWizard(step: number, appId: string, goal: string) {
   }
 }
 
-function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, onDelete }: {
+function Home({ library, missedNote, removed, onNew, onOpen, onRun, onRename, onPause, onDelete, onUndo }: {
   library: SavedTest[];
   missedNote: string;
+  removed: SavedTest | null;
   onNew: () => void;
   onOpen: (item: SavedTest) => void;
   onRun: (item: SavedTest) => void;
   onRename: (id: string, name: string) => void;
   onPause: (id: string) => void;
   onDelete: (id: string) => void;
+  onUndo: () => void;
 }) {
   const [filter, setFilter] = useState<"all" | "todo" | "fail" | "update" | "pass">(readListFilter);
   const [menu, setMenu] = useState<string | null>(null);
@@ -539,19 +553,24 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
           ))}
         </div>
       ) : null}
+      {removed ? <p role="status">已删掉「{removed.name}」。<button type="button" className="text-btn" onClick={onUndo}>撤销</button></p> : null}
       {missedNote ? <p role="status">{missedNote}</p> : null}
       {visible.length === 0 ? <p>这个筛选下没有测试。点「全部」可以看全部。</p> : null}
       <ul className="saved-list">
         {visible.map((item) => {
           const outcome = listedOutcome(item);
+          const problem = rowProblem(item, outcome);
           const next = item.paused ? "每天重跑已暂停" : `下次 ${formatWhen(nextDailyInstant(item.dailyAt, readClock(), item.weekdays ?? allWeekdays), readClock())}`;
           return (
-            <li key={item.id} className={outcome === "fail" ? "is-fail" : outcome === "needs-update" ? "is-update" : ""}>
+            <li key={item.id} className={[outcome === "fail" ? "is-fail" : outcome === "needs-update" ? "is-update" : "", item.paused ? "is-paused" : ""].filter(Boolean).join(" ")}>
               <button type="button" className="row-open" onClick={() => onOpen(item)}>
-                <strong>{item.name}</strong>
+                <span className="row-title">
+                  <strong>{item.name}</strong>
+                  {problem ? <span className="row-problem">{problem}</span> : null}
+                </span>
                 <span className="result-label">{outcomeWord(outcome)}</span>
                 <span>上次 {formatWhen(new Date(item.lastRun))}</span>
-                <span>{next}</span>
+                <span className={item.paused ? "is-paused-note" : ""}>{next}</span>
               </button>
               <button type="button" className="btn" onClick={() => onRun(item)}>现在跑一次</button>
               <div className="more-menu">
@@ -560,7 +579,7 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
                   <div role="menu">
                     <button type="button" role="menuitem" onClick={() => { setRenaming(item); setRenameValue(item.name); setMenu(null); }}>重命名</button>
                     <button type="button" role="menuitem" onClick={() => { onPause(item.id); setMenu(null); }}>{item.paused ? "恢复每天重跑" : "暂停每天重跑"}</button>
-                    <button type="button" role="menuitem" onClick={() => { setRemoving(item); setMenu(null); }}>删除</button>
+                    <button type="button" role="menuitem" className="is-danger" onClick={() => { setRemoving(item); setMenu(null); }}>删除</button>
                   </div>
                 ) : null}
               </div>
@@ -582,10 +601,10 @@ function Home({ library, missedNote, onNew, onOpen, onRun, onRename, onPause, on
       ) : null}
       {removing ? (
         <div role="dialog" aria-label="确认删除">
-          <p>删除「{removing.name}」？删掉之后不能恢复。</p>
+          <p>删掉「{removing.name}」？这份测试和以前的结果会一起去掉。按「留下」或 Esc 还能留下。</p>
           <div className="wizard-actions">
-            <button type="button" className="btn" onClick={() => setRemoving(null)}>取消</button>
-            <button type="button" className="btn-accent" onClick={() => { onDelete(removing.id); setRemoving(null); }}>删除</button>
+            <button type="button" className="btn" onClick={() => setRemoving(null)}>留下</button>
+            <button type="button" className="btn-danger" onClick={() => { onDelete(removing.id); setRemoving(null); }}>删掉</button>
           </div>
         </div>
       ) : null}
@@ -1005,6 +1024,13 @@ function Rerecord({ appName, sentence, step, onAdvance, onSave }: {
 
 function listedOutcome(item: SavedTest): "pass" | "fail" | "needs-update" {
   return item.history.at(-1)?.outcome ?? (item.passed ? "pass" : "fail");
+}
+
+function rowProblem(item: SavedTest, outcome: "pass" | "fail" | "needs-update"): string | null {
+  if (outcome === "pass") return null;
+  const reason = item.history.at(-1)?.reason ?? "";
+  if (!reason || reason === "通过" || reason === "没通过" || reason === "需要更新") return null;
+  return reason;
 }
 
 function todoRank(outcome: "pass" | "fail" | "needs-update"): number {

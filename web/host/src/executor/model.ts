@@ -310,17 +310,17 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
     value.setHours(hour, minute, 0, 0);
     return value.toISOString();
   };
-  const rows: Array<[string, string, boolean, number, number, number, string, boolean]> = [
-    ["cut", "切削后体积减小", true, 0, 3, 26, "07:30", false],
-    ["tooth", "旁边的牙变了", false, 0, 2, 10, "08:00", false],
-    ["start", "点开始后有反应", true, 1, 18, 4, "09:00", false],
-    ["size", "工件没有变小", false, 1, 11, 2, "18:00", true],
-    ["path", "沿路径切一刀", true, 2, 9, 15, "07:30", false],
-    ["text", "画面文字不对", false, 3, 16, 40, "12:00", false],
-    ["keep", "邻件保持原样", true, 0, 1, 5, pastClock(now), false],
-    ["again", "再切一次仍变小", false, 4, 8, 8, "07:30", false],
+  const rows: Array<[string, string, boolean, number, number, number, string, boolean, string]> = [
+    ["cut", "切削后工件变小", true, 0, 3, 26, "07:30", false, ""],
+    ["tooth", "切削后旁边的牙保持不变", false, 0, 2, 10, "08:00", false, "这次旁边的牙也变了"],
+    ["start", "点开始后画面有反应", true, 1, 18, 4, "09:00", false, ""],
+    ["size", "切削后工件体积变小", false, 1, 11, 2, "18:00", true, "这次工件没有变小"],
+    ["path", "在画面里切一刀", true, 2, 9, 15, "07:30", false, ""],
+    ["text", "画面显示「已开始」", false, 3, 16, 40, "12:00", false, "第 2 步找不到「开始」按钮"],
+    ["keep", "切削后旁边的物体保持原样", true, 0, 1, 5, pastClock(now), false, ""],
+    ["again", "再切一次后工件继续变小", false, 4, 8, 8, "07:30", false, "这次再切，工件没有变小"],
   ];
-  return rows.map(([id, name, passed, daysAgo, hour, minute, dailyAt, paused]) => ({
+  return rows.map(([id, name, passed, daysAgo, hour, minute, dailyAt, paused, problem]) => ({
     id, name, passed, lastRun: last(daysAgo, hour, minute), dailyAt, paused,
     script: passed ? fixedReplayScript : failingReplayScript,
     appId: "sample",
@@ -331,8 +331,8 @@ export function sampleLibrary(now = new Date()): SavedTestRecord[] {
       { at: last(1, 9, 0), outcome: "needs-update", reason: "第 2 步找不到「开始」按钮", image: true },
       { at: last(0, 3, 26), outcome: "pass", reason: "通过", image: true },
     ] : id === "text" ? [
-      { at: last(daysAgo, hour, minute), outcome: "needs-update", reason: "第 2 步找不到「开始」按钮", image: true },
-    ] : [{ at: last(daysAgo, hour, minute), outcome: passed ? "pass" : "fail", reason: passed ? "通过" : "没通过", image: true }],
+      { at: last(daysAgo, hour, minute), outcome: "needs-update", reason: problem, image: true },
+    ] : [{ at: last(daysAgo, hour, minute), outcome: passed ? "pass" : "fail", reason: passed ? "通过" : problem, image: true }],
   }));
 }
 
@@ -614,7 +614,7 @@ export function repairPrompt(dom: string, failed: ExecutorStep, diff = "counts.d
 }
 
 export const fixedReplayScript = [
-  '{"schema":"workbench.test-executor.authored-script.v1","schemaVersion":1,"id":"CASE-AUTHORED","name":"切削后体积减小","steps":[',
+  '{"schema":"workbench.test-executor.authored-script.v1","schemaVersion":1,"id":"CASE-AUTHORED","name":"切削后工件变小，旁边的牙不变","steps":[',
   '{"id":"wait-start","type":"web","action":"wait-for","target":{"text":"开始"},"allowFallback":false},',
   '{"id":"start","type":"web","action":"click","target":{"text":"开始"},"expected":"已开始","allowFallback":false},',
   '{"id":"status","type":"web","action":"assert-text","target":{"selector":"#status"},"expected":"已开始","allowFallback":false},',
