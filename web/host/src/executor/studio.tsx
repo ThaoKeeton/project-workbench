@@ -3,6 +3,7 @@ import "./studio.css";
 import {
   authorMessages,
   appFromFileName,
+  appStillOpen,
   authorPrompt,
   caseFromScript,
   compatiblePresets,
@@ -720,16 +721,34 @@ function AppStep({ picked, connection, recent, installed, launch, onChoose, onCa
   onNext: () => void;
 }) {
   const [confirm, setConfirm] = useState(false);
+  const [waitSelf, setWaitSelf] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const keepRef = useRef<HTMLButtonElement>(null);
   const connected = connection.state === "connected" && !launch;
   useEffect(() => {
-    if (!confirm) return;
+    if (!confirm && !waitSelf) return;
     const onKey = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setConfirm(false);
+      if (event.key === "Escape") {
+        setConfirm(false);
+        setWaitSelf(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [confirm]);
+  }, [confirm, waitSelf]);
+  useEffect(() => {
+    if (confirm || waitSelf) keepRef.current?.focus();
+  }, [confirm, waitSelf]);
+  useEffect(() => {
+    if (!waitSelf || !picked) return;
+    const timer = window.setInterval(() => {
+      if (!appStillOpen(picked)) {
+        setWaitSelf(false);
+        onChoose(picked);
+      }
+    }, 400);
+    return () => window.clearInterval(timer);
+  }, [waitSelf, picked, onChoose]);
   return (
     <div className="wizard-card" aria-label="选择程序">
       <h2>选择要测的程序</h2>
@@ -750,15 +769,18 @@ function AppStep({ picked, connection, recent, installed, launch, onChoose, onCa
       </ul>
       {launch ? null : (
         <>
-          <p role="status">{connection.status}</p>
-          {connection.detail ? <p>{connection.detail}</p> : null}
+          <p role="status">{waitSelf && picked ? `请先自己关掉「${picked.name}」。关掉后这里会接着打开。` : connection.status}</p>
+          {connection.detail && !waitSelf ? <p>{connection.detail}</p> : null}
         </>
       )}
       {connected ? <WindowPreview objects={connection.objects} /> : null}
-      {connection.state === "busy" && picked && !confirm ? (
-        <div className="wizard-actions is-main">
-          <button type="button" className="btn-accent" onClick={() => setConfirm(true)}>关掉并重新打开</button>
-        </div>
+      {connection.state === "busy" && picked && !confirm && !waitSelf ? (
+        <>
+          <p className="loss-note">关掉时，这个程序里没保存的内容会丢。</p>
+          <div className="wizard-actions is-main">
+            <button type="button" className="btn-accent" onClick={() => setConfirm(true)}>关掉并重新打开</button>
+          </div>
+        </>
       ) : null}
       {connection.state === "timeout" && picked ? (
         <div className="wizard-actions is-main">
@@ -770,13 +792,19 @@ function AppStep({ picked, connection, recent, installed, launch, onChoose, onCa
           <button type="button" className="btn-accent" onClick={() => onChoose(null)}>换一个程序</button>
         </div>
       ) : null}
-      {confirm && picked ? (
-        <div role="dialog" aria-label="确认重新打开">
-          <p>关掉并重新打开「{picked.name}」？正在用的窗口会关掉。</p>
-          <div className="wizard-actions">
-            <button type="button" className="btn" onClick={() => setConfirm(false)}>取消</button>
-            <button type="button" className="btn-accent" onClick={() => { setConfirm(false); onChoose(picked, { relaunch: true }); }}>关掉并重新打开</button>
+      {connection.state === "busy" && picked && confirm && !waitSelf ? (
+        <div className="inline-confirm">
+          <p className="loss-note">关掉时，这个程序里没保存的内容会丢。</p>
+          <div className="wizard-actions is-main">
+            <button ref={keepRef} type="button" className="btn-accent" onClick={() => setConfirm(false)}>先不关</button>
+            <button type="button" className="btn" onClick={() => { setConfirm(false); onChoose(picked, { relaunch: true }); }}>关掉并重新打开</button>
+            <button type="button" className="btn" onClick={() => { setConfirm(false); setWaitSelf(true); }}>我自己关掉后再继续</button>
           </div>
+        </div>
+      ) : null}
+      {connection.state === "busy" && picked && waitSelf ? (
+        <div className="wizard-actions is-main">
+          <button ref={keepRef} type="button" className="btn-accent" onClick={() => setWaitSelf(false)}>先不关</button>
         </div>
       ) : null}
       {connected || connection.state === "empty" ? (

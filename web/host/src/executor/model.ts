@@ -407,6 +407,16 @@ export function appFromFileName(fileName: string): TestApp | null {
   return { id: "picked", name: stem, fileName: trimmed, kind: "electron", running: "free", objects: null, recent: false };
 }
 
+/** The person closed a program that was already open. The preview watches this flag. */
+export function userReleasedRunningApp(): boolean {
+  try { return window.sessionStorage.getItem("workbench.author.released") === "1"; }
+  catch { return false; }
+}
+
+export function appStillOpen(app: TestApp): boolean {
+  return app.running === "busy" && !userReleasedRunningApp();
+}
+
 /** What the tester sees after a pick. The debugging port and profile stay inside the runner. */
 export function connectApp(app: TestApp | null, options: { attempt?: number; relaunch?: boolean } = {}): ConnectView {
   if (!app) {
@@ -419,7 +429,7 @@ export function connectApp(app: TestApp | null, options: { attempt?: number; rel
   if (app.running === "timeout" && attempt < 2) {
     return { state: "timeout", status: `没能打开「${app.name}」。`, detail: "可能是程序没开，或这一次太慢。点「再试一次」。", objects: null };
   }
-  if (app.running === "busy" && !options.relaunch) {
+  if (appStillOpen(app) && !options.relaunch) {
     return { state: "busy", status: `「${app.name}」正在开着。`, detail: "要接着测，需要先关掉它，再由这里重新打开。", objects: null };
   }
   const objects = app.objects;

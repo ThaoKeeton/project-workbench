@@ -225,9 +225,11 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await page.getByRole("button", { name: "已经开着的样品" }).click();
       await expect(page.getByRole("status")).toHaveText("「已经开着的样品」正在开着。");
       await expect(page.getByRole("button", { name: "关掉并重新打开" })).toBeVisible();
+      await expect(page.getByText("关掉时，这个程序里没保存的内容会丢。")).toBeVisible();
       await shot(page, `wizard-busy-${theme}`);
       await page.getByRole("button", { name: "关掉并重新打开" }).click();
-      await page.getByRole("dialog", { name: "确认重新打开" }).getByRole("button", { name: "关掉并重新打开" }).click();
+      await expect(page.getByRole("button", { name: "先不关" })).toBeFocused();
+      await page.getByRole("button", { name: "关掉并重新打开" }).click();
       await expect(page.getByRole("status")).toHaveText("已经打开「已经开着的样品」。");
       await page.getByRole("button", { name: "记事本" }).click();
       await expect(page.getByRole("status")).toHaveText("「记事本」还不能自动测试。");

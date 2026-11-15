@@ -158,6 +158,8 @@
   width: 100%;
 }
 .wizard-actions.is-main { justify-content: flex-start; }
+.loss-note { width: 100%; margin: 4px 0 0; color: var(--warn); }
+.inline-confirm { display: grid; gap: 8px; width: 100%; }
 .wizard-actions.is-main .btn-accent { min-width: 160px; min-height: 40px; }
 .key-ask, .key-setup { display: grid; gap: 12px; width: 100%; }
 .key-setup .filter-row { flex-wrap: wrap; }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it } from "vitest";
 import { aiBaseStorageKey, aiKeyStorageKey, appFromFileName, authorKeyReady, authorPrompt, capStorageKey, caseFromScript, compatiblePresets, connectApp, connectChoice, describeStep, failingReplayScript, fixedReplayScript, textMismatch, volumeFailingReplayScript, dismissHint, formatDailySummary, formatWhen, hintDismissed, hintDismissedKey, humanFindings, keepRecentImages, mismatch, missedBecauseOff, nextDailyInstant, outcomeOf, outcomeWord, pageChangedFindings, plainPlan, probeAi, readAiSettings, readAuthoredScript, readDailyCap, recordFromDom, repairPrompt, replay, resultSentence, sampleAppName, sampleApps, sampleDom, sampleLibrary, sceneObjectCount, sceneSnapshotText, seedCases, shouldToast, stuckStepSentence, writeAiSettings, writeDailyCap } from "./model";
@@ -161,11 +161,14 @@ describe("executor wizard", () => {
     await user.click(screen.getByRole("button", { name: "新建一个测试" }));
     await user.click(screen.getByRole("button", { name: "已经开着的样品" }));
     expect(screen.getByRole("status").textContent).toBe("「已经开着的样品」正在开着。");
+    expect(screen.getByText("关掉时，这个程序里没保存的内容会丢。")).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
-    expect(screen.getByRole("dialog", { name: "确认重新打开" })).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.activeElement).toBe(screen.getByRole("button", { name: "先不关" }));
+    await user.click(screen.getByRole("button", { name: "先不关" }));
+    expect(screen.queryByRole("button", { name: "我自己关掉后再继续" })).toBeNull();
     await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
-    await user.click(within(screen.getByRole("dialog", { name: "确认重新打开" })).getByRole("button", { name: "关掉并重新打开" }));
+    await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
     expect(screen.getByRole("status").textContent).toContain("已经打开「已经开着的样品」");
     await user.click(screen.getByRole("button", { name: "记事本" }));
     expect(screen.getByRole("status").textContent).toContain("还不能自动测试");
@@ -173,6 +176,19 @@ describe("executor wizard", () => {
     expect(screen.getByRole("status").textContent).toContain("没能打开「连不上的样品」");
     await user.click(screen.getByRole("button", { name: "再试一次" }));
     expect(screen.getByRole("status").textContent).toContain("已经打开「连不上的样品」");
+  });
+
+  it("continues after the person closes the open program themselves", async () => {
+    const user = userEvent.setup();
+    render(<ExecutorStudio />);
+    await user.click(screen.getByRole("button", { name: "新建一个测试" }));
+    await user.click(screen.getByRole("button", { name: "已经开着的样品" }));
+    await user.click(screen.getByRole("button", { name: "关掉并重新打开" }));
+    await user.click(screen.getByRole("button", { name: "我自己关掉后再继续" }));
+    expect(screen.getByRole("status").textContent).toBe("请先自己关掉「已经开着的样品」。关掉后这里会接着打开。");
+    expect(screen.queryByRole("button", { name: "关掉并重新打开" })).toBeNull();
+    sessionStorage.setItem("workbench.author.released", "1");
+    await waitFor(() => expect(screen.getByRole("status").textContent).toContain("已经打开「已经开着的样品」"));
   });
 
   it("filters, renames, pauses, and deletes a longer list", async () => {
@@ -465,6 +481,9 @@ describe("executor script", () => {
     expect(connectChoice("notes.txt").ok).toBe(false);
     expect(connectChoice("记事本.exe").ok).toBe(false);
     expect(connectApp(sampleApps().find((item) => item.id === "busy") ?? null).state).toBe("busy");
+    sessionStorage.setItem("workbench.author.released", "1");
+    expect(connectApp(sampleApps().find((item) => item.id === "busy") ?? null).state).toBe("connected");
+    sessionStorage.removeItem("workbench.author.released");
     expect(connectApp(appFromFileName("连不上的样品.exe"), { attempt: 2 }).state).toBe("connected");
     expect(sceneObjectCount(sceneSnapshotText)).toBe(2);
     expect(await probeAi({ key: "short", fake: "pass" })).toMatchObject({ ok: false });
