@@ -87,6 +87,8 @@ public sealed class LaunchedTarget : IAsyncDisposable
 {
     private readonly Process _process;
     private readonly string? _profile;
+    private readonly StringBuilder _startupNote = new();
+    private readonly object _noteGate = new();
 
     public LaunchedTarget(Process process, int port, string? profile = null)
     {
@@ -96,6 +98,31 @@ public sealed class LaunchedTarget : IAsyncDisposable
     }
 
     public int Port { get; }
+
+    public bool HasExited
+    {
+        get
+        {
+            try { return _process.HasExited; }
+            catch (InvalidOperationException) { return true; }
+        }
+    }
+
+    public string StartupNote
+    {
+        get { lock (_noteGate) return _startupNote.ToString(); }
+    }
+
+    internal void AddStartupNote(string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line)) return;
+        lock (_noteGate)
+        {
+            if (_startupNote.Length > 0) _startupNote.Append(' ');
+            _startupNote.Append(line.Trim());
+            if (_startupNote.Length > 300) _startupNote.Remove(0, _startupNote.Length - 300);
+        }
+    }
 
     public async ValueTask DisposeAsync()
     {
@@ -157,7 +184,8 @@ public static class ElectronTargetLauncher
         foreach (var pair in application.Environment ?? new Dictionary<string, string>())
             start.Environment[pair.Key] = pair.Value;
         var process = Process.Start(start) ?? throw new ExecutorDataException(ExecutorError.LaunchFailed);
-        _ = Drain(process);
+        var launched = new LaunchedTarget(process, port, profile);
+        _ = Drain(process, launched.AddStartupNote);
         var ready = await WaitAsync(port, cancellationToken);
         if (!ready)
         {
@@ -169,14 +197,23 @@ public static class ElectronTargetLauncher
             }
             throw new ExecutorDataException(ExecutorError.LaunchFailed);
         }
-        return new LaunchedTarget(process, port, profile);
+        return launched;
     }
 
-    private static async Task Drain(Process process)
+    private static async Task Drain(Process process, Action<string?> note)
     {
+        async Task Read(StreamReader reader)
+        {
+            while (true)
+            {
+                var line = await reader.ReadLineAsync();
+                if (line is null) return;
+                note(line);
+            }
+        }
         try
         {
-            await Task.WhenAll(process.StandardOutput.ReadToEndAsync(), process.StandardError.ReadToEndAsync());
+            await Task.WhenAll(Read(process.StandardOutput), Read(process.StandardError));
         }
         catch (Exception error) when (error is IOException or ObjectDisposedException)
         {
@@ -263,13 +300,9 @@ public sealed class CdpWebSession : IWebSession
                 }
                 await Task.Delay(100, cancellationToken);
             }
-            // The port answered, but the only match was a blank or devtools page with the same title.
-            // Return the session so the run can say what was open, instead of waiting out every step.
-            if (session._sawHttpList)
-            {
-                session._startupFault = session.PageFault();
-                return session;
-            }
+            // The debugging port can answer before the window exists. Keep the process
+            // and let the hook wait for the file page; do not fail the run at this deadline.
+            if (session._sawHttpList) return session;
             session.ReleaseSocket();
             return null;
         }
@@ -372,8 +405,11 @@ public sealed class CdpWebSession : IWebSession
         using var response = await _http.GetAsync(VersionUrl("/json/list"), cancellationToken);
         var pages = JsonSerializer.Deserialize<List<CdpPage>>(await response.Content.ReadAsStringAsync(cancellationToken), Json) ?? [];
         _sawHttpList = true;
-        var listed = pages.Where(page => page.Type is null or "page").ToArray();
-        _seenPages = string.Join("；", listed.Select(page => (string.IsNullOrEmpty(page.Title) ? "未命名" : page.Title) + " " + (string.IsNullOrEmpty(page.Url) ? "无地址" : page.Url)));
+        var described = string.Join("；", pages.Select(page =>
+            (string.IsNullOrEmpty(page.Type) ? "页面" : page.Type) + " " +
+            (string.IsNullOrEmpty(page.Title) ? "未命名" : page.Title) + " " +
+            (string.IsNullOrEmpty(page.Url) ? "无地址" : page.Url)));
+        if (described.Length > 0) _seenPages = described;
         var page = Pick(pages, title, url);
         if (page?.WebSocketDebuggerUrl is not { Length: > 0 } socketUrl) return false;
         if (!IsLoopback(socketUrl)) throw new ExecutorDataException(ExecutorError.DebugPortMissing);
@@ -494,6 +530,25 @@ public sealed class CdpWebSession : IWebSession
     internal async Task InstallSceneHookAsync(bool reload, TimeSpan budget, CancellationToken cancellationToken)
     {
         if (_startupFault is not null) return;
+        var attachDeadline = DateTime.UtcNow.Add(budget);
+        while (_socket is not { State: WebSocketState.Open } && DateTime.UtcNow < attachDeadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            try
+            {
+                if (await ActivateAsync(_title, _url, cancellationToken)) break;
+            }
+            catch (Exception error) when (error is ExecutorDataException or WebSocketException or IOException or HttpRequestException or OperationCanceledException)
+            {
+                if (cancellationToken.IsCancellationRequested) throw;
+            }
+            await Task.Delay(100, cancellationToken);
+        }
+        if (_socket is not { State: WebSocketState.Open })
+        {
+            _startupFault = PageFault();
+            return;
+        }
         var deadline = DateTime.UtcNow.Add(budget);
         await TryDebuggerAsync(async () =>
         {
@@ -522,8 +577,11 @@ public sealed class CdpWebSession : IWebSession
 
     private string PageFault()
     {
-        if (_seenPages.Length == 0) return "要测的画面没有出现。程序没有留下可看的页面。";
-        return "要测的画面没有出现。现在开着的是：" + _seenPages + "。";
+        var note = _owned?.StartupNote;
+        var spoken = string.IsNullOrEmpty(note) ? "" : "程序说：" + note;
+        if (_owned?.HasExited == true) return "要测的程序自己退出了，画面没有留下。" + spoken;
+        if (_seenPages.Length == 0) return "要测的画面没有出现。程序没有留下可看的页面。" + spoken;
+        return "要测的画面没有出现。现在开着的是：" + _seenPages + "。" + spoken;
     }
 
     private static async Task TryDebuggerAsync(Func<Task> action, CancellationToken cancellationToken)
