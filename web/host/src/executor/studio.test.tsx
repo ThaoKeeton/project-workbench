@@ -537,6 +537,7 @@ describe("executor script", () => {
     expect(nextDailyInstant("07:30", now, [1]).getDay()).not.toBe(5);
     const noon = new Date(2026, 10, 13, 12, 0, 0);
     expect(missedBecauseOff(new Date(2026, 10, 13, 3, 26, 0), "07:30", [1, 2, 3, 4, 5, 6, 7], noon)).toBe(true);
+    expect(sampleLibrary(noon).some((item) => !item.paused && missedBecauseOff(new Date(item.lastRun), item.dailyAt, item.weekdays, noon))).toBe(true);
     expect(missedBecauseOff(new Date(2026, 10, 13, 8, 0, 0), "07:30", [1, 2, 3, 4, 5, 6, 7], noon)).toBe(false);
     expect(formatDailySummary({ ran: 8, passed: 7, failed: 1, needsUpdate: 0 })).toBe("今天跑了 8 个，7 个通过，1 个没通过");
     expect(formatDailySummary({ ran: 8, passed: 7, failed: 0, needsUpdate: 1 })).toBe("今天跑了 8 个，7 个通过，1 个需要更新");

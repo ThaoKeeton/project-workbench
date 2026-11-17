@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text.Json;
 using Workbench.Testing.Domain.OwnedLab;
@@ -114,7 +115,7 @@ internal sealed class NativeChecks(string output, string zipSha)
         }
         finally { await controller.StopAsync(); }
         using (File.Open(Path.Combine(scope.DataDirectory, "owned-lab-v1", "owner.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
-        using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        RequireHelperImageReleased(factory.HelperPath);
         var retirement = factory.Retirements.Single(); CheckReceipt(retirement, requireTarget: true);
         ValidateScenarioRetirement(scenario, run.State, run.ErrorCode, results: run.Events.Count(e => e.Kind == OwnedEventKind.StepResult), run.Events[^1].Retirement!, retirement);
         var results = run.Events.Where(e => e.Kind == OwnedEventKind.StepResult).Select(e => new { e.Sequence, e.Outcome, e.State, e.Identity, e.FrameSha, frameLength = 172854, calibration = true }).ToArray();
@@ -181,7 +182,7 @@ internal sealed class NativeChecks(string output, string zipSha)
             using (File.Open(Path.Combine(scope.DataDirectory, "owned-lab-v1", "owner.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
             leaseAvailable = true;
             phase = NativeFailurePhase.HelperLease; helperLeaseAvailable = false;
-            using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+            RequireHelperImageReleased(factory.HelperPath);
             helperLeaseAvailable = true;
             phase = NativeFailurePhase.FixturePolicy;
             var badWire = fixture is NativeFixture.BadFrame or NativeFixture.PartialHeader or NativeFixture.TruncatedInit or NativeFixture.ExtraInit or NativeFixture.OversizeInit or NativeFixture.CrossSessionAction or NativeFixture.OutOfOrderAction;
@@ -226,7 +227,7 @@ internal sealed class NativeChecks(string output, string zipSha)
         finally { factory.ReleaseSuspendedFixture(); await controller.StopAsync(); }
         var receipt = factory.Retirements.Single();
         Require(run.State == OwnedRunState.Cancelled && run.Events.All(e => e.Kind != OwnedEventKind.Started) && receipt.BrokerPid > 0 && receipt.BrokerExited && !receipt.WasResumed && receipt.TargetPid is null && receipt.ActiveProcesses == 0 && receipt.AllIoJoined && receipt.CallbacksJoined, "Actual suspended creation must retire after synchronous seal without ResumeThread");
-        using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        RequireHelperImageReleased(factory.HelperPath);
         Record(new { check = "NativeFailureMatrix", fixture = "SealedResume", succeeded = true, run.Execution.RunId, run.Execution.SessionId, run.Execution.InputSha, run.ExecutionSha, run.Execution.Helper, run.State, receipt, leaseAvailable = true, zipSha });
     }
 
@@ -259,9 +260,47 @@ internal sealed class NativeChecks(string output, string zipSha)
         await session.DisposeAsync(); await session.DisposeAsync();
         var receipt = factory.Retirements.Single();
         Require(receipt.BrokerExitCode == 0 && receipt.TargetExitCode == 0 && receipt.BrokerExited && receipt.TargetExited && receipt.ActiveProcesses == 0 && receipt.AllIoJoined && receipt.CallbacksJoined, "Invalid Closed fixture requires actual clean process exits and all retirement joins.");
-        using (File.Open(factory.HelperPath, FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
+        RequireHelperImageReleased(factory.HelperPath);
         using (File.Open(Path.Combine(scope.DataDirectory, "owned-lab-v1", "owner.lock"), FileMode.Open, FileAccess.ReadWrite, FileShare.None)) { }
         Record(new { check = "NativeFailureMatrix", fixture = "InvalidClosedZeroExit", succeeded = true, run.Execution.RunId, run.Execution.SessionId, run.Execution.InputSha, run.ExecutionSha, run.Execution.Helper, run.State, run.ErrorCode, receipt, repeatedRetirementFailureStable = true, disposalIdempotent = true, retirementReportCount = factory.Retirements.Count, leaseAvailable = true, zipSha });
+    }
+
+    // A signaled process handle does not mean this image can be opened exclusively yet.
+    // Windows may still hold the mapped image, and a scanner may have the file open.
+    // A live process of this exact image is a leaked helper and fails at once.
+    private static void RequireHelperImageReleased(string path)
+    {
+        var full = Path.GetFullPath(path);
+        var started = Stopwatch.StartNew();
+        while (true)
+        {
+            if (MappedHelper(full) is int owner) throw new InvalidOperationException($"Helper image is still mapped by process {owner}.");
+            try
+            {
+                using var released = File.Open(full, FileMode.Open, FileAccess.ReadWrite, FileShare.None);
+                return;
+            }
+            catch (IOException error) when (error.HResult == unchecked((int)0x80070020) && started.Elapsed < TimeSpan.FromSeconds(3))
+            {
+                Thread.Sleep(20);
+            }
+        }
+    }
+
+    private static int? MappedHelper(string fullPath)
+    {
+        foreach (var process in Process.GetProcessesByName(Path.GetFileNameWithoutExtension(fullPath)))
+        {
+            try
+            {
+                var image = process.MainModule?.FileName;
+                if (image is not null && string.Equals(Path.GetFullPath(image), fullPath, StringComparison.OrdinalIgnoreCase)) return process.Id;
+            }
+            catch (System.ComponentModel.Win32Exception) { /* A protected process is not this helper image. */ }
+            catch (InvalidOperationException) { /* The process exited while it was being named. */ }
+            finally { process.Dispose(); }
+        }
+        return null;
     }
 
     private sealed class TrackingFactory(IOwnedDriverFactory inner) : IOwnedDriverFactory

@@ -74,7 +74,7 @@ export function ExecutorStudio({ complete, stepDelay = 160 }: { complete?: Scrip
   const [findings, setFindings] = useState<Finding[]>([]);
   const [shown, setShown] = useState(0);
   const [stopped, setStopped] = useState(false);
-  const [library, setLibrary] = useState<SavedTest[]>(() => (readSamples() ? sampleLibrary() : []));
+  const [library, setLibrary] = useState<SavedTest[]>(() => (readSamples() ? sampleLibrary(readClock()) : []));
   const [removed, setRemoved] = useState<SavedTest | null>(null);
   const [opened, setOpened] = useState<SavedTest | null>(null);
   const [relaunchNote, setRelaunchNote] = useState("");
@@ -664,7 +664,7 @@ function Home({ library, missedNote, removed, onNew, onOpen, onRun, onRename, on
                   </span>
                   <span className="row-meta">
                     <span className="result-label">{outcomeWord(outcome)}</span>
-                    <span>上次 {formatWhen(new Date(item.lastRun))}</span>
+                    <span>上次 {formatWhen(new Date(item.lastRun), readClock())}</span>
                     <span aria-hidden="true">·</span>
                     <span className={item.paused ? "is-paused-note" : ""}>{item.paused ? "每天重跑已暂停" : `下次 ${when}`}</span>
                   </span>
