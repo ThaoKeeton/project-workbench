@@ -94,18 +94,25 @@ internal sealed partial class MainWindow
         if (_workspace is null || _busy || _closing || _shutdownPending) return;
         _busy = true;
         var settled = BeginShellOperation();
-        _content.IsEnabled = false;
-        _navigation.IsEnabled = false;
-        if (_workspaceMenu is not null) _workspaceMenu.IsEnabled = false;
-        if (_workspaceSelector is not null) _workspaceSelector.IsEnabled = false;
-        _body.Content = ScrollPage(Ui.Page("正在打开项目", "正在保存上下文并等待已知插件工作安全结束…"));
+        var leftRaisingEvent = false;
         try
         {
             if (_themePreferences?.IsDirty == true)
                 await _workspace.RunCurrentAsync((runtime, _, _) => OnUiAsync(() => FlushThemeAsync(runtime)));
+            // Close admission before this method yields. The project selector raises
+            // SelectionChanged while it is still in the live tree; disabling that ComboBox
+            // or replacing the page before the native event returns makes WinUI fail-fast
+            // with 0xE0464645 and never raises Application.UnhandledException.
+            var pending = operation();
+            await LeaveRaisingEventAsync();
+            leftRaisingEvent = true;
+            if (_closing || _shutdownPending)
+            {
+                await pending;
+                return;
+            }
             DetachPluginViews(); // Only after accepted preferences are durable; clears credential drafts.
-            _body.Content = ScrollPage(Ui.Page("正在打开项目", "正在保存上下文并等待已知插件工作安全结束…"));
-            var pending = operation(); // Admission closes synchronously before this first await.
+            ShowProjectTransition();
             var result = await pending;
             RefreshWorkspace();
             if (!result.Succeeded)
@@ -122,6 +129,11 @@ internal sealed partial class MainWindow
         }
         catch (Exception error)
         {
+            if (!leftRaisingEvent)
+            {
+                try { await LeaveRaisingEventAsync(); }
+                catch (InvalidOperationException) { /* The dispatcher is already gone. */ }
+            }
             RefreshWorkspace();
             if (!_workspace.CanUseCurrentRuntime) ShowWorkspaceRecovery();
             Notice("项目操作未完成", _themePreferences?.IsDirty == true
@@ -132,6 +144,23 @@ internal sealed partial class MainWindow
         {
             CompleteShellOperation(settled);
         }
+    }
+
+    private void ShowProjectTransition()
+    {
+        _content.IsEnabled = false;
+        _navigation.IsEnabled = false;
+        if (_workspaceMenu is not null) _workspaceMenu.IsEnabled = false;
+        if (_workspaceSelector is not null) _workspaceSelector.IsEnabled = false;
+        _body.Content = ScrollPage(Ui.Page("正在打开项目", "正在保存上下文并等待已知插件工作安全结束…"));
+    }
+
+    private Task LeaveRaisingEventAsync()
+    {
+        var settled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(() => settled.TrySetResult()))
+            settled.TrySetException(new InvalidOperationException("ProjectSwitchUiDeferred"));
+        return settled.Task;
     }
 
     private async Task ShowProjectNameDialogAsync(bool create)

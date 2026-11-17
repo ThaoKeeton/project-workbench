@@ -162,6 +162,8 @@ internal static class NativeWorkspaceProbe
 
         // Do not yield to TextChanged, autosave, rendering or a clean-status wait between the
         // real TextBox accepting the value and the native selector closing admission.
+        // The shell closes admission inside SelectionChanged, then defers disabling the
+        // selector and replacing its page until that native event has returned.
         var contextPage = await window.SmokeNavigateAsync("context");
         var contextEditor = Find<TextBox>(contextPage, "项目上下文编辑器");
         contextEditor.Text = ImmediateSwitchContext;
