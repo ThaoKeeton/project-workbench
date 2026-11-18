@@ -106,6 +106,10 @@ function pluginsBody() {
         ],
         uiPath: "/plugins/test-cases",
       },
+      { id: "com.projectworkbench.upcam-standup.v2", name: "UPCAM 站会日报", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/upcam" },
+      { id: "com.projectworkbench.dingtalk-insights.v2", name: "钉钉 Insights", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/ding" },
+      { id: "com.projectworkbench.testing-design.v2", name: "测试设计", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/test" },
+      { id: "com.projectworkbench.test-executor", name: "自动测试", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/runner" },
     ],
   };
 }
@@ -263,7 +267,7 @@ const server = createServer(async (request, response) => {
     return sendJson(response, 200, { schema: "workbench.ui-theme.v2.preview", schemaVersion: 2, setting: state.themeSetting });
   }
   if (request.method === "GET" && url.pathname === "/api/v2/ui/desk") {
-    return sendJson(response, 200, { schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, ...state.desk });
+    return sendJson(response, 200, { schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, recovered: false, ...state.desk });
   }
   if (request.method === "PUT" && url.pathname === "/api/v2/ui/desk") {
     const body = JSON.parse(await readBody(request));
@@ -276,7 +280,7 @@ const server = createServer(async (request, response) => {
     if (touch !== null && !known.includes(touch)) return sendJson(response, 400, { error: "InvalidDesk" });
     const recent = touch ? [{ id: touch, at: new Date().toISOString() }, ...state.desk.recent.filter((item) => item.id !== touch)].slice(0, 8) : state.desk.recent;
     state.desk = { pinned, recent };
-    return sendJson(response, 200, { schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, ...state.desk });
+    return sendJson(response, 200, { schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, recovered: false, ...state.desk });
   }
   if (request.method === "PUT" && url.pathname === "/api/v2/ui/theme") {
     const body = JSON.parse(await readBody(request));

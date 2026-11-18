@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
 import { ApiClient, defaultDesk, readSessionToken, type Desk, type Diagnostics, type Info, type PluginItem, type Projects } from "./api";
-import { deviceLabel, devices, pinnedPlugins, type DeviceId } from "./catalog";
+import { deviceLabel, devices, pinnedPlugins, pluginStateLabel, shellPluginId, type DeviceId } from "./catalog";
 import { CommandPalette, HomePage } from "./launcher";
 import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
 import { Confirm } from "./market";
@@ -31,6 +31,7 @@ export function App() {
   const [projectOpen, setProjectOpen] = useState(false);
   const [desk, setDesk] = useState<Desk>(defaultDesk);
   const [notice, setNotice] = useState("");
+  const [retryDesk, setRetryDesk] = useState<{ pinned: string[]; touch?: string; success: string } | null>(null);
   const [confirm, setConfirm] = useState<{ title: string; body: string; onConfirm: () => void } | null>(null);
   const [restore, setRestore] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
@@ -41,10 +42,11 @@ export function App() {
       client.projects(),
       client.plugins(),
       client.diagnostics(),
-      client.desk().catch(() => defaultDesk),
+      client.desk().catch(() => ({ ...defaultDesk, recovered: true })),
     ]);
     setError("");
     setDesk(nextDesk);
+    if (nextDesk.recovered) setNotice("固定和最近打开读不出来，已先按这台电脑上的插件显示。再固定一次会重新记下。");
     setSnapshot((current) => ({ info, projects, plugins, diagnostics, channel: current?.channel ?? "未连接" }));
   }, [client]);
 
@@ -107,20 +109,54 @@ export function App() {
     client.saveTheme(next).catch(() => undefined);
   };
 
-  const rememberOpen = (id: string) => {
-    const pinned = desk.pinned;
-    client.saveDesk(pinned, id).then(setDesk).catch(() => setNotice("这次打开没能记下来。左侧固定和最近打开还是上次的。"));
+  const saveDesk = (pinned: string[], touch: string | undefined, success: string) => {
+    client.saveDesk(pinned, touch).then((saved) => {
+      setDesk(saved);
+      setRetryDesk(null);
+      if (success) setNotice(success);
+    }).catch(() => {
+      setRetryDesk({ pinned, touch, success });
+      setNotice(touch ? "这次打开没能记下来。左侧固定和最近打开还是上次的。" : "没能记下这次改动。左侧还是上次的。");
+    });
   };
 
+  const rememberOpen = (id: string) => {
+    saveDesk(desk.pinned, id, "");
+  };
+
+  const locals = (snapshot?.plugins ?? []).flatMap((plugin) => {
+    if (!plugin.uiPath) return [];
+    const shellId = shellPluginId(plugin.uiPath);
+    const known = shellId ? pinnedPlugins.find((item) => item.id === shellId) : undefined;
+    return [{
+      id: shellId ?? plugin.id,
+      name: plugin.name,
+      icon: known?.icon ?? "folder" as const,
+      hint: known?.hint ?? plugin.version,
+      loaded: plugin.loaded,
+      state: pluginStateLabel(plugin.loaded, plugin.uiPath),
+      href: plugin.uiPath,
+      pinnable: shellId !== null,
+    }];
+  });
+  const shown = locals.length > 0 ? locals : pinnedPlugins.map((plugin) => ({
+    ...plugin, loaded: true, state: "可以用", href: `/plugin/${plugin.id}`, pinnable: true,
+  }));
+  const unopened = (snapshot?.plugins ?? []).filter((plugin) => !plugin.uiPath).map((plugin) => plugin.name);
+
   const openPlugin = (id: string) => {
-    const plugin = pinnedPlugins.find((item) => item.id === id);
+    const plugin = shown.find((item) => item.id === id);
     if (!plugin) {
       setNotice("这个插件不在这台电脑上，没有打开。");
       return;
     }
+    if (!plugin.loaded) {
+      setNotice(`「${plugin.name}」没能载入，没有打开。`);
+      return;
+    }
     const go = () => {
-      rememberOpen(plugin.id);
-      void navigate(`/plugin/${plugin.id}`);
+      if (plugin.pinnable) rememberOpen(plugin.id);
+      void navigate(plugin.href);
     };
     const device = devices.find((item) => item.id === deviceId);
     if (device?.remote) {
@@ -136,11 +172,8 @@ export function App() {
 
   const changePin = (id: string, next: boolean) => {
     const pinned = next ? [...desk.pinned.filter((item) => item !== id), id] : desk.pinned.filter((item) => item !== id);
-    const plugin = pinnedPlugins.find((item) => item.id === id);
-    client.saveDesk(pinned).then((saved) => {
-      setDesk(saved);
-      setNotice(next ? `「${plugin?.name ?? "插件"}」已固定到左侧。关掉再打开还在。` : `「${plugin?.name ?? "插件"}」已从左侧拿下。`);
-    }).catch(() => setNotice("没能记下这次改动。左侧还是上次的。"));
+    const plugin = shown.find((item) => item.id === id);
+    saveDesk(pinned, undefined, next ? `「${plugin?.name ?? "插件"}」已固定到左侧。关掉再打开还在。` : `「${plugin?.name ?? "插件"}」已从左侧拿下。`);
   };
 
   const switchProject = (id: string) => {
@@ -183,6 +216,7 @@ export function App() {
       onOpenPlugin={openPlugin}
       onPickDevice={(id) => { setDeviceId(id); setDeviceOpen(false); }}
       onSwitchProject={switchProject}
+      plugins={shown.filter((plugin) => plugin.loaded)}
     />
   ) : null;
 
@@ -199,18 +233,19 @@ export function App() {
       onToggleDevice={() => { setDeviceOpen((open) => !open); setProjectOpen(false); }}
       onPickDevice={(id) => { setDeviceId(id); setDeviceOpen(false); }}
       onPair={() => { setDeviceOpen(false); void navigate("/devices"); }}
-      plugins={pinnedPlugins.filter((plugin) => desk.pinned.includes(plugin.id))}
+      plugins={shown.filter((plugin) => plugin.loaded && desk.pinned.includes(plugin.id))}
       onOpenPlugin={openPlugin}
       notice={notice}
+      onRetryNotice={retryDesk ? () => saveDesk(retryDesk.pinned, retryDesk.touch, retryDesk.success) : undefined}
       remote={remote}
     >
       {error && !snapshot ? <OfflinePage onRetry={() => { setError(""); void reload(); }} /> : null}
       {!snapshot && !error ? <p className="page">正在读取本机服务…</p> : null}
       {snapshot ? (
         <Routes>
-          <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} pinned={desk.pinned} recent={desk.recent} onOpen={openPlugin} onPin={changePin} />} />
-          <Route path="/market" element={<MarketPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} />} />
-          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} />} />
+          <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} plugins={shown} pinned={desk.pinned} recent={desk.recent} onOpen={openPlugin} onPin={changePin} unopened={unopened} />} />
+          <Route path="/market" element={<MarketPage onOpen={openPlugin} plugins={shown} />} />
+          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} plugins={shown} />} />
           <Route path="/market/updates" element={<UpdatesPage />} />
           <Route path="/market/import" element={<ImportPage onOpen={openPlugin} />} />
           <Route path="/market/:id" element={<MarketDetail />} />

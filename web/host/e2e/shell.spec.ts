@@ -167,7 +167,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
     test("market, installed, updates, and import", async ({ page }) => {
       await page.goto("/market");
       await expect(page.getByRole("heading", { name: "这台电脑上的插件" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "不在这台电脑上" }).first()).toBeVisible();
+      await expect(page.getByText("可以用").first()).toBeVisible();
       await shot(page, `market-${theme}`);
       await page.getByRole("link", { name: "已安装" }).click();
       await expect(page.getByRole("heading", { name: "已安装" })).toBeVisible();

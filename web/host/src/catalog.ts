@@ -137,6 +137,19 @@ export const marketItems: MarketItem[] = [
 
 export const categories = ["全部", "效率", "协作", "测试", "工具"] as const;
 
+export function shellPluginId(uiPath: string | null): PluginId | null {
+  if (uiPath === "/plugin/upcam") return "upcam";
+  if (uiPath === "/plugin/ding") return "ding";
+  if (uiPath === "/plugin/test") return "test";
+  if (uiPath === "/plugin/runner") return "runner";
+  return null;
+}
+
+export function pluginStateLabel(loaded: boolean, uiPath: string | null): string {
+  if (!uiPath) return "已发现，没有可以打开的页面";
+  return loaded ? "可以用" : "没能载入";
+}
+
 export function deviceLabel(id: DeviceId): string {
   const device = devices.find((item) => item.id === id);
   if (!device) return "本机 · 星河笔记本";

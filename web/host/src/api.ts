@@ -48,11 +48,13 @@ export type { Dashboard, Digest, InsightState, NoteFile };
 export type Desk = {
   pinned: string[];
   recent: Array<{ id: string; at: string }>;
+  recovered: boolean;
 };
 
 export const defaultDesk: Desk = {
   pinned: ["upcam", "ding", "test", "runner"],
   recent: [],
+  recovered: false,
 };
 
 export type CaseRow = { id: string; action: string; expected: string };

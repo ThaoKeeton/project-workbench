@@ -60,13 +60,14 @@ describe("launcher pages", () => {
     sessionStorage.removeItem("workbench.author.summary");
   });
 
-  it("browses the market, confirms an install, and opens the detail", async () => {
-    const user = userEvent.setup();
-    render(<MemoryRouter><MarketPage onOpen={vi.fn()} /></MemoryRouter>);
-    await user.click(screen.getByRole("tab", { name: "测试" }));
-    expect(screen.getByText("用例仓库")).toBeTruthy();
-    expect(screen.getAllByRole("button", { name: "不在这台电脑上" }).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("dialog")).toBeNull();
+  it("shows only plugins read from this computer", () => {
+    render(<MemoryRouter><MarketPage onOpen={vi.fn()} plugins={[
+      { id: "test", name: "测试设计", hint: "用例仓库与失败分流", icon: "flask", state: "可以用", loaded: true },
+      { id: "ding", name: "钉钉 Insights", hint: "看本周沟通热点", icon: "chat", state: "没能载入", loaded: false },
+    ]} /></MemoryRouter>);
+    expect(screen.getByText("可以用")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "没能载入" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "安装" })).toBeNull();
   });
 
   it("shows installed detail, updates, and the import checklist", async () => {
@@ -196,6 +197,6 @@ describe("launcher pages", () => {
     expect(screen.getByRole("heading", { name: "钉钉 Insights" })).toBeTruthy();
     cleanup();
     render(<MemoryRouter initialEntries={["/market/minutes"]}><Routes><Route path="/market/:id" element={<MarketDetail />} /></Routes></MemoryRouter>);
-    expect(screen.getByText("版本历史")).toBeTruthy();
+    expect(screen.getByRole("heading", { name: "没有这条网上介绍" })).toBeTruthy();
   });
 });

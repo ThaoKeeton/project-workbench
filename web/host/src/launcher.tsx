@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { devices, pinnedPlugins, type DeviceId, type IconName, type PluginId } from "./catalog";
+import { devices, pinnedPlugins, type DeviceId, type IconName } from "./catalog";
 import { formatDailySummary } from "./executor/model";
 import { Icon } from "./icons";
 import { Keycap } from "./shell";
@@ -21,14 +21,16 @@ export function HomePage({
   recent = [],
   onOpen,
   onPin,
+  unopened = [],
 }: {
   onOpenPalette: () => void;
   palette?: ReactNode;
-  plugins?: Array<{ id: PluginId; name: string; icon: IconName; hint: string }>;
+  plugins?: Array<{ id: string; name: string; icon: IconName; hint: string; loaded?: boolean; state?: string; pinnable?: boolean }>;
   pinned?: string[];
   recent?: Array<{ id: string; at: string }>;
   onOpen?: (id: string) => void;
   onPin?: (id: string, pinned: boolean) => void;
+  unopened?: string[];
 }) {
   const navigate = useNavigate();
   const recentPlugins = recent
@@ -75,16 +77,17 @@ export function HomePage({
             <ul className="catalog">
               {plugins.map((plugin) => {
                 const held = pinned.includes(plugin.id);
+                const loaded = plugin.loaded !== false;
                 return (
                   <li key={plugin.id}>
                     <button type="button" className="catalog-main" onClick={() => open(plugin.id)}>
                       <Icon name={plugin.icon} />
                       <span>
                         <strong>{plugin.name}</strong>
-                        <small>{plugin.hint}</small>
+                        <small>{plugin.state ?? plugin.hint}</small>
                       </span>
                     </button>
-                    {onPin ? (
+                    {onPin && loaded && plugin.pinnable !== false ? (
                       <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${plugin.name}` : `把 ${plugin.name} 固定到左侧`} onClick={() => onPin(plugin.id, !held)}>
                         {held ? "从左侧拿下" : "固定到左侧"}
                       </button>
@@ -93,6 +96,7 @@ export function HomePage({
                 );
               })}
             </ul>
+            {unopened.length > 0 ? <p>另外发现 {unopened.join("、")}，没有可以打开的页面。</p> : null}
           </section>
         </>
       )}
@@ -130,6 +134,7 @@ export function CommandPalette({
   onOpenPlugin,
   onPickDevice,
   onSwitchProject,
+  plugins = pinnedPlugins,
 }: {
   projects: Array<{ id: string; name: string }>;
   activeProjectId: string;
@@ -137,12 +142,13 @@ export function CommandPalette({
   onOpenPlugin: (id: string) => void;
   onPickDevice: (id: DeviceId) => void;
   onSwitchProject: (id: string) => void;
+  plugins?: Array<{ id: string; name: string }>;
 }) {
   const navigate = useNavigate();
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
   const entries = useMemo<PaletteEntry[]>(() => {
-    const pluginEntries: PaletteEntry[] = pinnedPlugins.map((plugin) => ({
+    const pluginEntries: PaletteEntry[] = plugins.map((plugin) => ({
       id: plugin.id,
       group: "插件",
       label: plugin.name,
@@ -168,7 +174,7 @@ export function CommandPalette({
     const all = [...pluginEntries, ...commands, ...deviceEntries, ...projectEntries];
     const needle = query.trim();
     return needle ? all.filter((item) => item.label.includes(needle) || item.group.includes(needle)) : all;
-  }, [activeProjectId, navigate, onOpenPlugin, onPickDevice, onSwitchProject, projects, query]);
+  }, [activeProjectId, navigate, onOpenPlugin, onPickDevice, onSwitchProject, plugins, projects, query]);
 
   useEffect(() => {
     setCursor(0);
