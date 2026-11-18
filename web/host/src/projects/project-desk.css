@@ -1,0 +1,17 @@
+.project-desk .stack { display: grid; gap: 8px; width: min(720px, 100%); margin-top: 20px; }
+.project-desk .current-name { margin: 0; font-size: 22px; font-weight: 500; }
+.project-desk .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.project-desk .hint { margin: 0; color: var(--text-secondary); }
+.project-desk .form-error { margin: 8px 0 0; color: var(--danger); }
+.project-desk textarea,
+.project-name-dialog input[type="text"] {
+  width: 100%;
+  margin-top: 8px;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text-primary);
+}
+.project-desk textarea { min-height: 96px; resize: vertical; }
+.project-desk .catalog button { flex: none; }
