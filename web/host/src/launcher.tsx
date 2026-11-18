@@ -60,7 +60,7 @@ export function HomePage({
               </ul>
             </section>
           ) : null}
-          <section className="column">
+          <section className="column recent-open">
             <h2 className="section">最近打开</h2>
             {recentPlugins.length === 0 ? <p>还没有打开过。从下面选一个，关掉再打开也会记得。</p> : (
               <div className="tiles">
@@ -70,7 +70,7 @@ export function HomePage({
               </div>
             )}
           </section>
-          <section className="column">
+          <section className="column local-plugins">
             <h2 className="section">这台电脑上的插件</h2>
             <ul className="catalog">
               {plugins.map((plugin) => {

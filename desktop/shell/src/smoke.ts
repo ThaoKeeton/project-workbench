@@ -5,8 +5,8 @@ export interface PageProbe {
   sessionPresent: boolean;
   rail: boolean;
   commandBar: boolean;
-  today: boolean;
-  recentTiles: boolean;
+  recentOpen: boolean;
+  localPlugins: boolean;
   wordmark: boolean;
   projectContext: boolean;
   builtins: boolean;
@@ -47,8 +47,8 @@ export function previewProbeScript(): string {
       sessionPresent: token.length >= 16,
       rail: Boolean(document.querySelector("nav.rail")),
       commandBar: Boolean(document.querySelector(".command-bar")),
-      today: Boolean(document.querySelector(".today")),
-      recentTiles: Boolean(document.querySelector(".tiles")),
+      recentOpen: Boolean(document.querySelector(".recent-open")),
+      localPlugins: document.querySelectorAll(".local-plugins .catalog-main").length >= 4,
       wordmark: (document.querySelector(".wordmark")?.textContent || "").trim() === "Project Workbench",
       projectContext: (document.querySelector(".context-project")?.textContent || "").trim().length > 0,
       builtins: labels.every((label) => document.querySelector('nav.rail a[aria-label="' + label + '"]')),
@@ -88,8 +88,8 @@ export function smokeFailures(report: SmokeReport): string[] {
   if (!report.sessionPresent) failures.push("session-missing");
   if (!report.rail) failures.push("rail");
   if (!report.commandBar) failures.push("command-bar");
-  if (!report.today) failures.push("today");
-  if (!report.recentTiles) failures.push("recent-tiles");
+  if (!report.recentOpen) failures.push("recent-open");
+  if (!report.localPlugins) failures.push("local-plugins");
   if (!report.wordmark) failures.push("wordmark");
   if (!report.projectContext) failures.push("project-context");
   if (!report.builtins) failures.push("host-builtins");
