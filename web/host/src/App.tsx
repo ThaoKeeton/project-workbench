@@ -5,6 +5,8 @@ import { deviceLabel, devices, pinnedPlugins, pluginStateLabel, shellPluginId, t
 import { CommandPalette, HomePage } from "./launcher";
 import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
 import { Confirm } from "./market";
+import { ProjectDesk } from "./projects/ProjectDesk";
+import { ProjectDeskClient } from "./projects/client";
 import { Shell } from "./shell";
 import { applyTheme, readStoredSetting, type ThemeSetting } from "./theme";
 import { AiSettingsPage, DiagnosticsPage, OfflinePage, PairingPage, PluginWorkspace, SampleCasesPage, SettingsPage } from "./workspace";
@@ -20,6 +22,7 @@ export type Snapshot = {
 export function App() {
   const token = readSessionToken();
   const client = useMemo(() => new ApiClient(token), [token]);
+  const projectClient = useMemo(() => new ProjectDeskClient(token), [token]);
   const navigate = useNavigate();
   const location = useLocation();
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
@@ -228,6 +231,7 @@ export function App() {
       projectOpen={projectOpen}
       onToggleProject={() => { setProjectOpen((open) => !open); setDeviceOpen(false); }}
       onSwitchProject={switchProject}
+      onManageProject={() => { setProjectOpen(false); setDeviceOpen(false); void navigate("/projects"); }}
       deviceId={deviceId}
       deviceOpen={deviceOpen}
       onToggleDevice={() => { setDeviceOpen((open) => !open); setProjectOpen(false); }}
@@ -258,6 +262,7 @@ export function App() {
           <Route path="/plugin/:id/empty/:scene" element={<PluginEmpty client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
           <Route path="/plugin/:id" element={<PluginWorkspace client={client} remoteName={remote ? deviceLabel(deviceId).replace("远程 · ", "") : undefined} />} />
           <Route path="/plugins/test-cases" element={<SampleCasesPage client={client} />} />
+          <Route path="/projects" element={<ProjectDesk client={projectClient} watchedActiveId={snapshot.projects.activeProjectId} onHome={() => { void navigate("/"); }} onChanged={(roster) => setSnapshot((current) => current ? { ...current, projects: roster } : current)} />} />
         </Routes>
       ) : null}
       {location.pathname !== "/" ? palette : null}

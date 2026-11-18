@@ -158,16 +158,16 @@ describe("project desk flow", () => {
   });
 
   it("saves a note, keeps a conflict, and can overwrite after re-reading", async () => {
-    expect(await saveDraft(client({}), note, "只在星河")).toMatchObject({ type: "clean" });
+    expect(await saveDraft(client({}), note, "只在星河", "default")).toMatchObject({ type: "clean" });
     const saved = { ...note, revision: "note-2", text: "改过" };
-    expect(await saveDraft(client({ saveNote: vi.fn(async () => saved) }), note, "改过")).toMatchObject({ type: "saved", note: saved });
-    expect(await saveDraft(client({ saveNote: vi.fn(async () => { throw new Error("RevisionConflict"); }) }), note, "改过")).toMatchObject({ type: "conflict" });
-    expect(await saveDraft(client({ saveNote: vi.fn(async () => { throw new Error("StoreIoFailure"); }) }), note, "改过")).toMatchObject({ type: "failed" });
+    expect(await saveDraft(client({ saveNote: vi.fn(async () => saved) }), note, "改过", "default")).toMatchObject({ type: "saved", note: saved });
+    expect(await saveDraft(client({ saveNote: vi.fn(async () => { throw new Error("RevisionConflict"); }) }), note, "改过", "default")).toMatchObject({ type: "conflict" });
+    expect(await saveDraft(client({ saveNote: vi.fn(async () => { throw new Error("StoreIoFailure"); }) }), note, "改过", "default")).toMatchObject({ type: "failed" });
     const overwritten = await saveDraftOver(client({
       readNote: vi.fn(async () => ({ ...note, revision: "note-9" })),
       saveNote: vi.fn(async () => ({ ...note, revision: "note-10", text: "改过" })),
-    }), "改过");
+    }), "改过", "default");
     expect(overwritten).toMatchObject({ type: "saved", note: { text: "改过" } });
-    expect(await saveDraftOver(client({ readNote: vi.fn(async () => { throw new Error("InvalidContext"); }) }), "改过")).toMatchObject({ type: "failed" });
+    expect(await saveDraftOver(client({ readNote: vi.fn(async () => { throw new Error("InvalidContext"); }) }), "改过", "default")).toMatchObject({ type: "failed" });
   });
 });

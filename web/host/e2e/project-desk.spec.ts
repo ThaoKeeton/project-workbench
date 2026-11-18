@@ -131,7 +131,7 @@ test.beforeEach(async ({ page }) => {
 
 test("create, rename, isolation, and a failed switch stay on the current project", async ({ page }) => {
   await page.setViewportSize({ width: 1100, height: 800 });
-  await page.goto("/projects.html");
+  await page.goto("/project-desk.html");
   await expect(page.getByRole("heading", { name: "星河协作" })).toBeVisible();
   await expect(page.getByLabel(/只保存在/)).toHaveValue("只在星河");
   await shot(page, "project-desk-1100-light");

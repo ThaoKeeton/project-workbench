@@ -15,19 +15,19 @@ export type NoteSave =
   | { type: "conflict" }
   | { type: "failed" };
 
-export async function saveDraft(client: ProjectDeskApi, note: ProjectNote, draft: string): Promise<NoteSave> {
+export async function saveDraft(client: ProjectDeskApi, note: ProjectNote, draft: string, projectId: string): Promise<NoteSave> {
   if (draft === note.text) return { type: "clean" };
   try {
-    return { type: "saved", note: await client.saveNote(draft, note.revision) };
+    return { type: "saved", note: await client.saveNote(draft, note.revision, projectId) };
   } catch (error) {
     return { type: codeOf(error) === "RevisionConflict" ? "conflict" : "failed" };
   }
 }
 
-export async function saveDraftOver(client: ProjectDeskApi, draft: string): Promise<NoteSave> {
+export async function saveDraftOver(client: ProjectDeskApi, draft: string, projectId: string): Promise<NoteSave> {
   try {
     const current = await client.readNote();
-    return { type: "saved", note: await client.saveNote(draft, current.revision) };
+    return { type: "saved", note: await client.saveNote(draft, current.revision, projectId) };
   } catch (error) {
     return { type: codeOf(error) === "RevisionConflict" ? "conflict" : "failed" };
   }

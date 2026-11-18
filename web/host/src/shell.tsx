@@ -17,6 +17,7 @@ export function Shell({
   projectOpen,
   onToggleProject,
   onSwitchProject,
+  onManageProject,
   deviceId,
   deviceOpen,
   onToggleDevice,
@@ -35,6 +36,7 @@ export function Shell({
   projectOpen: boolean;
   onToggleProject: () => void;
   onSwitchProject: (id: string) => void;
+  onManageProject: () => void;
   deviceId: DeviceId;
   deviceOpen: boolean;
   onToggleDevice: () => void;
@@ -69,6 +71,7 @@ export function Shell({
                     </span>
                   </button>
                 ))}
+                <button type="button" role="menuitem" className="pair" onClick={onManageProject}>新建或改名</button>
               </div>
             ) : null}
           </div>

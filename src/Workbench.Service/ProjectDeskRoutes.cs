@@ -72,7 +72,8 @@ public sealed partial class WorkbenchServiceHost
         if (string.IsNullOrWhiteSpace(body.ExpectedRevision)) return NameError("RevisionConflict");
         try
         {
-            var (store, _) = await ActiveContextAsync(cancellationToken);
+            var (store, snapshot) = await ActiveContextAsync(cancellationToken);
+            if (!string.IsNullOrEmpty(body.ProjectId) && body.ProjectId != snapshot.ActiveProjectId) return NameError("RevisionConflict");
             var document = await store.WriteAsync(body.Text, body.ExpectedRevision, cancellationToken);
             return Results.Json(ContextBody(document), Json);
         }
@@ -118,5 +119,5 @@ public sealed partial class WorkbenchServiceHost
     });
 
     private sealed record ProjectNameBody(string? Name, string? ExpectedRevision);
-    private sealed record ProjectContextBody(string? Text, string? ExpectedRevision);
+    private sealed record ProjectContextBody(string? Text, string? ExpectedRevision, string? ProjectId);
 }

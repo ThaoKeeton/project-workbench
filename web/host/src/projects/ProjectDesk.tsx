@@ -6,12 +6,14 @@ import { NameDialog } from "./NameDialog";
 import "./project-desk.css";
 
 /**
- * Standalone project desk. It is not mounted from the launcher or the top bar.
- * Later integration is one route; leave launcher.tsx and shell.tsx unchanged:
- *   <Route path="/projects" element={<ProjectDesk client={new ProjectDeskClient(token)} onChanged={syncRoster} />} />
- * A link to /projects can be added by the top-bar work. This module does not add it.
+ * Project page. The top bar opens it; onChanged keeps that bar's current name in step.
  */
-export function ProjectDesk({ client, onChanged }: { client: ProjectDeskApi; onChanged?: (roster: ProjectRoster) => void }) {
+export function ProjectDesk({ client, onChanged, onHome, watchedActiveId }: {
+  client: ProjectDeskApi;
+  onChanged?: (roster: ProjectRoster) => void;
+  onHome?: () => void;
+  watchedActiveId?: string;
+}) {
   const [attempt, setAttempt] = useState(0);
   const [roster, setRoster] = useState<ProjectRoster | null>(null);
   const [note, setNote] = useState<ProjectNote | null>(null);
@@ -24,8 +26,10 @@ export function ProjectDesk({ client, onChanged }: { client: ProjectDeskApi; onC
   const [busy, setBusy] = useState(false);
   const [conflict, setConflict] = useState(false);
   const noteRef = useRef<ProjectNote | null>(null);
+  const projectIdRef = useRef("");
   const saving = useRef<Promise<boolean> | null>(null);
   noteRef.current = note;
+  if (roster?.activeProjectId) projectIdRef.current = roster.activeProjectId;
 
   useEffect(() => {
     let cancel = false;
@@ -43,6 +47,12 @@ export function ProjectDesk({ client, onChanged }: { client: ProjectDeskApi; onC
     });
     return () => { cancel = true; };
   }, [attempt, client]);
+
+  useEffect(() => {
+    if (!watchedActiveId || !roster || busy || conflict) return;
+    if (watchedActiveId === roster.activeProjectId) return;
+    setAttempt((value) => value + 1);
+  }, [watchedActiveId, roster, busy, conflict]);
 
   useEffect(() => {
     if (!mode) return undefined;
@@ -86,7 +96,7 @@ export function ProjectDesk({ client, onChanged }: { client: ProjectDeskApi; onC
       setNoteStatus(`备注还没保存，所以没有离开「${current}」。`);
       return false;
     }
-    const outcome = await saveDraft(client, currentNote, draft);
+    const outcome = await saveDraft(client, currentNote, draft, projectIdRef.current);
     if (outcome.type === "saved") {
       noteRef.current = outcome.note;
       setNote(outcome.note);
@@ -115,6 +125,7 @@ export function ProjectDesk({ client, onChanged }: { client: ProjectDeskApi; onC
       <header className="page-head">
         <h1>项目</h1>
         <p>每个项目的备注都分开保存。新建或改名没成功时，你还留在现在这个项目。</p>
+        {onHome ? <button type="button" className="text-btn" onClick={onHome}>返回首页</button> : null}
       </header>
       {notice ? <p className="desk-note" role="status">{notice}</p> : null}
       <section className="stack" aria-label="当前项目">
@@ -248,7 +259,7 @@ export function ProjectDesk({ client, onChanged }: { client: ProjectDeskApi; onC
   async function commitDraft() {
     setBusy(true);
     try {
-      const outcome = await saveDraftOver(client, draft);
+      const outcome = await saveDraftOver(client, draft, projectIdRef.current);
       if (outcome.type === "saved") {
         setNote(outcome.note);
         setDraft(outcome.note.text);

@@ -52,6 +52,6 @@ describe("project desk client", () => {
     const client = new ProjectDeskClient("preview");
     expect((await client.list()).activeProjectId).toBe("default");
     expect((await client.open("lamp", "rev-1")).activeProjectId).toBe("lamp");
-    expect((await client.saveNote("只在这里", "missing")).text).toBe("只在这里");
+    expect((await client.saveNote("只在这里", "missing", "default")).text).toBe("只在这里");
   });
 });

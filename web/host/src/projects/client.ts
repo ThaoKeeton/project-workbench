@@ -22,7 +22,7 @@ export type ProjectDeskApi = {
   rename(name: string, expectedRevision: string): Promise<ProjectRoster>;
   open(id: string, expectedRevision: string): Promise<ProjectRoster>;
   readNote(): Promise<ProjectNote>;
-  saveNote(text: string, expectedRevision: string): Promise<ProjectNote>;
+  saveNote(text: string, expectedRevision: string, projectId: string): Promise<ProjectNote>;
 };
 
 export class ProjectDeskClient implements ProjectDeskApi {
@@ -59,10 +59,10 @@ export class ProjectDeskClient implements ProjectDeskApi {
     return this.json("/api/v2/projects/active/context");
   }
 
-  saveNote(text: string, expectedRevision: string): Promise<ProjectNote> {
+  saveNote(text: string, expectedRevision: string, projectId: string): Promise<ProjectNote> {
     return this.json("/api/v2/projects/active/context", {
       method: "PUT",
-      body: JSON.stringify({ text, expectedRevision }),
+      body: JSON.stringify({ text, expectedRevision, projectId }),
     });
   }
 

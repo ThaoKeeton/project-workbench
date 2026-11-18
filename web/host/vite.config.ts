@@ -29,7 +29,7 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: fileURLToPath(new URL("./index.html", import.meta.url)),
-        projects: fileURLToPath(new URL("./projects.html", import.meta.url)),
+        projects: fileURLToPath(new URL("./project-desk.html", import.meta.url)),
       },
     },
   },

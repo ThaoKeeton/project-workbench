@@ -122,8 +122,12 @@ public sealed class ProjectDeskApiTests
                 Assert.True(missing.GetProperty("missing").GetBoolean());
                 Assert.False(File.Exists(Path.Combine(root, ".workbench-project", "context.json")));
 
-                var written = await first.Client.PutAsJsonAsync("/api/v2/projects/active/context", new { text = "只在星河", expectedRevision = "missing" });
+                var written = await first.Client.PutAsJsonAsync("/api/v2/projects/active/context", new { text = "只在星河", expectedRevision = "missing", projectId = "default" });
                 Assert.Equal(HttpStatusCode.OK, written.StatusCode);
+                var savedRevision = (await written.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("revision").GetString();
+                var crossed = await first.Client.PutAsJsonAsync("/api/v2/projects/active/context", new { text = "串到别的项目", expectedRevision = savedRevision, projectId = new string('c', 32) });
+                Assert.Equal(HttpStatusCode.Conflict, crossed.StatusCode);
+                Assert.Equal("只在星河", (await first.Client.GetFromJsonAsync<JsonElement>("/api/v2/projects/active/context")).GetProperty("text").GetString());
                 var staleNote = await first.Client.PutAsJsonAsync("/api/v2/projects/active/context", new { text = "不要覆盖", expectedRevision = "missing" });
                 Assert.Equal(HttpStatusCode.Conflict, staleNote.StatusCode);
                 Assert.Equal("只在星河", (await first.Client.GetFromJsonAsync<JsonElement>("/api/v2/projects/active/context")).GetProperty("text").GetString());

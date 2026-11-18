@@ -39,6 +39,10 @@ function fresh() {
     insights: {},
     themeSetting: "system",
     desk: { pinned: ["upcam", "ding", "test", "runner"], recent: [] },
+    notes: {
+      default: { revision: "note-1", text: "只在星河" },
+      aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: { revision: "note-lamp", text: "只在灯塔" },
+    },
   };
 }
 
@@ -59,6 +63,29 @@ function sendJson(response, status, body, extra = {}) {
     ...extra,
   });
   response.end(payload);
+}
+
+function sameName(left, right) {
+  return left.toLocaleLowerCase("en-US") === right.toLocaleLowerCase("en-US");
+}
+
+function rejectName(name, exceptId) {
+  if (typeof name !== "string" || /[\u0000-\u001f\u007f-\u009f]/.test(name)) return "InvalidName";
+  const trimmed = name.trim();
+  if (trimmed.length === 0 || trimmed.length > 80) return "InvalidName";
+  const taken = state.projects.find((item) => item.id !== exceptId && sameName(item.name, trimmed));
+  return taken ? "DuplicateName" : null;
+}
+
+function bumpProject() {
+  state.generation += 1;
+  state.revision = `rev-${state.generation}`;
+}
+
+function noteBody() {
+  const saved = state.notes[state.activeProjectId];
+  if (!saved) return { schemaVersion: 1, revision: "missing", text: "", missing: true };
+  return { schemaVersion: 1, revision: saved.revision, text: saved.text, missing: false };
 }
 
 function projectsBody() {
@@ -295,6 +322,43 @@ const server = createServer(async (request, response) => {
     });
     response.end();
     return;
+  }
+  if (request.method === "GET" && url.pathname === "/api/v2/projects/active/context") return sendJson(response, 200, noteBody());
+  if (request.method === "PUT" && url.pathname === "/api/v2/projects/active/context") {
+    const body = JSON.parse(await readBody(request));
+    if (body.projectId && body.projectId !== state.activeProjectId) return sendJson(response, 409, { error: "RevisionConflict" });
+    const saved = state.notes[state.activeProjectId] ?? { revision: "missing", text: "" };
+    if (body.expectedRevision !== saved.revision) return sendJson(response, 409, { error: "RevisionConflict" });
+    const next = { revision: `note-${state.generation + 1}`, text: body.text ?? "" };
+    state.notes[state.activeProjectId] = next;
+    return sendJson(response, 200, { schemaVersion: 1, revision: next.revision, text: next.text, missing: false });
+  }
+  if (request.method === "POST" && url.pathname === "/api/v2/projects/name") {
+    const body = JSON.parse(await readBody(request));
+    if (body.expectedRevision !== state.revision) return sendJson(response, 409, { error: "RevisionConflict" });
+    const problem = rejectName(body.name, state.activeProjectId);
+    if (problem) return sendJson(response, problem === "DuplicateName" ? 409 : 400, { error: problem });
+    const trimmed = body.name.trim();
+    const current = state.projects.find((item) => item.id === state.activeProjectId);
+    if (current && current.name !== trimmed) {
+      current.name = trimmed;
+      bumpProject();
+    }
+    broadcast({ type: "project-changed", activeProjectId: state.activeProjectId });
+    return sendJson(response, 200, projectsBody());
+  }
+  if (request.method === "POST" && url.pathname === "/api/v2/projects") {
+    const body = JSON.parse(await readBody(request));
+    if (body.expectedRevision !== state.revision) return sendJson(response, 409, { error: "RevisionConflict" });
+    const problem = rejectName(body.name);
+    if (problem) return sendJson(response, problem === "DuplicateName" ? 409 : 400, { error: problem });
+    const id = `p${state.generation}`;
+    state.projects = [...state.projects, { id, name: body.name.trim(), isArchived: false }];
+    state.notes[id] = { revision: "missing", text: "" };
+    state.activeProjectId = id;
+    bumpProject();
+    broadcast({ type: "project-changed", activeProjectId: state.activeProjectId });
+    return sendJson(response, 200, { ...projectsBody(), opened: true });
   }
   if (request.method === "POST" && url.pathname === "/api/v2/projects/active") {
     const body = JSON.parse(await readBody(request));
