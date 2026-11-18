@@ -162,6 +162,7 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
             }
             catch (ProjectWorkspaceStoreException error) { return ProjectError(error); }
         });
+        MapProjectDesk(app);
         app.MapGet("/api/v2/plugins", () => Results.Json(new { plugins = PluginBodies() }, Json));
         app.MapGet("/api/v2/diagnostics", async (CancellationToken cancellationToken) =>
         {
