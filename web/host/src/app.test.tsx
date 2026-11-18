@@ -88,15 +88,76 @@ describe("app shell", () => {
 });
 
 describe("command palette", () => {
-  it("moves with the arrow keys and reports an empty filter", async () => {
+  it("moves with the arrow keys, clears with escape, then closes", async () => {
     const user = userEvent.setup();
     const onClose = vi.fn();
     render(<MemoryRouter><CommandPalette projects={[{ id: "a", name: "星河协作" }]} activeProjectId="a" onClose={onClose} onOpenPlugin={vi.fn()} onPickDevice={vi.fn()} onSwitchProject={vi.fn()} /></MemoryRouter>);
     const search = screen.getByRole("textbox", { name: "搜索插件、项目、设备或命令" });
     await user.type(search, "{ArrowDown}{ArrowUp}");
     await user.type(search, "没有这个");
-    expect(screen.getByText("没有匹配的结果")).toBeTruthy();
+    expect(screen.getByText("没有匹配的结果。换个词，或按 Esc 清空。")).toBeTruthy();
+    await user.keyboard("{Escape}");
+    expect(onClose).not.toHaveBeenCalled();
+    expect((search as HTMLInputElement).value).toBe("");
     await user.keyboard("{Escape}");
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it("opens a local plugin from the keyboard and keeps the recent label", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    const onClose = vi.fn();
+    render(<MemoryRouter><CommandPalette
+      projects={[{ id: "a", name: "星河协作" }]}
+      activeProjectId="a"
+      recent={["ding"]}
+      plugins={[
+        { id: "upcam", name: "UPCAM 站会日报", hint: "整理今日站会", loaded: true },
+        { id: "ding", name: "钉钉 Insights", hint: "看本周沟通", loaded: true },
+        { id: "test", name: "测试设计", hint: "用例仓库", loaded: false, state: "没能载入" },
+      ]}
+      onClose={onClose}
+      onOpenPlugin={onOpen}
+      onPickDevice={vi.fn()}
+      onSwitchProject={vi.fn()}
+    /></MemoryRouter>);
+    const search = screen.getByRole("textbox", { name: "搜索插件、项目、设备或命令" });
+    await user.type(search, "站会");
+    expect(screen.getByRole("option", { name: /UPCAM 站会日报/ })).toBeTruthy();
+    await user.keyboard("{Enter}");
+    expect(onOpen).toHaveBeenCalledWith("upcam");
+    expect(onClose).toHaveBeenCalled();
+    await user.clear(search);
+    expect(screen.getAllByRole("option")[0]?.textContent).toContain("钉钉 Insights");
+    expect(screen.getByRole("option", { name: /钉钉 Insights/ }).textContent).toContain("最近打开");
+    await user.type(search, "测试设计");
+    await user.keyboard("{Enter}");
+    expect(screen.getByRole("status").textContent).toContain("没能载入");
+    expect(onOpen).toHaveBeenCalledTimes(1);
+  });
+
+  it("refuses a remote computer and a missing standup", async () => {
+    const user = userEvent.setup();
+    const onPick = vi.fn();
+    const onOpen = vi.fn();
+    render(<MemoryRouter><CommandPalette
+      projects={[]}
+      activeProjectId=""
+      plugins={[{ id: "ding", name: "钉钉 Insights", loaded: true }]}
+      onClose={vi.fn()}
+      onOpenPlugin={onOpen}
+      onPickDevice={onPick}
+      onSwitchProject={vi.fn()}
+    /></MemoryRouter>);
+    const search = screen.getByRole("textbox", { name: "搜索插件、项目、设备或命令" });
+    await user.type(search, "书房");
+    await user.keyboard("{Enter}");
+    expect(onPick).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("连不上");
+    await user.clear(search);
+    await user.type(search, "站会摘要");
+    await user.keyboard("{Enter}");
+    expect(onOpen).not.toHaveBeenCalled();
+    expect(screen.getByRole("status").textContent).toContain("没有可用的站会日报");
   });
 });

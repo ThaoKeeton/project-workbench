@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { cloneElement, isValidElement, useEffect, useMemo, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { devices, pinnedPlugins, type DeviceId, type IconName } from "./catalog";
 import { formatDailySummary } from "./executor/model";
@@ -9,7 +9,9 @@ export type PaletteEntry = {
   id: string;
   group: "插件" | "命令" | "设备" | "项目";
   label: string;
+  hint?: string;
   detail?: string;
+  unavailable?: boolean;
   run: () => void;
 };
 
@@ -37,16 +39,22 @@ export function HomePage({
     .map((item) => plugins.find((plugin) => plugin.id === item.id))
     .filter((plugin): plugin is (typeof plugins)[number] => plugin !== undefined);
   const open = (id: string) => { if (onOpen) onOpen(id); else void navigate(`/plugin/${id}`); };
+  const paletteNode = isValidElement(palette)
+    ? cloneElement(palette as ReactElement<{ recent?: string[]; plugins?: typeof plugins }>, {
+        recent: recent.map((item) => item.id),
+        plugins,
+      })
+    : palette;
   return (
     <div className="launcher">
-      {palette ?? (
+      {paletteNode ?? (
         <button type="button" className="command-bar" onClick={onOpenPalette}>
           <Icon name="home" size={18} />
           <span>搜索插件、项目、设备或命令…</span>
           <span className="shortcut">Ctrl K</span>
         </button>
       )}
-      {palette ? null : (
+      {paletteNode ? null : (
         <>
           {dailySummary() ? (
             <section className="column">
@@ -135,6 +143,7 @@ export function CommandPalette({
   onPickDevice,
   onSwitchProject,
   plugins = pinnedPlugins,
+  recent = [],
 }: {
   projects: Array<{ id: string; name: string }>;
   activeProjectId: string;
@@ -142,58 +151,112 @@ export function CommandPalette({
   onOpenPlugin: (id: string) => void;
   onPickDevice: (id: DeviceId) => void;
   onSwitchProject: (id: string) => void;
-  plugins?: Array<{ id: string; name: string }>;
+  plugins?: Array<{ id: string; name: string; hint?: string; loaded?: boolean; state?: string }>;
+  recent?: string[];
 }) {
   const navigate = useNavigate();
+  const input = useRef<HTMLInputElement>(null);
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
+  const [note, setNote] = useState("");
   const entries = useMemo<PaletteEntry[]>(() => {
-    const pluginEntries: PaletteEntry[] = plugins.map((plugin) => ({
-      id: plugin.id,
-      group: "插件",
-      label: plugin.name,
-      run: () => onOpenPlugin(plugin.id),
-    }));
+    const order = new Map(recent.map((id, index) => [id, index]));
+    const pluginEntries: PaletteEntry[] = [...plugins]
+      .sort((left, right) => (order.get(left.id) ?? 100) - (order.get(right.id) ?? 100))
+      .map((plugin) => {
+        const unavailable = plugin.loaded === false;
+        return {
+          id: plugin.id,
+          group: "插件" as const,
+          label: plugin.name,
+          hint: plugin.hint,
+          detail: unavailable ? (plugin.state ?? "没能载入") : order.has(plugin.id) ? "最近打开" : undefined,
+          unavailable,
+          run: () => onOpenPlugin(plugin.id),
+        };
+      });
+    const standup = plugins.find((plugin) => plugin.id === "upcam");
     const commands: PaletteEntry[] = [
-      { id: "summary", group: "命令", label: "生成今日站会摘要", run: () => onOpenPlugin("upcam") },
-      { id: "market", group: "命令", label: "打开这台电脑上的插件", run: () => { void navigate("/market"); } },
+      {
+        id: "summary",
+        group: "命令",
+        label: "生成今日站会摘要",
+        hint: "打开站会日报",
+        detail: standup && standup.loaded !== false ? undefined : "这台电脑上没有可用的站会日报",
+        unavailable: !(standup && standup.loaded !== false),
+        run: () => onOpenPlugin("upcam"),
+      },
+      { id: "market", group: "命令", label: "打开这台电脑上的插件", hint: "查看已经装在这里的插件", run: () => { void navigate("/market"); } },
     ];
     const deviceEntries: PaletteEntry[] = devices.map((device) => ({
       id: device.id,
-      group: "设备",
+      group: "设备" as const,
       label: device.remote ? device.name : `本机 · ${device.name}`,
+      hint: device.status,
+      detail: device.remote ? "这台预览连不上别的电脑" : undefined,
+      unavailable: device.remote,
       run: () => onPickDevice(device.id),
     }));
     const projectEntries: PaletteEntry[] = projects.map((project) => ({
       id: project.id,
-      group: "项目",
+      group: "项目" as const,
       label: project.name,
       detail: project.id === activeProjectId ? "当前项目" : undefined,
       run: () => onSwitchProject(project.id),
     }));
     const all = [...pluginEntries, ...commands, ...deviceEntries, ...projectEntries];
-    const needle = query.trim();
-    return needle ? all.filter((item) => item.label.includes(needle) || item.group.includes(needle)) : all;
-  }, [activeProjectId, navigate, onOpenPlugin, onPickDevice, onSwitchProject, plugins, projects, query]);
+    const needle = query.trim().toLocaleLowerCase();
+    if (!needle) return all;
+    return all.filter((item) => `${item.label} ${item.hint ?? ""}`.toLocaleLowerCase().includes(needle));
+  }, [activeProjectId, navigate, onOpenPlugin, onPickDevice, onSwitchProject, plugins, projects, query, recent]);
 
   useEffect(() => {
     setCursor(0);
   }, [query]);
 
+  const choose = (item: PaletteEntry | undefined) => {
+    if (!item) {
+      setNote(query.trim() ? "没有匹配的结果。换个词，或按 Esc 清空。" : "先选一项，再按 Enter 打开。");
+      return;
+    }
+    if (item.unavailable) {
+      setNote(item.detail ?? `「${item.label}」现在打不开。`);
+      return;
+    }
+    item.run();
+    onClose();
+  };
+
   const groups = ["插件", "命令", "设备", "项目"] as const;
 
   return (
     <div className="palette-layer" role="presentation" onMouseDown={onClose}>
-      <div className="palette" role="dialog" aria-label="命令条" onMouseDown={(event) => event.stopPropagation()}>
+      <div
+        className="palette"
+        role="dialog"
+        aria-label="命令条"
+        onMouseDown={(event) => event.stopPropagation()}
+        onKeyDown={(event) => {
+          if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+            event.preventDefault();
+            input.current?.focus();
+          }
+        }}
+      >
         <label className="palette-input">
           <input
+            ref={input}
             autoFocus
             aria-label="搜索插件、项目、设备或命令"
             placeholder="搜索插件、项目、设备或命令…"
             value={query}
-            onChange={(event) => setQuery(event.target.value)}
+            onChange={(event) => { setQuery(event.target.value); setNote(""); }}
             onKeyDown={(event) => {
-              if (event.key === "Escape") onClose();
+              if (event.key === "Escape") {
+                event.preventDefault();
+                if (query) { setQuery(""); setNote(""); return; }
+                onClose();
+              }
               if (event.key === "ArrowDown") {
                 event.preventDefault();
                 setCursor((value) => Math.min(value + 1, Math.max(entries.length - 1, 0)));
@@ -202,16 +265,17 @@ export function CommandPalette({
                 event.preventDefault();
                 setCursor((value) => Math.max(value - 1, 0));
               }
-              if (event.key === "Enter" && entries[cursor]) {
-                entries[cursor].run();
-                onClose();
+              if (event.key === "Enter") {
+                event.preventDefault();
+                choose(entries[cursor]);
               }
             }}
           />
           <span className="keys"><Keycap>Ctrl</Keycap><Keycap>K</Keycap></span>
         </label>
         <div className="palette-list" role="listbox" aria-label="命令结果">
-          {entries.length === 0 ? <p className="empty-inline">没有匹配的结果</p> : null}
+          {note ? <p className="empty-inline" role="status">{note}</p> : null}
+          {!note && entries.length === 0 ? <p className="empty-inline" role="status">没有匹配的结果。换个词，或按 Esc 清空。</p> : null}
           {groups.map((group) => {
             const items = entries.filter((item) => item.group === group);
             if (items.length === 0) return null;
@@ -222,16 +286,14 @@ export function CommandPalette({
                   const index = entries.indexOf(item);
                   return (
                     <button
-                      key={item.id}
+                      key={`${item.group}-${item.id}`}
                       type="button"
                       role="option"
                       aria-selected={index === cursor}
+                      aria-disabled={item.unavailable || undefined}
                       className={index === cursor ? "is-active" : ""}
                       onMouseEnter={() => setCursor(index)}
-                      onClick={() => {
-                        item.run();
-                        onClose();
-                      }}
+                      onClick={() => choose(item)}
                     >
                       <span>{item.label}</span>
                       {item.detail ? <small>{item.detail}</small> : null}
@@ -250,7 +312,7 @@ export function CommandPalette({
           <Keycap>Enter</Keycap>
           <span>打开</span>
           <Keycap>Esc</Keycap>
-          <span>关闭</span>
+          <span>清空或关闭</span>
         </footer>
       </div>
     </div>

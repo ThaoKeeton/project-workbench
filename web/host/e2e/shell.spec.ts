@@ -83,6 +83,44 @@ test("a stale project list asks for another try", async ({ page }) => {
   await expect(page.getByRole("button", { name: /当前项目/ })).toContainText("星河协作");
 });
 
+test("command bar finds a local plugin and explains a miss", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await chooseTheme(page, "浅色");
+  await page.goto("/");
+  await page.getByRole("button", { name: /UPCAM 站会日报/ }).first().click();
+  await expect(page.getByRole("heading", { name: "站会日报" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeVisible();
+  await page.keyboard.press("Control+k");
+  const search = page.getByRole("textbox", { name: "搜索插件、项目、设备或命令" });
+  await expect(search).toBeVisible();
+  await search.fill("站会");
+  await expect(page.getByRole("option", { name: /UPCAM 站会日报/ })).toContainText("最近打开");
+  await page.keyboard.press("Enter");
+  await expect(page.getByRole("heading", { name: "站会日报" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await expect(search).toBeVisible();
+  await search.fill("站会");
+  await shot(page, "command-found-1100-light");
+  await search.fill("没有这个插件");
+  await expect(page.getByText("没有匹配的结果。换个词，或按 Esc 清空。")).toBeVisible();
+  await shot(page, "command-empty-1100-light");
+  await page.keyboard.press("Escape");
+  await expect(search).toHaveValue("");
+  await chooseTheme(page, "深色");
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.goto("/");
+  await expect(page.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeVisible();
+  await page.keyboard.press("Control+k");
+  await expect(search).toBeVisible();
+  await search.fill("站会");
+  await shot(page, "command-found-1100-dark");
+  await search.fill("没有这个插件");
+  await shot(page, "command-empty-1100-dark");
+});
+
 test("sample cases stay on their own local page", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await chooseTheme(page, "深色");
