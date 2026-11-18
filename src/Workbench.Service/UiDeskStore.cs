@@ -42,7 +42,9 @@ internal static class UiDeskStore
         var directory = Path.Combine(userRoot, "v2-preview");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "desk.json");
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(new DeskFile(Schema, 2, next.Pinned, next.Recent), Json);
+        var pins = next.Pinned.ToArray();
+        var opens = next.Recent.Select(item => new DeskOpenFile(item.Id, item.At)).ToArray();
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(new DeskFile(Schema, 2, pins, opens), Json);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         await File.WriteAllBytesAsync(temporary, bytes, cancellationToken);
         File.Move(temporary, path, overwrite: true);
