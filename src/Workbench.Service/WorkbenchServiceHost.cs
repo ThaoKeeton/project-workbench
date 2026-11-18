@@ -183,13 +183,16 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
             return Results.Json(new { schema = UiThemeStore.Schema, schemaVersion = 2, setting = body.Setting }, Json);
         });
         app.MapGet("/api/v2/ui/desk", async (CancellationToken cancellationToken) =>
-            Results.Json(DeskBody(await UiDeskStore.ReadAsync(_userRoot, cancellationToken)), Json));
+        {
+            var read = await UiDeskStore.ReadAsync(_userRoot, cancellationToken);
+            return Results.Json(DeskBody(read.State, read.Recovered), Json);
+        });
         app.MapPut("/api/v2/ui/desk", async (DeskWriteBody body, CancellationToken cancellationToken) =>
         {
             try
             {
                 var saved = await UiDeskStore.WriteAsync(_userRoot, body.Pinned, string.IsNullOrWhiteSpace(body.Touch) ? null : body.Touch, cancellationToken);
-                return Results.Json(DeskBody(saved), Json);
+                return Results.Json(DeskBody(saved, false), Json);
             }
             catch (ArgumentOutOfRangeException)
             {
@@ -420,12 +423,13 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
     private static Task SendAsync(WebSocket socket, string message, CancellationToken cancellationToken)
         => socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, endOfMessage: true, cancellationToken);
 
-    private static object DeskBody(DeskState desk) => new
+    private static object DeskBody(DeskState desk, bool recovered) => new
     {
         schema = UiDeskStore.Schema,
         schemaVersion = 2,
         pinned = desk.Pinned,
-        recent = desk.Recent.Select(item => new { id = item.Id, at = item.At }).ToArray()
+        recent = desk.Recent.Select(item => new { id = item.Id, at = item.At }).ToArray(),
+        recovered
     };
 
     private sealed record SwitchBody(string? Id, string? ExpectedRevision);

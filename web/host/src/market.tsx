@@ -1,81 +1,41 @@
-import { useMemo, useState } from "react";
-import { NavLink, useNavigate, useParams } from "react-router-dom";
-import { categories, marketItems, type MarketBadge, type MarketCategory, type MarketItem } from "./catalog";
+import { useState } from "react";
+import { NavLink, useParams } from "react-router-dom";
+import type { MarketBadge } from "./catalog";
 import type { IconName } from "./catalog";
 import { Icon } from "./icons";
 
-const iconFor = (id: string): IconName => {
-  if (id === "ding") return "chat";
-  if (id === "test" || id === "cases") return "flask";
-  if (id === "minutes" || id === "markup") return "chat";
-  if (id === "calendar" || id === "backup" || id === "local-pack") return "folder";
-  return "clipboard";
-};
-
-export function MarketPage({ onOpen, pinned = [], onPin }: { onOpen: (id: string) => void; pinned?: string[]; onPin?: (id: string, pinned: boolean) => void }) {
-  const navigate = useNavigate();
-  const [query, setQuery] = useState("");
-  const [category, setCategory] = useState<(typeof categories)[number]>("全部");
-  const visible = useMemo(
-    () => marketItems.filter((item) => (category === "全部" || item.category === category) && (!query.trim() || `${item.name}${item.author}${item.summary}`.includes(query.trim()))),
-    [category, query],
-  );
-  const featured = visible.filter((item) => item.featured);
-  const list = visible.filter((item) => !item.featured);
-  const localAction = (item: MarketItem) => {
-    if (!item.pluginId) return <button type="button" className="btn" disabled>不在这台电脑上</button>;
-    const held = pinned.includes(item.pluginId);
-    return (
-      <>
-        <button type="button" className="btn" onClick={() => onOpen(item.pluginId!)}>打开</button>
-        {onPin ? <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${item.name}` : `把 ${item.name} 固定到左侧`} onClick={() => onPin(item.pluginId!, !held)}>{held ? "从左侧拿下" : "固定到左侧"}</button> : null}
-      </>
-    );
-  };
-
+export function MarketPage({
+  onOpen,
+  plugins = [],
+}: {
+  onOpen: (id: string) => void;
+  pinned?: string[];
+  onPin?: (id: string, pinned: boolean) => void;
+  plugins?: Array<{ id: string; name: string; hint: string; icon: IconName; state?: string; loaded?: boolean }>;
+}) {
   return (
     <div className="page">
       <header className="page-head">
         <h1>这台电脑上的插件</h1>
-        <p>只使用已经在这台电脑上的插件。没有网上的商店，也不会下载未知插件。</p>
+        <p>下面是本机刚读到的插件。没有网上的商店，也不会下载未知插件。</p>
         <MarketNav />
       </header>
-      <input className="search-line" aria-label="搜索插件名称、作者或能力" placeholder="搜索插件名称、作者或能力…" value={query} onChange={(event) => setQuery(event.target.value)} />
-      <div className="chips" role="tablist" aria-label="分类">
-        {categories.map((item) => (
-          <button key={item} type="button" role="tab" aria-selected={category === item} className={category === item ? "is-on" : ""} onClick={() => setCategory(item as MarketCategory | "全部")}>{item}</button>
-        ))}
-      </div>
-      {visible.length === 0 ? <p className="empty-inline">找不到目标程序</p> : null}
-      <div className="featured">
-        {featured.map((item) => (
-          <article key={item.id} className="feature-card">
-            <Icon name={iconFor(item.id)} size={28} />
-            <div>
-              <p className="eyebrow">精选</p>
-              <h2>{item.name}</h2>
-              <p>{item.summary}</p>
-            </div>
-            {item.pluginId ? <button type="button" className="btn-accent" onClick={() => onOpen(item.pluginId!)}>打开</button> : <button type="button" className="btn" disabled>不在这台电脑上</button>}
-          </article>
-        ))}
-      </div>
-      <ul className="catalog">
-        {list.map((item) => (
-          <li key={item.id}>
-            <button type="button" className="catalog-main" onClick={() => { void navigate(`/market/${item.id}`); }}>
-              <Icon name={iconFor(item.id)} />
-              <span>
-                <strong>{item.name}</strong>
-                <small>{item.summary}</small>
-                <small>{item.author} · {item.version}</small>
+      {plugins.length === 0 ? <p>还没有从本机读到可以打开的插件。</p> : (
+        <ul className="catalog">
+          {plugins.map((item) => (
+            <li key={item.id}>
+              <span className="catalog-main">
+                <Icon name={item.icon} />
+                <span>
+                  <strong>{item.name}</strong>
+                  <small>{item.state ?? item.hint}</small>
+                </span>
               </span>
-            </button>
-            <Badge value={item.badge} />
-            {localAction(item)}
-          </li>
-        ))}
-      </ul>
+              {item.loaded === false ? <button type="button" className="btn" disabled>没能载入</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -93,27 +53,11 @@ export function MarketNav() {
 
 export function MarketDetail() {
   const { id } = useParams();
-  const item = marketItems.find((entry) => entry.id === id) ?? marketItems[1];
   return (
     <div className="page">
-      <p className="crumb">市场 / {item.name}</p>
-      <h1>{item.name}</h1>
-      <p className="sub">{item.author} · {item.version} · {item.badge}</p>
-      <p>从录音稿或站会文字里提取决议、待办与风险项，生成只写入本机的纪要草稿。不会自动发送到任何群聊。</p>
-      <h2>界面截图</h2>
-      <div className="shots">
-        {["纪要草稿", "待办提取", "风险项"].map((label) => <div key={label} className="shot">{label}</div>)}
-      </div>
-      <h2>安装时将申请这些权限</h2>
-      <ul className="plain">
-        <li>读取你选择的本机录音稿与文字笔记</li>
-        <li>在当前项目写入待办草稿</li>
-        <li>读取当前项目名称（星河协作）</li>
-      </ul>
-      <h2>版本历史</h2>
-      <p className="sub">v1.0.3 · 2026年11月3日 · 待办可以按发言人分组</p>
-      <h2>适配</h2>
-      <p>可在本机与已配对的局域网设备上运行 · 2.4 MB · 2026年11月3日更新</p>
+      <p className="crumb">插件 / {id}</p>
+      <h1>没有这条网上介绍</h1>
+      <p>这里不提供可下载的插件。请回到已安装，看这台电脑上实际读到的插件。</p>
     </div>
   );
 }
@@ -125,9 +69,21 @@ const installedRows = [
   { id: "local-pack", name: "本地导入示例包", summary: "用于演示本地清单导入流程", meta: "文前 · v0.1.0", badge: "本地导入" as const, icon: "folder" as const },
 ];
 
-export function InstalledPage({ onOpen, pinned = [], onPin }: { onOpen: (id: string) => void; pinned?: string[]; onPin?: (id: string, pinned: boolean) => void }) {
-  const rows = installedRows.filter((item) => item.id !== "local-pack");
-  const [selected, setSelected] = useState(rows[0].id);
+export function InstalledPage({
+  onOpen,
+  pinned = [],
+  onPin,
+  plugins,
+}: {
+  onOpen: (id: string) => void;
+  pinned?: string[];
+  onPin?: (id: string, pinned: boolean) => void;
+  plugins?: Array<{ id: string; name: string; hint: string; icon: IconName; state?: string; loaded?: boolean }>;
+}) {
+  const rows = (plugins ?? installedRows.filter((item) => item.id !== "local-pack").map((item) => ({
+    id: item.id, name: item.name, hint: item.summary, icon: item.icon, state: "可以用", loaded: true,
+  })));
+  const [selected, setSelected] = useState(rows[0]?.id ?? "");
   const current = rows.find((item) => item.id === selected) ?? rows[0];
   const held = current ? pinned.includes(current.id) : false;
   return (
@@ -145,12 +101,11 @@ export function InstalledPage({ onOpen, pinned = [], onPin }: { onOpen: (id: str
                 <Icon name={item.icon} />
                 <span>
                   <strong>{item.name}</strong>
-                  <small>{item.summary}</small>
-                  <small>{pinned.includes(item.id) ? "已固定在左侧" : "没有固定在左侧"}</small>
+                  <small>{item.state ?? item.hint}</small>
+                  <small>{item.loaded === false ? "没能载入" : pinned.includes(item.id) ? "已固定在左侧" : "没有固定在左侧"}</small>
                 </span>
               </button>
-              <Badge value={item.badge} />
-              <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>
+              {item.loaded === false ? <button type="button" className="btn" disabled>没能载入</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
             </li>
           ))}
         </ul>
@@ -158,11 +113,11 @@ export function InstalledPage({ onOpen, pinned = [], onPin }: { onOpen: (id: str
       {current ? (
         <aside className="detail-card">
           <h2>{current.name}</h2>
-          <p className="sub">{current.meta} · {held ? "已固定在左侧" : "没有固定在左侧"}</p>
+          <p className="sub">{current.state ?? "可以用"} · {held ? "已固定在左侧" : "没有固定在左侧"}</p>
           <p>它随工作台留在这台电脑上。这里不能把它卸掉，也不会去网上找新版本。</p>
           <div className="row-actions">
             <button type="button" className="btn-accent" onClick={() => onOpen(current.id)}>打开</button>
-            {onPin ? <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${current.name}` : `把 ${current.name} 固定到左侧`} onClick={() => onPin(current.id, !held)}>{held ? "从左侧拿下" : "固定到左侧"}</button> : null}
+            {onPin && current.loaded !== false ? <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${current.name}` : `把 ${current.name} 固定到左侧`} onClick={() => onPin(current.id, !held)}>{held ? "从左侧拿下" : "固定到左侧"}</button> : null}
           </div>
         </aside>
       ) : <p>没有已安装的插件。</p>}

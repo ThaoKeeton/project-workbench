@@ -45,7 +45,8 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .top-grow { flex: 1; }
 .device, .project { position: relative; }
 .project-menu { left: 0; right: auto; width: 240px; }
-.desk-note { margin: 0; padding: 10px 20px; background: var(--surface-2); color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.desk-note { display: flex; gap: 12px; align-items: center; margin: 0; padding: 10px 20px; background: var(--surface-2); color: var(--text-secondary); border-bottom: 1px solid var(--border); }
+.desk-note p { margin: 0; }
 .device-trigger, .window-controls button, .rail-btn, .pair, .text-btn {
   border: 0;
   background: transparent;

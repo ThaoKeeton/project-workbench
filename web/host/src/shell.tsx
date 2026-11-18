@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { deviceLabel, devices, type DeviceId, type IconName, type PluginId } from "./catalog";
+import { deviceLabel, devices, type DeviceId, type IconName } from "./catalog";
 import { Icon, WindowGlyph } from "./icons";
 
 const railBottom: Array<{ to: string; label: string; icon: IconName }> = [
@@ -25,6 +25,7 @@ export function Shell({
   plugins,
   onOpenPlugin,
   notice,
+  onRetryNotice,
   remote,
   children,
 }: {
@@ -39,9 +40,10 @@ export function Shell({
   onToggleDevice: () => void;
   onPickDevice: (id: DeviceId) => void;
   onPair: () => void;
-  plugins: Array<{ id: PluginId; name: string; icon: IconName }>;
-  onOpenPlugin: (id: PluginId) => void;
+  plugins: Array<{ id: string; name: string; icon: IconName }>;
+  onOpenPlugin: (id: string) => void;
   notice?: string;
+  onRetryNotice?: () => void;
   remote: boolean;
   children: ReactNode;
 }) {
@@ -125,7 +127,12 @@ export function Shell({
           ))}
         </nav>
         <div className="shell-main">
-          {notice ? <p className="desk-note" role="status">{notice}</p> : null}
+          {notice ? (
+            <div className="desk-note">
+              <p role="status">{notice}</p>
+              {onRetryNotice ? <button type="button" className="btn" onClick={onRetryNotice}>再试一次</button> : null}
+            </div>
+          ) : null}
           {children}
         </div>
       </div>

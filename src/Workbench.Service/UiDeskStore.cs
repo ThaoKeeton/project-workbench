@@ -12,19 +12,20 @@ internal static class UiDeskStore
 
     public static DeskState Default { get; } = new([.. Known], []);
 
-    public static async Task<DeskState> ReadAsync(string userRoot, CancellationToken cancellationToken)
+    public static async Task<DeskRead> ReadAsync(string userRoot, CancellationToken cancellationToken)
     {
         var path = Path.Combine(userRoot, "v2-preview", "desk.json");
-        if (!File.Exists(path)) return Default;
+        if (!File.Exists(path)) return new(Default, false);
         try
         {
             await using var stream = File.OpenRead(path);
             var document = await JsonSerializer.DeserializeAsync<DeskFile>(stream, Json, cancellationToken);
-            return Accept(document) ?? Default;
+            var accepted = Accept(document);
+            return accepted is null ? new(Default, true) : new(accepted, false);
         }
         catch (Exception error) when (error is JsonException or IOException)
         {
-            return Default;
+            return new(Default, true);
         }
     }
 
@@ -32,7 +33,7 @@ internal static class UiDeskStore
     {
         if (!ValidPins(pinned)) throw new ArgumentOutOfRangeException(nameof(pinned));
         if (touch is not null && !Known.Contains(touch)) throw new ArgumentOutOfRangeException(nameof(touch));
-        var current = await ReadAsync(userRoot, cancellationToken);
+        var current = (await ReadAsync(userRoot, cancellationToken)).State;
         var recent = current.Recent;
         if (touch is not null)
         {
@@ -69,6 +70,8 @@ internal static class UiDeskStore
     private sealed record DeskFile(string Schema, int SchemaVersion, string[]? Pinned, DeskOpenFile[]? Recent);
     private sealed record DeskOpenFile(string? Id, string? At);
 }
+
+internal sealed record DeskRead(DeskState State, bool Recovered);
 
 internal sealed record DeskState(IReadOnlyList<string> Pinned, IReadOnlyList<DeskOpen> Recent);
 

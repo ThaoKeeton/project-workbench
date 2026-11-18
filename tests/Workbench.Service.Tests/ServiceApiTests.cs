@@ -328,6 +328,7 @@ public sealed class ServiceApiTests
         await using var running = await StartAsync();
         var initial = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/desk");
         Assert.Equal(2, initial.GetProperty("schemaVersion").GetInt32());
+        Assert.False(initial.GetProperty("recovered").GetBoolean());
         Assert.Equal(UiDeskStore.Known, initial.GetProperty("pinned").EnumerateArray().Select(item => item.GetString()).ToArray());
         Assert.Empty(initial.GetProperty("recent").EnumerateArray());
         var saved = await running.Client.PutAsJsonAsync("/api/v2/ui/desk", new { pinned = new[] { "ding", "upcam" }, touch = "upcam" });
@@ -343,6 +344,7 @@ public sealed class ServiceApiTests
         var deskPath = Path.Combine(running.Root, "v2-preview", "desk.json");
         await File.WriteAllTextAsync(deskPath, """{"schema":"nope","schemaVersion":1,"pinned":["upcam"]}""");
         var recovered = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/desk");
+        Assert.True(recovered.GetProperty("recovered").GetBoolean());
         Assert.Equal(UiDeskStore.Known, recovered.GetProperty("pinned").EnumerateArray().Select(item => item.GetString()).ToArray());
     }
 
