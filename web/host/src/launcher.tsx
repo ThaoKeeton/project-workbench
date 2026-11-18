@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link, useNavigate } from "react-router-dom";
-import { devices, pinnedPlugins, recentPlugins, todayItems, type DeviceId, type IconName } from "./catalog";
+import { devices, pinnedPlugins, type DeviceId, type IconName, type PluginId } from "./catalog";
 import { formatDailySummary } from "./executor/model";
 import { Icon } from "./icons";
 import { Keycap } from "./shell";
@@ -13,7 +13,28 @@ export type PaletteEntry = {
   run: () => void;
 };
 
-export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void; palette?: ReactNode }) {
+export function HomePage({
+  onOpenPalette,
+  palette,
+  plugins = pinnedPlugins,
+  pinned = pinnedPlugins.map((plugin) => plugin.id),
+  recent = [],
+  onOpen,
+  onPin,
+}: {
+  onOpenPalette: () => void;
+  palette?: ReactNode;
+  plugins?: Array<{ id: PluginId; name: string; icon: IconName; hint: string }>;
+  pinned?: string[];
+  recent?: Array<{ id: string; at: string }>;
+  onOpen?: (id: string) => void;
+  onPin?: (id: string, pinned: boolean) => void;
+}) {
+  const navigate = useNavigate();
+  const recentPlugins = recent
+    .map((item) => plugins.find((plugin) => plugin.id === item.id))
+    .filter((plugin): plugin is (typeof plugins)[number] => plugin !== undefined);
+  const open = (id: string) => { if (onOpen) onOpen(id); else void navigate(`/plugin/${id}`); };
   return (
     <div className="launcher">
       {palette ?? (
@@ -25,10 +46,10 @@ export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void
       )}
       {palette ? null : (
         <>
-          <section className="column">
-            <h2 className="section">今日</h2>
-            <ul className="today">
-              {dailySummary() ? (
+          {dailySummary() ? (
+            <section className="column">
+              <h2 className="section">今天</h2>
+              <ul className="today">
                 <li>
                   <Link className="today-link" to="/plugin/runner?filter=todo">
                     <span className="time"><Icon name="activity" size={18} /></span>
@@ -36,23 +57,42 @@ export function HomePage({ onOpenPalette, palette }: { onOpenPalette: () => void
                     <span>{dailySummary()}</span>
                   </Link>
                 </li>
-              ) : null}
-              {todayItems.map((item) => (
-                <li key={item.time}>
-                  <span className="time">{item.time}</span>
-                  <span className="source">{item.source}</span>
-                  <span>{item.title}</span>
-                </li>
-              ))}
-            </ul>
-          </section>
+              </ul>
+            </section>
+          ) : null}
           <section className="column">
             <h2 className="section">最近打开</h2>
-            <div className="tiles">
-              {recentPlugins.map((plugin) => (
-                <PluginTile key={plugin.id} id={plugin.id} name={plugin.name} hint={plugin.hint} icon={plugin.icon} />
-              ))}
-            </div>
+            {recentPlugins.length === 0 ? <p>还没有打开过。从下面选一个，关掉再打开也会记得。</p> : (
+              <div className="tiles">
+                {recentPlugins.map((plugin) => (
+                  <PluginTile key={plugin.id} id={plugin.id} name={plugin.name} hint={plugin.hint} icon={plugin.icon} onOpen={open} />
+                ))}
+              </div>
+            )}
+          </section>
+          <section className="column">
+            <h2 className="section">这台电脑上的插件</h2>
+            <ul className="catalog">
+              {plugins.map((plugin) => {
+                const held = pinned.includes(plugin.id);
+                return (
+                  <li key={plugin.id}>
+                    <button type="button" className="catalog-main" onClick={() => open(plugin.id)}>
+                      <Icon name={plugin.icon} />
+                      <span>
+                        <strong>{plugin.name}</strong>
+                        <small>{plugin.hint}</small>
+                      </span>
+                    </button>
+                    {onPin ? (
+                      <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${plugin.name}` : `把 ${plugin.name} 固定到左侧`} onClick={() => onPin(plugin.id, !held)}>
+                        {held ? "从左侧拿下" : "固定到左侧"}
+                      </button>
+                    ) : null}
+                  </li>
+                );
+              })}
+            </ul>
           </section>
         </>
       )}
@@ -72,10 +112,10 @@ function dailySummary(): string | null {
   }
 }
 
-function PluginTile({ id, name, hint, icon }: { id: string; name: string; hint: string; icon: IconName }) {
+function PluginTile({ id, name, hint, icon, onOpen }: { id: string; name: string; hint: string; icon: IconName; onOpen?: (id: string) => void }) {
   const navigate = useNavigate();
   return (
-    <button type="button" className="tile" onClick={() => { void navigate(`/plugin/${id}`); }}>
+    <button type="button" className="tile" onClick={() => { if (onOpen) onOpen(id); else void navigate(`/plugin/${id}`); }}>
       <Icon name={icon} size={28} />
       <strong>{name}</strong>
       <span>{hint}</span>
@@ -110,7 +150,7 @@ export function CommandPalette({
     }));
     const commands: PaletteEntry[] = [
       { id: "summary", group: "命令", label: "生成今日站会摘要", run: () => onOpenPlugin("upcam") },
-      { id: "market", group: "命令", label: "打开插件市场", run: () => { void navigate("/market"); } },
+      { id: "market", group: "命令", label: "打开这台电脑上的插件", run: () => { void navigate("/market"); } },
     ];
     const deviceEntries: PaletteEntry[] = devices.map((device) => ({
       id: device.id,

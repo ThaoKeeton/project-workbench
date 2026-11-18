@@ -45,6 +45,16 @@ export type Diagnostics = {
 
 export type { Dashboard, Digest, InsightState, NoteFile };
 
+export type Desk = {
+  pinned: string[];
+  recent: Array<{ id: string; at: string }>;
+};
+
+export const defaultDesk: Desk = {
+  pinned: ["upcam", "ding", "test", "runner"],
+  recent: [],
+};
+
 export type CaseRow = { id: string; action: string; expected: string };
 
 export type CaseDocument = {
@@ -150,6 +160,14 @@ export class ApiClient {
 
   async saveTheme(setting: "system" | "light" | "dark"): Promise<void> {
     await this.json("/api/v2/ui/theme", { method: "PUT", body: JSON.stringify({ setting }) });
+  }
+
+  desk(): Promise<Desk> {
+    return this.json("/api/v2/ui/desk");
+  }
+
+  saveDesk(pinned: string[], touch?: string): Promise<Desk> {
+    return this.json("/api/v2/ui/desk", { method: "PUT", body: JSON.stringify({ pinned, touch: touch ?? null }) });
   }
 
   private async json<T>(path: string, init?: RequestInit): Promise<T> {

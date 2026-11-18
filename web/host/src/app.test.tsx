@@ -67,9 +67,9 @@ describe("app shell", () => {
     await user.click(screen.getByRole("menuitem", { name: /书房工作站/ }));
     await user.keyboard("{Control>}k{/Control}");
     const search = await screen.findByRole("textbox", { name: "搜索插件、项目、设备或命令" });
-    await user.type(search, "市场");
+    await user.type(search, "这台电脑");
     await user.keyboard("{Enter}");
-    expect(await screen.findByRole("heading", { name: "插件市场" })).toBeTruthy();
+    expect(await screen.findByRole("heading", { name: "这台电脑上的插件" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "UPCAM 站会日报" }));
     expect(await screen.findByRole("dialog", { name: "远程操作确认" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "确认并继续" }));

@@ -38,6 +38,7 @@ function fresh() {
     chats: {},
     insights: {},
     themeSetting: "system",
+    desk: { pinned: ["upcam", "ding", "test", "runner"], recent: [] },
   };
 }
 
@@ -260,6 +261,22 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/api/v2/diagnostics") return sendJson(response, 200, diagnosticsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/ui/theme") {
     return sendJson(response, 200, { schema: "workbench.ui-theme.v2.preview", schemaVersion: 2, setting: state.themeSetting });
+  }
+  if (request.method === "GET" && url.pathname === "/api/v2/ui/desk") {
+    return sendJson(response, 200, { schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, ...state.desk });
+  }
+  if (request.method === "PUT" && url.pathname === "/api/v2/ui/desk") {
+    const body = JSON.parse(await readBody(request));
+    const known = ["upcam", "ding", "test", "runner"];
+    const pinned = Array.isArray(body.pinned) ? body.pinned : null;
+    if (!pinned || pinned.length > 6 || pinned.some((id) => !known.includes(id)) || new Set(pinned).size !== pinned.length) {
+      return sendJson(response, 400, { error: "InvalidDesk" });
+    }
+    const touch = body.touch ?? null;
+    if (touch !== null && !known.includes(touch)) return sendJson(response, 400, { error: "InvalidDesk" });
+    const recent = touch ? [{ id: touch, at: new Date().toISOString() }, ...state.desk.recent.filter((item) => item.id !== touch)].slice(0, 8) : state.desk.recent;
+    state.desk = { pinned, recent };
+    return sendJson(response, 200, { schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, ...state.desk });
   }
   if (request.method === "PUT" && url.pathname === "/api/v2/ui/theme") {
     const body = JSON.parse(await readBody(request));

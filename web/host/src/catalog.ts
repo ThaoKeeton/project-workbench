@@ -38,19 +38,6 @@ export const pinnedPlugins: Array<{ id: PluginId; name: string; icon: IconName; 
   { id: "runner", name: "自动测试", icon: "activity", hint: "选一个程序，用一句话说要测什么" },
 ];
 
-export const todayItems = [
-  { time: "09:20", source: "钉钉 Insights", title: "合成导出可按需分析，发送保持关闭" },
-  { time: "09:12", source: "UPCAM", title: "SYN-014 登录页对照仍在进行" },
-  { time: "昨天", source: "测试设计", title: "合成检查 6 / 6 通过，不替代人工验收" },
-];
-
-export const recentPlugins = [
-  { id: "upcam" as const, name: "UPCAM 站会日报", hint: "采集站会记录并生成今日摘要", icon: "clipboard" as const },
-  { id: "ding" as const, name: "钉钉 Insights", hint: "按需检查群聊洞察，不代发", icon: "chat" as const },
-  { id: "test" as const, name: "测试设计", hint: "运行合成检查看板，仍需人工验收", icon: "flask" as const },
-  { id: "runner" as const, name: "自动测试", hint: "选程序，说一句，看着它做一遍", icon: "activity" as const },
-];
-
 export const devices = [
   { id: "local", group: "本机", name: "星河笔记本", status: "当前设备", remote: false, icon: "laptop", dot: "on" },
   { id: "study", group: "局域网", name: "书房工作站", status: "在线 · LAN", remote: true, icon: "server", dot: "on" },

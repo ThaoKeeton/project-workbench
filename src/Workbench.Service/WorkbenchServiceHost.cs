@@ -181,6 +181,20 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
             await UiThemeStore.WriteAsync(_userRoot, body.Setting!, cancellationToken);
             return Results.Json(new { schema = UiThemeStore.Schema, schemaVersion = 2, setting = body.Setting }, Json);
         });
+        app.MapGet("/api/v2/ui/desk", async (CancellationToken cancellationToken) =>
+            Results.Json(DeskBody(await UiDeskStore.ReadAsync(_userRoot, cancellationToken)), Json));
+        app.MapPut("/api/v2/ui/desk", async (DeskWriteBody body, CancellationToken cancellationToken) =>
+        {
+            try
+            {
+                var saved = await UiDeskStore.WriteAsync(_userRoot, body.Pinned, string.IsNullOrWhiteSpace(body.Touch) ? null : body.Touch, cancellationToken);
+                return Results.Json(DeskBody(saved), Json);
+            }
+            catch (ArgumentOutOfRangeException)
+            {
+                return Results.Json(new { error = "InvalidDesk" }, Json, statusCode: StatusCodes.Status400BadRequest);
+            }
+        });
         app.MapPost("/api/v2/session", (HttpContext context) =>
         {
             // Loopback preview speaks HTTP. Forcing Secure would make the browser drop the cookie.
@@ -405,8 +419,17 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
     private static Task SendAsync(WebSocket socket, string message, CancellationToken cancellationToken)
         => socket.SendAsync(Encoding.UTF8.GetBytes(message), WebSocketMessageType.Text, endOfMessage: true, cancellationToken);
 
+    private static object DeskBody(DeskState desk) => new
+    {
+        schema = UiDeskStore.Schema,
+        schemaVersion = 2,
+        pinned = desk.Pinned,
+        recent = desk.Recent.Select(item => new { id = item.Id, at = item.At }).ToArray()
+    };
+
     private sealed record SwitchBody(string? Id, string? ExpectedRevision);
     private sealed record ThemeSettingBody(string? Setting);
+    private sealed record DeskWriteBody(string[]? Pinned, string? Touch);
 
     private sealed class PreviewEvents
     {

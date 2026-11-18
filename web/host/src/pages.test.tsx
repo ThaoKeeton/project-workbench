@@ -44,7 +44,7 @@ describe("launcher pages", () => {
     const user = userEvent.setup();
     render(<MemoryRouter><HomePage onOpenPalette={vi.fn()} /></MemoryRouter>);
     expect(screen.getByRole("button", { name: /搜索插件、项目、设备或命令/ })).toBeTruthy();
-    expect(screen.getByText("合成检查 6 / 6 通过，不替代人工验收")).toBeTruthy();
+    expect(screen.getByText("还没有打开过。从下面选一个，关掉再打开也会记得。")).toBeTruthy();
     expect(screen.getByRole("button", { name: /自动测试/ })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: /UPCAM 站会日报/ }));
   });
@@ -65,23 +65,21 @@ describe("launcher pages", () => {
     render(<MemoryRouter><MarketPage onOpen={vi.fn()} /></MemoryRouter>);
     await user.click(screen.getByRole("tab", { name: "测试" }));
     expect(screen.getByText("用例仓库")).toBeTruthy();
-    await user.click(screen.getAllByRole("button", { name: "安装" })[0]);
-    expect(screen.getByRole("dialog")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "取消" }));
+    expect(screen.getAllByRole("button", { name: "不在这台电脑上" }).length).toBeGreaterThan(0);
     expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   it("shows installed detail, updates, and the import checklist", async () => {
     const user = userEvent.setup();
-    const { unmount } = render(<MemoryRouter><InstalledPage onOpen={vi.fn()} /></MemoryRouter>);
+    const onPin = vi.fn();
+    const { unmount } = render(<MemoryRouter><InstalledPage onOpen={vi.fn()} pinned={["upcam"]} onPin={onPin} /></MemoryRouter>);
     await user.click(screen.getAllByRole("button", { name: /钉钉 Insights/ })[0]);
-    await user.click(screen.getByRole("button", { name: "卸载" }));
+    await user.click(screen.getByRole("button", { name: "把 钉钉 Insights 固定到左侧" }));
+    expect(onPin).toHaveBeenCalledWith("ding", true);
     unmount();
     render(<MemoryRouter><UpdatesPage /></MemoryRouter>);
-    await user.click(screen.getByRole("button", { name: /钉钉 Insights/ }));
-    expect(screen.getByText("热点计算忽略已撤回的消息")).toBeTruthy();
-    await user.click(screen.getByRole("button", { name: "更新全部" }));
-    expect(screen.getAllByRole("button", { name: "已更新" }).length).toBeGreaterThan(0);
+    expect(screen.getByText("没有可下载的更新。这些插件随工作台放在这台电脑上，这里不会从网上下载。")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "更新全部" })).toBeNull();
     cleanup();
     render(<MemoryRouter><ImportPage onOpen={vi.fn()} /></MemoryRouter>);
     expect(screen.getByText("未请求网络访问")).toBeTruthy();

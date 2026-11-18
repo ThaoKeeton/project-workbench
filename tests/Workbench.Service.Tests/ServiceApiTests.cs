@@ -323,6 +323,30 @@ public sealed class ServiceApiTests
     }
 
     [Fact]
+    public async Task Desk_pins_and_recent_opens_stay_beside_schema_1()
+    {
+        await using var running = await StartAsync();
+        var initial = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/desk");
+        Assert.Equal(2, initial.GetProperty("schemaVersion").GetInt32());
+        Assert.Equal(UiDeskStore.Known, initial.GetProperty("pinned").EnumerateArray().Select(item => item.GetString()).ToArray());
+        Assert.Empty(initial.GetProperty("recent").EnumerateArray());
+        var saved = await running.Client.PutAsJsonAsync("/api/v2/ui/desk", new { pinned = new[] { "ding", "upcam" }, touch = "upcam" });
+        Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+        var again = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/desk");
+        Assert.Equal(new[] { "ding", "upcam" }, again.GetProperty("pinned").EnumerateArray().Select(item => item.GetString()).ToArray());
+        Assert.Equal("upcam", again.GetProperty("recent")[0].GetProperty("id").GetString());
+        var rejected = await running.Client.PutAsJsonAsync("/api/v2/ui/desk", new { pinned = new[] { "minutes" }, touch = "upcam" });
+        Assert.Equal(HttpStatusCode.BadRequest, rejected.StatusCode);
+        Assert.Equal("InvalidDesk", (await rejected.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+        var catalog = JsonDocument.Parse(await File.ReadAllBytesAsync(Path.Combine(running.Root, ".workspaces", "catalog.json")));
+        Assert.Equal(1, catalog.RootElement.GetProperty("schemaVersion").GetInt32());
+        var deskPath = Path.Combine(running.Root, "v2-preview", "desk.json");
+        await File.WriteAllTextAsync(deskPath, """{"schema":"nope","schemaVersion":1,"pinned":["upcam"]}""");
+        var recovered = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/desk");
+        Assert.Equal(UiDeskStore.Known, recovered.GetProperty("pinned").EnumerateArray().Select(item => item.GetString()).ToArray());
+    }
+
+    [Fact]
     public async Task Startup_rejects_a_missing_host_and_a_weak_token()
     {
         var root = TempRoot();

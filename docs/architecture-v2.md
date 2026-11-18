@@ -101,6 +101,7 @@ npx electron . --smoke --user-root "$root" --ui-dist "$(pwd)/../../web/host/dist
 | POST | `/api/v2/plugins/com.projectworkbench.dingtalk-insights.v2/actions/send` | 始终 `SendDisabled`，不打开网络 |
 | GET | `/api/v2/plugins/com.projectworkbench.testing-design.v2/actions/dashboard` | 合成检查看板，人工验收保持未验收 |
 | GET/PUT | `/api/v2/ui/theme` | 界面主题 `system` / `light` / `dark`。文件是 `v2-preview/ui-theme.json`，`schemaVersion` 为 2 |
+| GET/PUT | `/api/v2/ui/desk` | 左侧固定和最近打开。只接受已经在这台电脑上的 `upcam`、`ding`、`test`、`runner`。文件是 `v2-preview/desk.json`，`schemaVersion` 为 2，不写入 schema 1 |
 
 不兼容的变更要提高 `preview` 版本，并继续留在 `/api/v2` 之外的新路径上，直到有意发布稳定的 v2。不要把新字段写进 schema 1 的目录、上下文或测试存储。
 

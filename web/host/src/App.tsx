@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Route, Routes, useLocation, useNavigate, useParams } from "react-router-dom";
-import { ApiClient, readSessionToken, type Diagnostics, type Info, type PluginItem, type Projects } from "./api";
+import { ApiClient, defaultDesk, readSessionToken, type Desk, type Diagnostics, type Info, type PluginItem, type Projects } from "./api";
 import { deviceLabel, devices, pinnedPlugins, type DeviceId } from "./catalog";
 import { CommandPalette, HomePage } from "./launcher";
 import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
@@ -28,18 +28,23 @@ export function App() {
   const [deviceId, setDeviceId] = useState<DeviceId>("local");
   const [deviceOpen, setDeviceOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [projectOpen, setProjectOpen] = useState(false);
+  const [desk, setDesk] = useState<Desk>(defaultDesk);
+  const [notice, setNotice] = useState("");
   const [confirm, setConfirm] = useState<{ title: string; body: string; onConfirm: () => void } | null>(null);
   const [restore, setRestore] = useState(true);
   const [reduceMotion, setReduceMotion] = useState(false);
 
   const reload = useCallback(async () => {
-    const [info, projects, plugins, diagnostics] = await Promise.all([
+    const [info, projects, plugins, diagnostics, nextDesk] = await Promise.all([
       client.info(),
       client.projects(),
       client.plugins(),
       client.diagnostics(),
+      client.desk().catch(() => defaultDesk),
     ]);
     setError("");
+    setDesk(nextDesk);
     setSnapshot((current) => ({ info, projects, plugins, diagnostics, channel: current?.channel ?? "未连接" }));
   }, [client]);
 
@@ -102,20 +107,65 @@ export function App() {
     client.saveTheme(next).catch(() => undefined);
   };
 
+  const rememberOpen = (id: string) => {
+    const pinned = desk.pinned;
+    client.saveDesk(pinned, id).then(setDesk).catch(() => setNotice("这次打开没能记下来。左侧固定和最近打开还是上次的。"));
+  };
+
   const openPlugin = (id: string) => {
     const plugin = pinnedPlugins.find((item) => item.id === id);
+    if (!plugin) {
+      setNotice("这个插件不在这台电脑上，没有打开。");
+      return;
+    }
+    const go = () => {
+      rememberOpen(plugin.id);
+      void navigate(`/plugin/${plugin.id}`);
+    };
     const device = devices.find((item) => item.id === deviceId);
     if (device?.remote) {
       setConfirm({
         title: "远程操作确认",
-        body: `你即将在「${device.name}」上打开 ${plugin?.name ?? "插件"}。对方屏幕会看到此次操作，并可随时断开。`,
-        onConfirm: () => {
-          void navigate(`/plugin/${id}`);
-        },
+        body: `你即将在「${device.name}」上打开 ${plugin.name}。对方屏幕会看到此次操作，并可随时断开。`,
+        onConfirm: go,
       });
       return;
     }
-    void navigate(`/plugin/${id}`);
+    go();
+  };
+
+  const changePin = (id: string, next: boolean) => {
+    const pinned = next ? [...desk.pinned.filter((item) => item !== id), id] : desk.pinned.filter((item) => item !== id);
+    const plugin = pinnedPlugins.find((item) => item.id === id);
+    client.saveDesk(pinned).then((saved) => {
+      setDesk(saved);
+      setNotice(next ? `「${plugin?.name ?? "插件"}」已固定到左侧。关掉再打开还在。` : `「${plugin?.name ?? "插件"}」已从左侧拿下。`);
+    }).catch(() => setNotice("没能记下这次改动。左侧还是上次的。"));
+  };
+
+  const switchProject = (id: string) => {
+    const current = snapshot?.projects;
+    const revision = current?.revision;
+    const currentName = current?.projects.find((project) => project.id === current.activeProjectId)?.name ?? "当前项目";
+    const target = current?.projects.find((project) => project.id === id);
+    setProjectOpen(false);
+    if (!revision || !target) {
+      setNotice("没能换过去。项目列表还没读好，请再试一次。");
+      return;
+    }
+    if (id === current?.activeProjectId) return;
+    client.switchProject(id, revision).then(async (projects) => {
+      const [info, plugins, diagnostics] = await Promise.all([client.info(), client.plugins(), client.diagnostics()]);
+      setSnapshot({ info, projects, plugins, diagnostics, channel: snapshot?.channel ?? "已连接" });
+      setNotice(`已换到「${target.name}」。`);
+    }).catch(async (reason: unknown) => {
+      if (reason instanceof Error && reason.message === "RevisionConflict") {
+        await reload().catch(() => undefined);
+        setNotice("项目列表刚被更新，已重新读取。请再选一次。");
+        return;
+      }
+      setNotice(`没能换到「${target.name}」。现在还是「${currentName}」。`);
+    });
   };
 
   if (!token) return <p role="alert">未找到本机会话。请从工作台外壳打开。</p>;
@@ -132,35 +182,35 @@ export function App() {
       onClose={() => setPaletteOpen(false)}
       onOpenPlugin={openPlugin}
       onPickDevice={(id) => { setDeviceId(id); setDeviceOpen(false); }}
-      onSwitchProject={(id) => {
-        const revision = snapshot?.projects.revision;
-        if (!revision) return;
-        client.switchProject(id, revision).then(async (projects) => {
-          const [info, plugins, diagnostics] = await Promise.all([client.info(), client.plugins(), client.diagnostics()]);
-          setSnapshot({ info, projects, plugins, diagnostics, channel: snapshot?.channel ?? "已连接" });
-        }).catch(() => setError("无法切换项目。"));
-      }}
+      onSwitchProject={switchProject}
     />
   ) : null;
 
   return (
     <Shell
       projectName={projectName}
+      activeProjectId={snapshot?.projects.activeProjectId ?? ""}
+      projects={(snapshot?.projects.projects ?? []).filter((item) => !item.isArchived)}
+      projectOpen={projectOpen}
+      onToggleProject={() => { setProjectOpen((open) => !open); setDeviceOpen(false); }}
+      onSwitchProject={switchProject}
       deviceId={deviceId}
       deviceOpen={deviceOpen}
-      onToggleDevice={() => setDeviceOpen((open) => !open)}
+      onToggleDevice={() => { setDeviceOpen((open) => !open); setProjectOpen(false); }}
       onPickDevice={(id) => { setDeviceId(id); setDeviceOpen(false); }}
       onPair={() => { setDeviceOpen(false); void navigate("/devices"); }}
+      plugins={pinnedPlugins.filter((plugin) => desk.pinned.includes(plugin.id))}
       onOpenPlugin={openPlugin}
+      notice={notice}
       remote={remote}
     >
       {error && !snapshot ? <OfflinePage onRetry={() => { setError(""); void reload(); }} /> : null}
       {!snapshot && !error ? <p className="page">正在读取本机服务…</p> : null}
       {snapshot ? (
         <Routes>
-          <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} />} />
-          <Route path="/market" element={<MarketPage onOpen={openPlugin} />} />
-          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} />} />
+          <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} pinned={desk.pinned} recent={desk.recent} onOpen={openPlugin} onPin={changePin} />} />
+          <Route path="/market" element={<MarketPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} />} />
+          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} />} />
           <Route path="/market/updates" element={<UpdatesPage />} />
           <Route path="/market/import" element={<ImportPage onOpen={openPlugin} />} />
           <Route path="/market/:id" element={<MarketDetail />} />

@@ -1,6 +1,6 @@
 import type { ReactNode } from "react";
 import { NavLink, useLocation } from "react-router-dom";
-import { deviceLabel, devices, pinnedPlugins, type DeviceId, type IconName, type PluginId } from "./catalog";
+import { deviceLabel, devices, type DeviceId, type IconName, type PluginId } from "./catalog";
 import { Icon, WindowGlyph } from "./icons";
 
 const railBottom: Array<{ to: string; label: string; icon: IconName }> = [
@@ -12,22 +12,36 @@ const railBottom: Array<{ to: string; label: string; icon: IconName }> = [
 
 export function Shell({
   projectName,
+  activeProjectId,
+  projects,
+  projectOpen,
+  onToggleProject,
+  onSwitchProject,
   deviceId,
   deviceOpen,
   onToggleDevice,
   onPickDevice,
   onPair,
+  plugins,
   onOpenPlugin,
+  notice,
   remote,
   children,
 }: {
   projectName: string;
+  activeProjectId: string;
+  projects: Array<{ id: string; name: string }>;
+  projectOpen: boolean;
+  onToggleProject: () => void;
+  onSwitchProject: (id: string) => void;
   deviceId: DeviceId;
   deviceOpen: boolean;
   onToggleDevice: () => void;
   onPickDevice: (id: DeviceId) => void;
   onPair: () => void;
+  plugins: Array<{ id: PluginId; name: string; icon: IconName }>;
   onOpenPlugin: (id: PluginId) => void;
+  notice?: string;
   remote: boolean;
   children: ReactNode;
 }) {
@@ -39,7 +53,23 @@ export function Shell({
         <div className="top-grow" />
         {remote ? <span className="remote-pill"><i />远程会话</span> : null}
         <div className="top-context">
-          <span className="context-project">{projectName}</span>
+          <div className="project">
+            <button type="button" className="context-project device-trigger" aria-haspopup="menu" aria-expanded={projectOpen} aria-label={`当前项目 ${projectName}`} onClick={onToggleProject}>
+              {projectName} ▾
+            </button>
+            {projectOpen ? (
+              <div className="device-menu project-menu" role="menu" aria-label="切换项目">
+                {projects.map((project) => (
+                  <button key={project.id} type="button" role="menuitem" className={project.id === activeProjectId ? "is-current" : ""} onClick={() => onSwitchProject(project.id)}>
+                    <span>
+                      <strong>{project.name}</strong>
+                      {project.id === activeProjectId ? <small>当前</small> : null}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
           <span className="context-dot" aria-hidden="true">·</span>
         <div className="device">
           <button type="button" className="device-trigger" aria-expanded={deviceOpen} aria-haspopup="menu" onClick={onToggleDevice}>
@@ -76,7 +106,7 @@ export function Shell({
       <div className="shell-body">
         <nav className="rail" aria-label="主导航">
           <RailLink to="/" label="首页" icon="home" end />
-          {pinnedPlugins.map((plugin) => (
+          {plugins.map((plugin) => (
             <button
               key={plugin.id}
               type="button"
@@ -94,7 +124,10 @@ export function Shell({
             <RailLink key={item.to} to={item.to} label={item.label} icon={item.icon} />
           ))}
         </nav>
-        <div className="shell-main">{children}</div>
+        <div className="shell-main">
+          {notice ? <p className="desk-note" role="status">{notice}</p> : null}
+          {children}
+        </div>
       </div>
     </div>
   );

@@ -36,6 +36,53 @@ test("project switch updates the current project", async ({ page }) => {
   await expect(page.locator(".context-project")).toContainText("灯塔实验");
 });
 
+test("pins, a recent plugin, and the project remain after reload", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await chooseTheme(page, "浅色");
+  await page.goto("/");
+  const rail = page.getByRole("navigation", { name: "主导航" });
+  await expect(rail.getByRole("button", { name: "测试设计" })).toBeVisible();
+  await page.getByRole("button", { name: "从左侧拿下 测试设计" }).click();
+  await expect(page.getByRole("status")).toHaveText("「测试设计」已从左侧拿下。");
+  await expect(rail.getByRole("button", { name: "测试设计" })).toHaveCount(0);
+  await page.getByRole("button", { name: /UPCAM 站会日报/ }).first().click();
+  await expect(page.getByRole("heading", { name: "站会日报" })).toBeVisible();
+  await page.goto("/");
+  await expect(page.getByRole("heading", { name: "最近打开" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /UPCAM 站会日报/ }).first()).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("navigation", { name: "主导航" }).getByRole("button", { name: "测试设计" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /UPCAM 站会日报/ }).first()).toBeVisible();
+  await shot(page, "desk-recent-1100-light");
+  await page.getByRole("button", { name: /当前项目/ }).click();
+  await shot(page, "desk-projects-1100-light");
+  await page.getByRole("menuitem", { name: "灯塔实验" }).click();
+  await expect(page.getByRole("status")).toHaveText("已换到「灯塔实验」。");
+  await shot(page, "desk-switched-1100-light");
+  await page.reload();
+  await expect(page.getByRole("button", { name: /当前项目/ })).toContainText("灯塔实验");
+  await chooseTheme(page, "深色");
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.goto("/");
+  await shot(page, "desk-recent-1100-dark");
+  await page.getByRole("button", { name: /当前项目/ }).click();
+  await page.getByRole("menuitem", { name: "星河协作" }).click();
+  await expect(page.getByRole("status")).toHaveText("已换到「星河协作」。");
+  await shot(page, "desk-switched-1100-dark");
+});
+
+test("a stale project list asks for another try", async ({ page }) => {
+  await page.setViewportSize({ width: 1100, height: 800 });
+  await page.goto("/");
+  await page.route("**/api/v2/projects/active", async (route) => {
+    await route.fulfill({ status: 409, contentType: "application/json", body: JSON.stringify({ error: "RevisionConflict" }) });
+  });
+  await page.getByRole("button", { name: /当前项目/ }).click();
+  await page.getByRole("menuitem", { name: "灯塔实验" }).click();
+  await expect(page.getByRole("status")).toHaveText("项目列表刚被更新，已重新读取。请再选一次。");
+  await expect(page.getByRole("button", { name: /当前项目/ })).toContainText("星河协作");
+});
+
 test("sample cases stay on their own local page", async ({ page }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
   await chooseTheme(page, "深色");
@@ -119,14 +166,14 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
 
     test("market, installed, updates, and import", async ({ page }) => {
       await page.goto("/market");
-      await expect(page.getByRole("heading", { name: "插件市场" })).toBeVisible();
-      await expect(page.getByRole("button", { name: "安装" }).first()).toBeVisible();
+      await expect(page.getByRole("heading", { name: "这台电脑上的插件" })).toBeVisible();
+      await expect(page.getByRole("button", { name: "不在这台电脑上" }).first()).toBeVisible();
       await shot(page, `market-${theme}`);
       await page.getByRole("link", { name: "已安装" }).click();
       await expect(page.getByRole("heading", { name: "已安装" })).toBeVisible();
       await shot(page, `installed-${theme}`);
       await page.getByRole("link", { name: "更新" }).click();
-      await expect(page.getByText("即将安装")).toBeVisible();
+      await expect(page.getByText("没有可下载的更新。这些插件随工作台放在这台电脑上，这里不会从网上下载。")).toBeVisible();
       await shot(page, `updates-${theme}`);
       await page.getByRole("link", { name: "本地导入" }).click();
       await expect(page.getByText("未请求网络访问")).toBeVisible();
