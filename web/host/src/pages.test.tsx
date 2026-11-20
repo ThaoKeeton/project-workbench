@@ -67,14 +67,25 @@ describe("launcher pages", () => {
     sessionStorage.removeItem("workbench.author.summary");
   });
 
-  it("shows only plugins read from this computer", () => {
-    render(<MemoryRouter><MarketPage onOpen={vi.fn()} plugins={[
-      { id: "test", name: "测试设计", hint: "用例仓库与失败分流", icon: "flask", state: "可以用", loaded: true },
-      { id: "ding", name: "钉钉 Insights", hint: "看本周沟通热点", icon: "chat", state: "没能载入", loaded: false },
+  it("shows only plugins read from this computer", async () => {
+    const user = userEvent.setup();
+    const onOpen = vi.fn();
+    render(<MemoryRouter><MarketPage onOpen={onOpen} plugins={[
+      { id: "test", openId: "test", name: "测试设计", version: "0.1.0", icon: "flask", state: "可以用", loaded: true, href: "/plugin/test" },
+      { id: "ding", openId: "ding", name: "钉钉 Insights", version: "0.1.0", icon: "chat", state: "没能载入", loaded: false, href: "/plugin/ding" },
     ]} /></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "浏览" })).toBeTruthy();
+    expect(screen.getByText("这里只列出这台电脑上读到的插件。没有网上目录，也不能从这里安装。")).toBeTruthy();
     expect(screen.getByText("可以用")).toBeTruthy();
-    expect(screen.getByRole("button", { name: "没能载入" })).toBeTruthy();
+    expect(screen.getAllByText("本机版本 0.1.0").length).toBe(2);
+    expect(screen.getByRole("button", { name: "不能打开" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "安装" })).toBeNull();
+    expect(screen.queryByText("会议纪要助手")).toBeNull();
+    await user.click(screen.getByRole("button", { name: "打开" }));
+    expect(onOpen).toHaveBeenCalledWith("test");
+    cleanup();
+    render(<MemoryRouter><MarketPage onOpen={vi.fn()} plugins={[]} /></MemoryRouter>);
+    expect(screen.getByText("这台电脑上还没有读到插件。")).toBeTruthy();
   });
 
   it("shows installed detail, updates, and the import checklist", async () => {
@@ -85,9 +96,15 @@ describe("launcher pages", () => {
     await user.click(screen.getByRole("button", { name: "把 钉钉 Insights 固定到左侧" }));
     expect(onPin).toHaveBeenCalledWith("ding", true);
     unmount();
-    render(<MemoryRouter><UpdatesPage /></MemoryRouter>);
-    expect(screen.getByText("没有可下载的更新。这些插件随工作台放在这台电脑上，这里不会从网上下载。")).toBeTruthy();
+    render(<MemoryRouter><UpdatesPage plugins={[{ id: "upcam", openId: "upcam", name: "UPCAM 站会日报", version: "0.1.0", icon: "clipboard", state: "可以用", loaded: true, href: "/plugin/upcam" }]} /></MemoryRouter>);
+    expect(screen.getByText("没有可下载的更新。下面是这台电脑上的版本，不会从网上下载，也不能在这里卸掉。")).toBeTruthy();
+    expect(screen.getByText("本机版本 0.1.0")).toBeTruthy();
+    expect(screen.getByText("没有可下载的更新")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "更新全部" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "安装" })).toBeNull();
+    cleanup();
+    render(<MemoryRouter><UpdatesPage plugins={[]} /></MemoryRouter>);
+    expect(screen.getByText("这台电脑上还没有读到插件。")).toBeTruthy();
     cleanup();
     const onCheck = vi.fn(async () => ({ importable: false, error: "InvalidManifest", fileName: "sample.plugin.v2.json", plugin: null, checks: [{ id: "manifest", ok: false, text: "这不是插件清单。请选择 plugin.v2.json。" }] }));
     render(<MemoryRouter><ImportPage onCheck={onCheck} onCommit={vi.fn()} /></MemoryRouter>);
@@ -227,7 +244,19 @@ describe("launcher pages", () => {
     render(<MemoryRouter initialEntries={["/plugin/ding"]}><Routes><Route path="/plugin/:id" element={<PluginWorkspace client={client} />} /></Routes></MemoryRouter>);
     expect(screen.getByRole("heading", { name: "钉钉 Insights" })).toBeTruthy();
     cleanup();
-    render(<MemoryRouter initialEntries={["/market/minutes"]}><Routes><Route path="/market/:id" element={<MarketDetail />} /></Routes></MemoryRouter>);
-    expect(screen.getByRole("heading", { name: "没有这条网上介绍" })).toBeTruthy();
+    render(<MemoryRouter initialEntries={["/market/minutes"]}><Routes><Route path="/market/:id" element={<MarketDetail plugins={[]} />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "这台电脑上没有这个插件" })).toBeTruthy();
+    expect(screen.getByText("没有去网上查，也不能从这里安装。")).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter initialEntries={["/market/com.example.synthetic-notes"]}><Routes><Route path="/market/:id" element={<MarketDetail plugins={[{ id: "com.example.synthetic-notes", openId: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0", icon: "folder", state: "已安装，尚未启用", loaded: false, href: "" }]} />} /></Routes></MemoryRouter>);
+    expect(screen.getByRole("heading", { name: "合成备忘" })).toBeTruthy();
+    expect(screen.getByText("0.1.0")).toBeTruthy();
+    expect(screen.getByText("这台电脑")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "尚未启用" }) as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+    const onOpen = vi.fn();
+    render(<MemoryRouter initialEntries={["/market/com.projectworkbench.upcam-standup.v2"]}><Routes><Route path="/market/:id" element={<MarketDetail onOpen={onOpen} plugins={[{ id: "com.projectworkbench.upcam-standup.v2", openId: "upcam", name: "UPCAM 站会日报", version: "0.1.0", icon: "clipboard", state: "可以用", loaded: true, href: "/plugin/upcam" }]} />} /></Routes></MemoryRouter>);
+    await user.click(screen.getByRole("button", { name: "打开" }));
+    expect(onOpen).toHaveBeenCalledWith("upcam");
   });
 });

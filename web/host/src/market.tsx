@@ -1,38 +1,47 @@
 import { useState } from "react";
-import { NavLink, useParams } from "react-router-dom";
-import type { MarketBadge } from "./catalog";
+import { Link, NavLink, useParams } from "react-router-dom";
 import type { ImportReport } from "./api";
 import type { IconName } from "./catalog";
 import { Icon } from "./icons";
+
+export type LocalPlugin = {
+  id: string;
+  openId: string;
+  name: string;
+  version: string;
+  icon: IconName;
+  state: string;
+  loaded: boolean;
+  href: string;
+};
 
 export function MarketPage({
   onOpen,
   plugins = [],
 }: {
   onOpen: (id: string) => void;
-  pinned?: string[];
-  onPin?: (id: string, pinned: boolean) => void;
-  plugins?: Array<{ id: string; name: string; hint: string; icon: IconName; state?: string; loaded?: boolean }>;
+  plugins?: LocalPlugin[];
 }) {
   return (
     <div className="page">
       <header className="page-head">
-        <h1>这台电脑上的插件</h1>
-        <p>下面是本机刚读到的插件。没有网上的商店，也不会下载未知插件。</p>
+        <h1>浏览</h1>
+        <p>这里只列出这台电脑上读到的插件。没有网上目录，也不能从这里安装。</p>
         <MarketNav />
       </header>
-      {plugins.length === 0 ? <p>还没有从本机读到可以打开的插件。</p> : (
+      {plugins.length === 0 ? <p>这台电脑上还没有读到插件。</p> : (
         <ul className="catalog">
           {plugins.map((item) => (
             <li key={item.id}>
-              <span className="catalog-main">
+              <Link className="catalog-main" to={`/market/${encodeURIComponent(item.id)}`}>
                 <Icon name={item.icon} />
                 <span>
                   <strong>{item.name}</strong>
-                  <small>{item.state ?? item.hint}</small>
+                  <small>本机版本 {item.version}</small>
+                  <small>{item.state}</small>
                 </span>
-              </span>
-              {item.loaded === false ? <button type="button" className="btn" disabled>{item.state === "已安装，尚未启用" ? "尚未启用" : "没能载入"}</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
+              </Link>
+              {item.loaded && item.href ? <button type="button" className="btn" onClick={() => onOpen(item.openId)}>打开</button> : <button type="button" className="btn" disabled>{item.state === "已安装，尚未启用" ? "尚未启用" : "不能打开"}</button>}
             </li>
           ))}
         </ul>
@@ -52,21 +61,50 @@ export function MarketNav() {
   );
 }
 
-export function MarketDetail() {
-  const { id } = useParams();
+export function MarketDetail({
+  plugins = [],
+  onOpen,
+}: {
+  plugins?: LocalPlugin[];
+  onOpen?: (id: string) => void;
+}) {
+  const { id = "" } = useParams();
+  const plugin = plugins.find((item) => item.id === decodeURIComponent(id));
+  if (!plugin) {
+    return (
+      <div className="page">
+        <header className="page-head">
+          <h1>这台电脑上没有这个插件</h1>
+          <p>没有去网上查，也不能从这里安装。</p>
+          <MarketNav />
+        </header>
+      </div>
+    );
+  }
   return (
-    <div className="page">
-      <p className="crumb">插件 / {id}</p>
-      <h1>没有这条网上介绍</h1>
-      <p>这里不提供可下载的插件。请回到已安装，看这台电脑上实际读到的插件。</p>
+    <div className="page narrow-page">
+      <header className="page-head">
+        <p className="crumb">浏览 / {plugin.name}</p>
+        <h1>{plugin.name}</h1>
+        <p>这是这台电脑上读到的记录。没有网上的介绍，也不能从这里安装或卸掉。</p>
+        <MarketNav />
+      </header>
+      <ul className="status-rows">
+        <li><span>版本</span><strong>{plugin.version}</strong></li>
+        <li><span>状态</span><strong>{plugin.state}</strong></li>
+        <li><span>来源</span><strong>这台电脑</strong></li>
+      </ul>
+      <div className="row-actions">
+        {plugin.loaded && plugin.href && onOpen ? <button type="button" className="btn-accent" onClick={() => onOpen(plugin.openId)}>打开</button> : <button type="button" className="btn" disabled>{plugin.state === "已安装，尚未启用" ? "尚未启用" : "不能打开"}</button>}
+      </div>
     </div>
   );
 }
 
 const installedRows = [
-  { id: "upcam", name: "UPCAM 站会日报", summary: "整理今日站会并生成草稿", meta: "星河实验室 · v1.4.2", badge: "官方" as const, icon: "clipboard" as const },
-  { id: "ding", name: "钉钉 Insights", summary: "看本周沟通热点与会议节奏", meta: "星河实验室 · v0.9.1", badge: "官方" as const, icon: "chat" as const },
-  { id: "test", name: "测试设计", summary: "用例仓库与失败分流", meta: "青裔测试 · v2.1.0", badge: "已签名" as const, icon: "flask" as const },
+  { id: "upcam", name: "UPCAM 站会日报", summary: "整理今日站会并生成草稿", icon: "clipboard" as const },
+  { id: "ding", name: "钉钉 Insights", summary: "看本周沟通热点与会议节奏", icon: "chat" as const },
+  { id: "test", name: "测试设计", summary: "用例仓库与失败分流", icon: "flask" as const },
 ];
 
 export function InstalledPage({
@@ -125,14 +163,30 @@ export function InstalledPage({
   );
 }
 
-export function UpdatesPage() {
+export function UpdatesPage({ plugins = [] }: { plugins?: LocalPlugin[] }) {
   return (
     <div className="page">
       <header className="page-head">
         <h1>更新</h1>
-        <p>没有可下载的更新。这些插件随工作台放在这台电脑上，这里不会从网上下载。</p>
+        <p>没有可下载的更新。下面是这台电脑上的版本，不会从网上下载，也不能在这里卸掉。</p>
         <MarketNav />
       </header>
+      {plugins.length === 0 ? <p>这台电脑上还没有读到插件。</p> : (
+        <ul className="catalog">
+          {plugins.map((item) => (
+            <li key={item.id}>
+              <span className="catalog-main">
+                <Icon name={item.icon} />
+                <span>
+                  <strong>{item.name}</strong>
+                  <small>本机版本 {item.version}</small>
+                  <small>没有可下载的更新</small>
+                </span>
+              </span>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }
@@ -203,10 +257,6 @@ export function ImportPage({
       ) : null}
     </div>
   );
-}
-
-export function Badge({ value }: { value: MarketBadge }) {
-  return <span className={`badge badge-${value}`}>{value}</span>;
 }
 
 export function Confirm({

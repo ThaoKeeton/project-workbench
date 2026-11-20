@@ -204,14 +204,17 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
 
     test("market, installed, updates, and import", async ({ page }) => {
       await page.goto("/market");
-      await expect(page.getByRole("heading", { name: "这台电脑上的插件" })).toBeVisible();
-      await expect(page.getByText("可以用").first()).toBeVisible();
+      await expect(page.getByRole("heading", { name: "浏览" })).toBeVisible();
+      await expect(page.getByText("这里只列出这台电脑上读到的插件。没有网上目录，也不能从这里安装。")).toBeVisible();
+      await expect(page.getByRole("link", { name: /UPCAM 站会日报/ })).toBeVisible();
+      await expect(page.getByText("会议纪要助手")).toHaveCount(0);
       await shot(page, `market-${theme}`);
       await page.getByRole("link", { name: "已安装" }).click();
       await expect(page.getByRole("heading", { name: "已安装" })).toBeVisible();
       await shot(page, `installed-${theme}`);
       await page.getByRole("link", { name: "更新" }).click();
-      await expect(page.getByText("没有可下载的更新。这些插件随工作台放在这台电脑上，这里不会从网上下载。")).toBeVisible();
+      await expect(page.getByText("没有可下载的更新。下面是这台电脑上的版本，不会从网上下载，也不能在这里卸掉。")).toBeVisible();
+      await expect(page.getByText("本机版本 0.1.0").first()).toBeVisible();
       await shot(page, `updates-${theme}`);
       await page.getByRole("link", { name: "本地导入" }).click();
       await expect(page.getByText("选择这台电脑上的插件清单。先看对这个文件的检查，确认后才记下。不会启用，也不会联网。")).toBeVisible();

@@ -157,6 +157,21 @@ export function App() {
   const shown = locals.length > 0 ? locals : pinnedPlugins.map((plugin) => ({
     ...plugin, loaded: true, state: "可以用", href: `/plugin/${plugin.id}`, pinnable: true,
   }));
+  const records = (snapshot?.plugins ?? []).map((plugin) => {
+    const shellId = plugin.uiPath ? shellPluginId(plugin.uiPath) : null;
+    const known = shellId ? pinnedPlugins.find((item) => item.id === shellId) : undefined;
+    const installed = plugin.state === "Installed";
+    return {
+      id: plugin.id,
+      openId: shellId ?? plugin.id,
+      name: plugin.name,
+      version: plugin.version,
+      icon: installed || !known ? "folder" as const : known.icon,
+      state: installed ? "已安装，尚未启用" : pluginStateLabel(plugin.loaded, plugin.uiPath),
+      loaded: installed ? false : plugin.loaded && Boolean(plugin.uiPath),
+      href: installed ? "" : plugin.uiPath ?? "",
+    };
+  });
   const unopened = (snapshot?.plugins ?? []).filter((plugin) => !plugin.uiPath && plugin.state !== "Installed").map((plugin) => plugin.name);
 
   const openPlugin = (id: string) => {
@@ -262,11 +277,11 @@ export function App() {
       {snapshot ? (
         <Routes>
           <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} plugins={shown} pinned={desk.pinned} recent={desk.recent} onOpen={openPlugin} onPin={changePin} unopened={unopened} />} />
-          <Route path="/market" element={<MarketPage onOpen={openPlugin} plugins={shown} />} />
+          <Route path="/market" element={<MarketPage onOpen={openPlugin} plugins={records} />} />
           <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} plugins={shown} />} />
-          <Route path="/market/updates" element={<UpdatesPage />} />
+          <Route path="/market/updates" element={<UpdatesPage plugins={records} />} />
           <Route path="/market/import" element={<ImportPage onCheck={(fileName, text) => client.checkImport(fileName, text)} onCommit={async (fileName, text) => { await client.commitImport(fileName, text); await reload(); }} />} />
-          <Route path="/market/:id" element={<MarketDetail />} />
+          <Route path="/market/:id" element={<MarketDetail plugins={records} onOpen={openPlugin} />} />
           <Route path="/devices" element={<PairingPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage minimumWidth={snapshot.diagnostics.nativeWindow.minimumWidth} discovered={snapshot.diagnostics.plugins.discovered} ready={snapshot.diagnostics.plugins.ready} />} />
           <Route path="/settings" element={<SettingsPage setting={setting} onChange={chooseTheme} restore={restore} onRestore={setRestore} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} />} />
