@@ -294,6 +294,7 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .feature-card h2, .detail-card h2, .doc h2 { margin: 0; font-size: 16px; }
 .eyebrow { margin: 0; color: var(--accent); font-size: 12px; }
 .btn-accent { background: var(--accent); color: var(--accent-on); border-color: transparent; font-weight: 500; }
+.btn:disabled, .btn-accent:disabled { opacity: 0.45; cursor: default; }
 .btn { background: var(--surface-1); }
 .catalog { list-style: none; width: min(960px, 100%); margin: 16px 0 0; padding: 0; }
 .catalog li, .import-row {

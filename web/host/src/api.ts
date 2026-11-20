@@ -21,6 +21,16 @@ export type Projects = {
   projects: ProjectItem[];
 };
 
+export type ImportCheck = { id: string; ok: boolean; text: string };
+
+export type ImportReport = {
+  importable: boolean;
+  error: string | null;
+  fileName: string;
+  plugin: { id: string; name: string; version: string } | null;
+  checks: ImportCheck[];
+};
+
 export type PluginItem = {
   id: string;
   name: string;
@@ -96,6 +106,14 @@ export class ApiClient {
   async plugins(): Promise<PluginItem[]> {
     const body = await this.json<{ plugins: PluginItem[] }>("/api/v2/plugins");
     return body.plugins;
+  }
+
+  checkImport(fileName: string, text: string): Promise<ImportReport> {
+    return this.json("/api/v2/plugins/import/check", { method: "POST", body: JSON.stringify({ fileName, text }) });
+  }
+
+  commitImport(fileName: string, text: string): Promise<ImportReport> {
+    return this.json("/api/v2/plugins/import", { method: "POST", body: JSON.stringify({ fileName, text }) });
   }
 
   diagnostics(): Promise<Diagnostics> {

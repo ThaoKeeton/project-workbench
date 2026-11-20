@@ -14,6 +14,13 @@ const emptyDigest = {
   schema: "workbench.upcam.digest.v2.preview", schemaVersion: 2, autoSend: false, delivered: false, stored: false, source: "none",
   meetingDate: "2026-11-12", summary: "还没有今日草稿。", speechSummary: "", items: [], speeches: [], skipped: [], issues: [],
 };
+const notesManifest = JSON.stringify({
+  contract: "workbench.plugin.v2", contractVersion: "2.0.0-preview.1", id: "com.example.synthetic-notes",
+  name: "合成备忘", version: "0.1.0", description: "只留在本机的合成清单。", autoSend: false,
+  backend: { entryAssembly: "Notes.dll", entryType: "Example.Notes" },
+  ui: { kind: "web-package", module: "./ui/Notes.tsx", mount: "embedded" },
+  permissions: [{ id: "project.read", reason: "知道当前项目", sensitive: false }],
+});
 const emptyInsights = {
   schema: "workbench.dingtalk.insights.v2.preview", schemaVersion: 2, autoSend: false, sendEnabled: false, webhookConfigured: false,
   delivered: false, stored: false, source: "none", imported: false, analyzed: false, conversation: "", messageCount: 0, insights: [],
@@ -82,11 +89,30 @@ describe("launcher pages", () => {
     expect(screen.getByText("没有可下载的更新。这些插件随工作台放在这台电脑上，这里不会从网上下载。")).toBeTruthy();
     expect(screen.queryByRole("button", { name: "更新全部" })).toBeNull();
     cleanup();
-    render(<MemoryRouter><ImportPage onOpen={vi.fn()} /></MemoryRouter>);
-    expect(screen.getByText("未请求网络访问")).toBeTruthy();
-    const file = new File(["{}"], "sample.pbpack", { type: "application/octet-stream" });
+    const onCheck = vi.fn(async () => ({ importable: false, error: "InvalidManifest", fileName: "sample.plugin.v2.json", plugin: null, checks: [{ id: "manifest", ok: false, text: "这不是插件清单。请选择 plugin.v2.json。" }] }));
+    render(<MemoryRouter><ImportPage onCheck={onCheck} onCommit={vi.fn()} /></MemoryRouter>);
+    const file = new File(["{}"], "sample.plugin.v2.json", { type: "application/json" });
     await user.upload(screen.getByLabelText("选择文件"), file);
-    expect(screen.getByText("sample.pbpack")).toBeTruthy();
+    expect(await screen.findByText("这不是插件清单。请选择 plugin.v2.json。")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "确认记在这台电脑上" }) as HTMLButtonElement).disabled).toBe(true);
+    cleanup();
+    const onCommit = vi.fn(async () => undefined);
+    render(<MemoryRouter><ImportPage onCheck={async () => ({ importable: true, error: null, fileName: "notes.plugin.v2.json", plugin: { id: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0" }, checks: [{ id: "manifest", ok: true, text: "这是一份插件清单。" }, { id: "permissions", ok: true, text: "允许「project.read」：知道当前项目。不会联网。" }] })} onCommit={onCommit} /></MemoryRouter>);
+    await user.upload(screen.getByLabelText("选择文件"), new File([notesManifest], "notes.plugin.v2.json", { type: "application/json" }));
+    expect(await screen.findByText("这是一份插件清单。")).toBeTruthy();
+    expect(screen.getByText("允许「project.read」：知道当前项目。不会联网。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "确认记在这台电脑上" }));
+    expect(await screen.findByText("「合成备忘」已记在这台电脑上，还没有启用。")).toBeTruthy();
+    expect(onCommit).toHaveBeenCalledWith("notes.plugin.v2.json", notesManifest);
+    cleanup();
+    render(<MemoryRouter><ImportPage onCheck={async () => { throw new Error("offline"); }} onCommit={vi.fn()} /></MemoryRouter>);
+    await user.upload(screen.getByLabelText("选择文件"), new File(["{}"], "broken.json", { type: "application/json" }));
+    expect(await screen.findByText("没能检查这个文件。没有写入。")).toBeTruthy();
+    cleanup();
+    render(<MemoryRouter><ImportPage onCheck={async () => ({ importable: true, error: null, fileName: "notes.plugin.v2.json", plugin: null, checks: [{ id: "manifest", ok: true, text: "这是一份插件清单。" }] })} onCommit={async () => { throw new Error("refused"); }} /></MemoryRouter>);
+    await user.upload(screen.getByLabelText("选择文件"), new File(["{}"], "notes.plugin.v2.json", { type: "application/json" }));
+    await user.click(await screen.findByRole("button", { name: "确认记在这台电脑上" }));
+    expect(await screen.findByText("没有记下。请看上面的检查。")).toBeTruthy();
   });
 
   it("covers settings, diagnostics, pairing, offline, crash and empty states", async () => {
@@ -102,12 +128,17 @@ describe("launcher pages", () => {
     await user.click(screen.getByRole("button", { name: "关闭" }));
     expect(onMotion).toHaveBeenCalledWith(true);
     cleanup();
-    render(<DiagnosticsPage minimumWidth={1100} />);
+    render(<DiagnosticsPage minimumWidth={1100} discovered={4} ready={3} />);
     expect(screen.getByText(/仅本机回环/)).toBeTruthy();
+    expect(screen.getByText("未开放")).toBeTruthy();
+    expect(screen.getByText("没有。不会从网上下载插件。")).toBeTruthy();
+    expect(screen.getByText("4 个")).toBeTruthy();
+    expect(screen.getByText("3 个")).toBeTruthy();
     expect(screen.getByText(/1,100/)).toBeTruthy();
+    expect(screen.queryByText("LAN 发现")).toBeNull();
     cleanup();
     render(<MemoryRouter><PairingPage /></MemoryRouter>);
-    expect(screen.getByText("7K4M — XQ2P")).toBeTruthy();
+    expect(screen.getByText("局域网没有开放，不能配对另一台设备，也没有配对过别的电脑。")).toBeTruthy();
     cleanup();
     render(<MemoryRouter><OfflinePage onRetry={vi.fn()} /></MemoryRouter>);
     await user.click(screen.getByRole("button", { name: "重试" }));

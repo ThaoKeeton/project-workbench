@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { NavLink, useParams } from "react-router-dom";
 import type { MarketBadge } from "./catalog";
+import type { ImportReport } from "./api";
 import type { IconName } from "./catalog";
 import { Icon } from "./icons";
 
@@ -31,7 +32,7 @@ export function MarketPage({
                   <small>{item.state ?? item.hint}</small>
                 </span>
               </span>
-              {item.loaded === false ? <button type="button" className="btn" disabled>没能载入</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
+              {item.loaded === false ? <button type="button" className="btn" disabled>{item.state === "已安装，尚未启用" ? "尚未启用" : "没能载入"}</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
             </li>
           ))}
         </ul>
@@ -66,7 +67,6 @@ const installedRows = [
   { id: "upcam", name: "UPCAM 站会日报", summary: "整理今日站会并生成草稿", meta: "星河实验室 · v1.4.2", badge: "官方" as const, icon: "clipboard" as const },
   { id: "ding", name: "钉钉 Insights", summary: "看本周沟通热点与会议节奏", meta: "星河实验室 · v0.9.1", badge: "官方" as const, icon: "chat" as const },
   { id: "test", name: "测试设计", summary: "用例仓库与失败分流", meta: "青裔测试 · v2.1.0", badge: "已签名" as const, icon: "flask" as const },
-  { id: "local-pack", name: "本地导入示例包", summary: "用于演示本地清单导入流程", meta: "文前 · v0.1.0", badge: "本地导入" as const, icon: "folder" as const },
 ];
 
 export function InstalledPage({
@@ -80,7 +80,7 @@ export function InstalledPage({
   onPin?: (id: string, pinned: boolean) => void;
   plugins?: Array<{ id: string; name: string; hint: string; icon: IconName; state?: string; loaded?: boolean }>;
 }) {
-  const rows = (plugins ?? installedRows.filter((item) => item.id !== "local-pack").map((item) => ({
+  const rows = (plugins ?? installedRows.map((item) => ({
     id: item.id, name: item.name, hint: item.summary, icon: item.icon, state: "可以用", loaded: true,
   })));
   const [selected, setSelected] = useState(rows[0]?.id ?? "");
@@ -102,10 +102,10 @@ export function InstalledPage({
                 <span>
                   <strong>{item.name}</strong>
                   <small>{item.state ?? item.hint}</small>
-                  <small>{item.loaded === false ? "没能载入" : pinned.includes(item.id) ? "已固定在左侧" : "没有固定在左侧"}</small>
+                  <small>{item.state === "已安装，尚未启用" ? "还没有启用" : item.loaded === false ? "没能载入" : pinned.includes(item.id) ? "已固定在左侧" : "没有固定在左侧"}</small>
                 </span>
               </button>
-              {item.loaded === false ? <button type="button" className="btn" disabled>没能载入</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
+              {item.loaded === false ? <button type="button" className="btn" disabled>{item.state === "已安装，尚未启用" ? "尚未启用" : "没能载入"}</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
             </li>
           ))}
         </ul>
@@ -116,7 +116,7 @@ export function InstalledPage({
           <p className="sub">{current.state ?? "可以用"} · {held ? "已固定在左侧" : "没有固定在左侧"}</p>
           <p>它随工作台留在这台电脑上。这里不能把它卸掉，也不会去网上找新版本。</p>
           <div className="row-actions">
-            <button type="button" className="btn-accent" onClick={() => onOpen(current.id)}>打开</button>
+            <button type="button" className="btn-accent" disabled={current.state === "已安装，尚未启用"} onClick={() => onOpen(current.id)}>{current.state === "已安装，尚未启用" ? "尚未启用" : "打开"}</button>
             {onPin && current.loaded !== false ? <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${current.name}` : `把 ${current.name} 固定到左侧`} onClick={() => onPin(current.id, !held)}>{held ? "从左侧拿下" : "固定到左侧"}</button> : null}
           </div>
         </aside>
@@ -137,40 +137,70 @@ export function UpdatesPage() {
   );
 }
 
-export function ImportPage({ onOpen }: { onOpen: (id: string) => void }) {
-  const [fileName, setFileName] = useState("本地导入示例包");
+export function ImportPage({
+  onCheck,
+  onCommit,
+}: {
+  onCheck: (fileName: string, text: string) => Promise<ImportReport>;
+  onCommit: (fileName: string, text: string) => Promise<void>;
+}) {
+  const [fileName, setFileName] = useState("");
+  const [text, setText] = useState("");
+  const [report, setReport] = useState<ImportReport | null>(null);
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
   return (
     <div className="page">
       <header className="page-head">
         <h1>本地导入</h1>
-        <p>可以先看本机上的文件名。这里不会安装未知插件包，也不会访问网络。</p>
+        <p>选择这台电脑上的插件清单。先看对这个文件的检查，确认后才记下。不会启用，也不会联网。</p>
         <MarketNav />
       </header>
       <label className="drop">
-        <strong>将插件清单或 .pbpack 拖到这里</strong>
-        <span>也可从本机选择文件。导入前会检查签名与所需权限。</span>
-        <input aria-label="选择文件" type="file" onChange={(event) => setFileName(event.target.files?.[0]?.name || "本地导入示例包")} />
+        <strong>选择 plugin.v2.json</strong>
+        <span>只读取你选中的这个文件。</span>
+        <input aria-label="选择文件" type="file" onChange={(event) => {
+          const file = event.target.files?.[0];
+          setNotice("");
+          setReport(null);
+          if (!file) return;
+          setFileName(file.name);
+          void file.text().then(async (body) => {
+            setText(body);
+            setBusy(true);
+            try { setReport(await onCheck(file.name, body)); }
+            catch { setNotice("没能检查这个文件。没有写入。"); }
+            finally { setBusy(false); }
+          });
+        }} />
         <span className="btn">选择文件</span>
       </label>
-      <h2>最近导入</h2>
-      <div className="import-row">
-        <Icon name="folder" />
-        <span>
-          <strong>{fileName}</strong>
-          <small>只显示文件名，还没有安装</small>
-        </span>
-        <Badge value="本地导入" />
-        <button type="button" className="btn" onClick={() => onOpen("local-pack")}>打开</button>
-      </div>
-      <h2>签名与权限检查</h2>
-      <p className="sub">这些是本机策略，不是对刚才那个文件的检查结果。未知插件包不会被安装。</p>
-      <ul className="checks">
-        <li className="ok">已识别为 .pbpack 插件包</li>
-        <li className="warn">未发现发布者签名，导入后将标为「本地导入」</li>
-        <li className="ok">申请读取你选择的本机目录</li>
-        <li className="ok">申请写入插件数据目录</li>
-        <li className="ok">未请求网络访问</li>
-      </ul>
+      {fileName ? <p>正在看「{fileName}」。</p> : <p>还没有选择文件。</p>}
+      {busy ? <p role="status">正在检查这个文件。</p> : null}
+      {notice ? <p role="status">{notice}</p> : null}
+      {report ? (
+        <>
+          <h2>对这个文件的检查</h2>
+          <ul className="checks">
+            {report.checks.map((check) => <li key={check.id + check.text} className={check.ok ? "ok" : "warn"}>{check.text}</li>)}
+          </ul>
+          <div className="row-actions">
+            <button
+              type="button"
+              className="btn-accent"
+              disabled={!report.importable || busy}
+              onClick={() => {
+                setBusy(true);
+                void onCommit(fileName, text).then(() => {
+                  setNotice(report.plugin ? `「${report.plugin.name}」已记在这台电脑上，还没有启用。` : "已记下，还没有启用。");
+                }).catch(() => setNotice("没有记下。请看上面的检查。")).finally(() => setBusy(false));
+              }}
+            >
+              确认记在这台电脑上
+            </button>
+          </div>
+        </>
+      ) : null}
     </div>
   );
 }

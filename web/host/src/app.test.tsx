@@ -5,6 +5,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
 import { CommandPalette } from "./launcher";
 
+const notesManifest = JSON.stringify({
+  contract: "workbench.plugin.v2", contractVersion: "2.0.0-preview.1", id: "com.example.synthetic-notes",
+  name: "合成备忘", version: "0.1.0", description: "只留在本机的合成清单。", autoSend: false,
+  backend: { entryAssembly: "Notes.dll", entryType: "Example.Notes" },
+  ui: { kind: "web-package", module: "./ui/Notes.tsx", mount: "embedded" },
+  permissions: [{ id: "project.read", reason: "知道当前项目", sensitive: false }],
+});
+
 const projects = {
   schemaVersion: 1,
   revision: "rev-1",
@@ -74,6 +82,55 @@ describe("app shell", () => {
     expect(await screen.findByRole("dialog", { name: "远程操作确认" })).toBeTruthy();
     await user.click(screen.getByRole("button", { name: "确认并继续" }));
     expect(await screen.findByRole("heading", { name: "站会日报" })).toBeTruthy();
+  });
+
+  it("keeps a confirmed local manifest installed and tells the truth about this computer", async () => {
+    sessionStorage.setItem("workbench.session", "preview-session");
+    vi.stubGlobal("WebSocket", class {
+      addEventListener(type: string, handler: () => void) { if (type === "open") handler(); }
+      close() { return undefined; }
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as { text?: string; fileName?: string } : null;
+      if (url.endsWith("/api/v2/info")) return json({ product: "ProjectWorkbench", apiVersion: "2", preview: true, device: { id: "local", label: "本机", kind: "loopback" }, lan: { enabled: false, availableInPreview: false }, autoSend: false, catalogSchemaVersion: 1 });
+      if (url.endsWith("/api/v2/projects")) return json(projects);
+      if (url.endsWith("/api/v2/plugins/import/check") || url.endsWith("/api/v2/plugins/import")) {
+        if (body?.text === "{}") return json({ importable: false, error: "InvalidManifest", fileName: body.fileName, plugin: null, checks: [{ id: "manifest", ok: false, text: "这不是插件清单。请选择 plugin.v2.json。" }] });
+        return json({ importable: true, error: null, fileName: body?.fileName, plugin: { id: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0" }, checks: [{ id: "manifest", ok: true, text: "这是一份插件清单。" }, { id: "permissions", ok: true, text: "允许「project.read」：知道当前项目。不会联网。" }] });
+      }
+      if (url.endsWith("/api/v2/plugins")) return json({ plugins: [
+        { id: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0", contract: "v2-preview", state: "Installed", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
+        { id: "com.projectworkbench.summary", name: "工作摘要 · 示例", version: "0.1.0", contract: "v1", state: "Disabled", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null },
+      ] });
+      if (url.endsWith("/api/v2/diagnostics")) return json({ schema: "workbench.diagnostics.v2.preview", service: { bind: "loopback", lanEnabled: false, autoSend: false }, plugins: { discovered: 4, ready: 3, invalid: 0, loaded: 3 }, projects: { count: 2, activePresent: true }, issues: [], nativeWindow: { minimumWidth: 1100 } });
+      if (url.endsWith("/api/v2/ui/theme")) return json({ schema: "workbench.ui-theme.v2.preview", schemaVersion: 2, setting: "system" });
+      if (url.endsWith("/api/v2/session")) return json(null, 204);
+      if (url.endsWith("/api/v2/ui/desk")) return json({ schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, pinned: ["upcam"], recent: [], recovered: false });
+      return json({ error: "NotFound" }, 404);
+    }));
+    const user = userEvent.setup();
+    render(<MemoryRouter><App /></MemoryRouter>);
+    expect(await screen.findByText("已安装，尚未启用")).toBeTruthy();
+    expect(screen.getByText(/另外发现 工作摘要/)).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: /合成备忘/ }));
+    expect(await screen.findByText("「合成备忘」已记在这台电脑上，还没有启用，所以没有打开。")).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "诊断" }));
+    expect(await screen.findByText("仅本机回环 · 已连接")).toBeTruthy();
+    expect(screen.getByText("4 个")).toBeTruthy();
+    expect(screen.getByText("没有。不会从网上下载插件。")).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "设备" }));
+    expect(await screen.findByText("局域网没有开放，不能配对另一台设备，也没有配对过别的电脑。")).toBeTruthy();
+    await user.click(screen.getByRole("link", { name: "市场" }));
+    await user.click(screen.getByRole("link", { name: "本地导入" }));
+    await user.upload(screen.getByLabelText("选择文件"), new File([notesManifest], "notes.plugin.v2.json", { type: "application/json" }));
+    expect(await screen.findByText("这是一份插件清单。")).toBeTruthy();
+    expect(screen.getByText("允许「project.read」：知道当前项目。不会联网。")).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "确认记在这台电脑上" }));
+    expect(await screen.findByText("「合成备忘」已记在这台电脑上，还没有启用。")).toBeTruthy();
+    await user.upload(screen.getByLabelText("选择文件"), new File(["{}"], "nope.json", { type: "application/json" }));
+    expect(await screen.findByText("这不是插件清单。请选择 plugin.v2.json。")).toBeTruthy();
+    expect((screen.getByRole("button", { name: "确认记在这台电脑上" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
   it("shows the missing session and offline states", async () => {

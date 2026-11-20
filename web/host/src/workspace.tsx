@@ -232,43 +232,41 @@ export function PairingPage() {
   const navigate = useNavigate();
   return (
     <section className="pairing">
-      <h1>配对新设备</h1>
-      <p>在另一台已安装工作台的设备上输入下方代码</p>
-      <p className="pair-code">7K4M — XQ2P</p>
-      <p className="sub">代码 10 分钟内有效，仅限同一局域网</p>
-      <button type="button" className="btn" onClick={() => void navigate("/")}>返回</button>
-      <div className="log-block">
-        <h2>配对步骤</h2>
-        <ul className="log-rows">
-          <li><span>1.</span><span>在另一台设备打开工作台</span></li>
-          <li><span>2.</span><span>进入设备页并输入上方代码</span></li>
-          <li><span>3.</span><span>确认双方都在同一局域网</span></li>
-        </ul>
-        <p className="sub">上次成功配对 书房工作站 · 11月8日 21:16</p>
-      </div>
+      <h1>设备</h1>
+      <p>这台预览只在这台电脑上使用。</p>
+      <p>局域网没有开放，不能配对另一台设备，也没有配对过别的电脑。</p>
+      <button type="button" className="btn" onClick={() => void navigate("/")}>返回首页</button>
     </section>
   );
 }
 
-export function DiagnosticsPage({ minimumWidth }: { minimumWidth: number }) {
+export function DiagnosticsPage({
+  minimumWidth,
+  discovered = 0,
+  ready = 0,
+}: {
+  minimumWidth: number;
+  discovered?: number;
+  ready?: number;
+}) {
   return (
     <div className="page narrow-page">
       <header className="page-head">
         <h1>诊断</h1>
-        <p>本机服务与插件沙箱状态</p>
+        <p>这台电脑现在的情况</p>
       </header>
       <ul className="status-rows">
         <li><span>本机服务</span><strong>仅本机回环 · 已连接</strong></li>
-        <li><span>插件沙箱</span><strong>站会、洞察与测试设计均在本机</strong></li>
-        <li><span>局域网</span><strong>合成演示，预览不开放局域网</strong></li>
+        <li><span>局域网</span><strong>未开放</strong></li>
+        <li><span>网上更新</span><strong>没有。不会从网上下载插件。</strong></li>
         <li><span>自动发送</span><strong>自动发送：关闭 · 最小宽度 {minimumWidth.toLocaleString("zh-CN")}</strong></li>
       </ul>
-      <h2>最近日志</h2>
+      <h2>插件</h2>
       <ul className="log-rows">
-        <li><span>11:18:02</span><span>站会草稿只写入本机</span></li>
-        <li><span>11:17:44</span><span>LAN 发现 书房工作站</span></li>
-        <li><span>11:16:09</span><span>市场签名校验通过，4 个更新可用</span></li>
-        <li><span>11:12:51</span><span>本地导入示例包已隐藏进度</span></li>
+        <li><span>已发现</span><span>{discovered} 个</span></li>
+        <li><span>可以用</span><span>{ready} 个</span></li>
+        <li><span>局域网发现</span><span>没有</span></li>
+        <li><span>网上更新</span><span>没有</span></li>
       </ul>
     </div>
   );

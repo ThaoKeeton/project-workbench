@@ -626,7 +626,7 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByText("这里不写金额")).toBeVisible();
       await shot(page, `settings-${theme}`);
       await page.goto("/devices");
-      await expect(page.getByText("7K4M — XQ2P")).toBeVisible();
+      await expect(page.getByText("局域网没有开放，不能配对另一台设备，也没有配对过别的电脑。")).toBeVisible();
       await shot(page, `pairing-${theme}`);
       await page.goto("/offline");
       await expect(page.getByRole("heading", { name: "本地服务未连接" })).toBeVisible();

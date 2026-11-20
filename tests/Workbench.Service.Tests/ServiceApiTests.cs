@@ -4,6 +4,7 @@ using System.Net.Http.Json;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Workbench.Core.Projects;
 using Xunit;
 using Workbench.Service;
@@ -543,6 +544,123 @@ public sealed class ServiceApiTests
         Assert.Equal(HttpStatusCode.NotFound, badAction.StatusCode);
         var oversized = await running.Client.PostAsync("/api/v2/plugins/com.projectworkbench.upcam-standup.v2/actions/import", new StringContent(new string('x', 262145)));
         Assert.Equal(HttpStatusCode.RequestEntityTooLarge, oversized.StatusCode);
+    }
+
+    [Fact]
+    public async Task Local_manifest_is_checked_then_recorded_without_loading()
+    {
+        var root = TempRoot();
+        var running = await StartAsync(root);
+        var stopped = false;
+        const string notes = """
+            {"contract":"workbench.plugin.v2","contractVersion":"2.0.0-preview.1","id":"com.example.synthetic-notes","name":"合成备忘","version":"0.1.0","description":"只留在本机的合成清单。","autoSend":false,"backend":{"entryAssembly":"Notes.dll","entryType":"Example.Notes"},"ui":{"kind":"web-package","module":"./ui/Notes.tsx","mount":"embedded"},"permissions":[{"id":"project.read","reason":"知道当前项目","sensitive":false}]}
+            """;
+        try
+        {
+            async Task<JsonElement> Check(string text, string fileName = "notes.plugin.v2.json")
+            {
+                var response = await running.Client.PostAsJsonAsync("/api/v2/plugins/import/check", new { fileName, text });
+                Assert.Equal(HttpStatusCode.OK, response.StatusCode);
+                return (await response.Content.ReadFromJsonAsync<JsonElement>())!;
+            }
+
+            string Alter(Action<JsonObject> edit)
+            {
+                var node = JsonNode.Parse(notes)!.AsObject();
+                edit(node);
+                return node.ToJsonString();
+            }
+
+            var missing = await running.Client.PostAsJsonAsync("/api/v2/plugins/import/check", new { fileName = "", text = "" });
+            Assert.Equal(HttpStatusCode.BadRequest, missing.StatusCode);
+            var refused = await Check("{}");
+            Assert.False(refused.GetProperty("importable").GetBoolean());
+            Assert.Equal("InvalidManifest", refused.GetProperty("error").GetString());
+            Assert.Contains("这不是插件清单", refused.GetRawText(), StringComparison.Ordinal);
+
+            var indexDir = Path.Combine(root, "v2-preview", "imports");
+            Directory.CreateDirectory(indexDir);
+            var indexPath = Path.Combine(indexDir, "index.json");
+            await File.WriteAllTextAsync(indexPath, "{");
+            Assert.True((await Check(notes)).GetProperty("importable").GetBoolean());
+            await File.WriteAllTextAsync(indexPath, """{"schema":"other","schemaVersion":1,"plugins":null}""");
+            Assert.True((await Check(notes)).GetProperty("importable").GetBoolean());
+            await File.WriteAllTextAsync(indexPath, """
+                {"schema":"workbench.plugin-import.v2.preview","schemaVersion":2,"plugins":[
+                  {"id":"BAD","name":"x","version":"1","fileName":"a.json"},
+                  {"id":"com.example.taken","name":"","version":"0.1.0","fileName":"a.json"},
+                  {"id":"com.example.taken","name":"已有","version":"0.1.0","fileName":"a.json"},
+                  {"id":"com.example.taken","name":"重复","version":"0.1.0","fileName":"b.json"}
+                ]}
+                """);
+            var taken = await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = "taken.plugin.v2.json", text = Alter(node => node["id"] = "com.example.taken") });
+            Assert.Equal(HttpStatusCode.BadRequest, taken.StatusCode);
+            Assert.Equal("DuplicatePluginId", (await taken.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("error").GetString());
+
+            Assert.Equal("IncompatibleContract", (await Check(Alter(node => node["contractVersion"] = "9"))).GetProperty("error").GetString());
+            var badId = await Check(Alter(node => node["id"] = "Not-Valid"));
+            Assert.Equal("InvalidManifest", badId.GetProperty("error").GetString());
+            Assert.Contains("插件编号不符合要求", badId.GetRawText(), StringComparison.Ordinal);
+            var send = await Check(Alter(node => node["autoSend"] = true));
+            Assert.Equal("AutoSendRejected", send.GetProperty("error").GetString());
+            Assert.Contains("这份清单要求自动发送", send.GetRawText(), StringComparison.Ordinal);
+            var shape = await Check(Alter(node => node["backend"]!["entryAssembly"] = "Notes.txt"));
+            Assert.Equal("InvalidManifest", shape.GetProperty("error").GetString());
+            Assert.Contains("界面或后端写法不符合要求", shape.GetRawText(), StringComparison.Ordinal);
+            Assert.Equal("InvalidManifest", (await Check(Alter(node => node["permissions"] = new JsonArray()))).GetProperty("error").GetString());
+            var many = new JsonArray();
+            for (var i = 0; i < 33; i++) many.Add(new JsonObject { ["id"] = "project.read", ["reason"] = "知道", ["sensitive"] = false });
+            Assert.Equal("InvalidManifest", (await Check(Alter(node => node["permissions"] = many))).GetProperty("error").GetString());
+            Assert.Contains("没有写清", (await Check(Alter(node => node["permissions"]![0]!["id"] = " "))).GetRawText(), StringComparison.Ordinal);
+            Assert.Equal("PermissionRejected", (await Check(Alter(node => node["permissions"]![0]!["reason"] = ""))).GetProperty("error").GetString());
+            Assert.Contains("不认识的权限", (await Check(Alter(node => node["permissions"]![0]!["id"] = "network.fetch"))).GetRawText(), StringComparison.Ordinal);
+            Assert.Contains("需要单独确认", (await Check(Alter(node => node["permissions"]![0]!["sensitive"] = true))).GetRawText(), StringComparison.Ordinal);
+            var longReason = new string('a', 250);
+            var clipped = await Check(Alter(node => node["permissions"]![0]!["reason"] = longReason));
+            Assert.True(clipped.GetProperty("importable").GetBoolean());
+            Assert.Contains(new string('a', 200), clipped.GetRawText(), StringComparison.Ordinal);
+            Assert.DoesNotContain(new string('a', 201), clipped.GetRawText(), StringComparison.Ordinal);
+            var named = await Check(notes, "C:\\temp\\notes.plugin.v2.json");
+            Assert.Equal("notes.plugin.v2.json", named.GetProperty("fileName").GetString());
+            Assert.Contains("不会联网", named.GetRawText(), StringComparison.Ordinal);
+
+            var saved = await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = "notes.plugin.v2.json", text = notes });
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            var log = Alter(node => node["id"] = "com.example.synthetic-log");
+            var longName = new string('n', 90) + ".json";
+            Assert.Equal(HttpStatusCode.OK, (await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = longName, text = log })).StatusCode);
+            var mark = Alter(node => node["id"] = "com.example.synthetic-mark");
+            Assert.Equal(HttpStatusCode.OK, (await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = "..", text = mark })).StatusCode);
+            var imported = Plugin((await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins"), "com.example.synthetic-notes");
+            Assert.Equal("Installed", imported.GetProperty("state").GetString());
+            Assert.False(imported.GetProperty("loaded").GetBoolean());
+            var duplicate = await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = "notes.plugin.v2.json", text = notes });
+            Assert.Equal(HttpStatusCode.BadRequest, duplicate.StatusCode);
+            var index = JsonDocument.Parse(await File.ReadAllTextAsync(indexPath)).RootElement.GetProperty("plugins").EnumerateArray().ToArray();
+            Assert.Contains(index, item => item.GetProperty("id").GetString() == "com.example.synthetic-notes" && item.GetProperty("fileName").GetString() == "notes.plugin.v2.json");
+            Assert.Contains(index, item => item.GetProperty("fileName").GetString() == new string('n', 80));
+            Assert.Contains(index, item => item.GetProperty("id").GetString() == "com.example.synthetic-mark" && item.GetProperty("fileName").GetString() == "plugin.v2.json");
+            Assert.Equal(1, JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, ".workspaces", "catalog.json"))).RootElement.GetProperty("schemaVersion").GetInt32());
+            running.Client.Dispose();
+            await running.Host.DisposeAsync();
+            stopped = true;
+            var restarted = await StartAsync(root);
+            try
+            {
+                var again = await restarted.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins");
+                Assert.Equal("Installed", Plugin(again.GetProperty("plugins"), "com.example.synthetic-notes").GetProperty("state").GetString());
+            }
+            finally { await restarted.DisposeAsync(); }
+        }
+        finally
+        {
+            if (!stopped)
+            {
+                running.Client.Dispose();
+                await running.Host.DisposeAsync();
+                Delete(root);
+            }
+        }
     }
 
     private static JsonElement Plugin(JsonElement plugins, string id)

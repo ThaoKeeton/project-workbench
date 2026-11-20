@@ -128,6 +128,18 @@ export function App() {
   };
 
   const locals = (snapshot?.plugins ?? []).flatMap((plugin) => {
+    if (plugin.state === "Installed") {
+      return [{
+        id: plugin.id,
+        name: plugin.name,
+        icon: "folder" as const,
+        hint: plugin.version,
+        loaded: false,
+        state: "已安装，尚未启用",
+        href: "",
+        pinnable: false,
+      }];
+    }
     if (!plugin.uiPath) return [];
     const shellId = shellPluginId(plugin.uiPath);
     const known = shellId ? pinnedPlugins.find((item) => item.id === shellId) : undefined;
@@ -145,7 +157,7 @@ export function App() {
   const shown = locals.length > 0 ? locals : pinnedPlugins.map((plugin) => ({
     ...plugin, loaded: true, state: "可以用", href: `/plugin/${plugin.id}`, pinnable: true,
   }));
-  const unopened = (snapshot?.plugins ?? []).filter((plugin) => !plugin.uiPath).map((plugin) => plugin.name);
+  const unopened = (snapshot?.plugins ?? []).filter((plugin) => !plugin.uiPath && plugin.state !== "Installed").map((plugin) => plugin.name);
 
   const openPlugin = (id: string) => {
     const plugin = shown.find((item) => item.id === id);
@@ -154,7 +166,9 @@ export function App() {
       return;
     }
     if (!plugin.loaded) {
-      setNotice(`「${plugin.name}」没能载入，没有打开。`);
+      setNotice(plugin.state === "已安装，尚未启用"
+        ? `「${plugin.name}」已记在这台电脑上，还没有启用，所以没有打开。`
+        : `「${plugin.name}」没能载入，没有打开。`);
       return;
     }
     const go = () => {
@@ -251,10 +265,10 @@ export function App() {
           <Route path="/market" element={<MarketPage onOpen={openPlugin} plugins={shown} />} />
           <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} plugins={shown} />} />
           <Route path="/market/updates" element={<UpdatesPage />} />
-          <Route path="/market/import" element={<ImportPage onOpen={openPlugin} />} />
+          <Route path="/market/import" element={<ImportPage onCheck={(fileName, text) => client.checkImport(fileName, text)} onCommit={async (fileName, text) => { await client.commitImport(fileName, text); await reload(); }} />} />
           <Route path="/market/:id" element={<MarketDetail />} />
           <Route path="/devices" element={<PairingPage />} />
-          <Route path="/diagnostics" element={<DiagnosticsPage minimumWidth={snapshot.diagnostics.nativeWindow.minimumWidth} />} />
+          <Route path="/diagnostics" element={<DiagnosticsPage minimumWidth={snapshot.diagnostics.nativeWindow.minimumWidth} discovered={snapshot.diagnostics.plugins.discovered} ready={snapshot.diagnostics.plugins.ready} />} />
           <Route path="/settings" element={<SettingsPage setting={setting} onChange={chooseTheme} restore={restore} onRestore={setRestore} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} />} />
           <Route path="/settings/ai" element={<AiSettingsPage />} />
           <Route path="/offline" element={<OfflinePage onRetry={() => { void reload(); void navigate("/"); }} />} />

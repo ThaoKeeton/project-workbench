@@ -164,6 +164,22 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
         });
         MapProjectDesk(app);
         app.MapGet("/api/v2/plugins", () => Results.Json(new { plugins = PluginBodies() }, Json));
+        app.MapPost("/api/v2/plugins/import/check", (ImportBody body) =>
+        {
+            if (!TryReadImport(body, out var fileName, out var text))
+                return Results.Json(new { error = "InvalidImport" }, Json, statusCode: StatusCodes.Status400BadRequest);
+            return Results.Json(ImportBodyOf(PluginV2Catalog.InspectText(text, KnownPluginIds()), fileName), Json);
+        });
+        app.MapPost("/api/v2/plugins/import", async (ImportBody body, CancellationToken cancellationToken) =>
+        {
+            if (!TryReadImport(body, out var fileName, out var text))
+                return Results.Json(new { error = "InvalidImport" }, Json, statusCode: StatusCodes.Status400BadRequest);
+            var report = PluginV2Catalog.InspectText(text, KnownPluginIds());
+            if (!report.Importable)
+                return Results.Json(new { error = report.Error ?? "InvalidManifest", report = ImportBodyOf(report, fileName) }, Json, statusCode: StatusCodes.Status400BadRequest);
+            await PluginImportStore.CommitAsync(_userRoot, report, fileName, cancellationToken);
+            return Results.Json(ImportBodyOf(report, fileName), Json);
+        });
         app.MapGet("/api/v2/diagnostics", async (CancellationToken cancellationToken) =>
         {
             try
@@ -337,6 +353,20 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
             permissions = Array.Empty<V2PermissionView>(),
             uiPath = (string?)null
         });
+        var shipped = _v2Packages.Select(plugin => plugin.Id).ToHashSet(StringComparer.Ordinal);
+        var imported = PluginImportStore.Read(_userRoot).Where(plugin => !shipped.Contains(plugin.Id)).Select(plugin => new
+        {
+            id = plugin.Id,
+            name = plugin.Name,
+            version = plugin.Version,
+            contract = "v2-preview",
+            state = "Installed",
+            trusted = false,
+            loaded = false,
+            diagnostics = Array.Empty<object>(),
+            permissions = Array.Empty<V2PermissionView>(),
+            uiPath = (string?)null
+        });
         var v2 = _v2Packages.Select(plugin => new
         {
             id = plugin.Id,
@@ -350,7 +380,7 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
             permissions = plugin.Permissions.ToArray(),
             uiPath = plugin.UiPath
         });
-        return v1.Cast<object>().Concat(v2).ToArray();
+        return v1.Cast<object>().Concat(v2).Concat(imported).ToArray();
     }
 
     private object DiagnosticsBody(ProjectWorkspaceSnapshot projects)
@@ -432,6 +462,33 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
         recovered
     };
 
+    private HashSet<string> KnownPluginIds() => _v2Packages.Select(plugin => plugin.Id)
+        .Concat(_plugins.Plugins.Select(plugin => plugin.Manifest?.Id).OfType<string>())
+        .Concat(PluginImportStore.Read(_userRoot).Select(plugin => plugin.Id))
+        .ToHashSet(StringComparer.Ordinal);
+
+    private static bool TryReadImport(ImportBody body, out string fileName, out string text)
+    {
+        fileName = "";
+        text = "";
+        if (body.FileName is not { Length: > 0 and <= 200 } || body.Text is not { Length: > 0 and <= 65536 }) return false;
+        fileName = body.FileName;
+        text = body.Text;
+        return true;
+    }
+
+    private static object ImportBodyOf(PluginImportReport report, string fileName) => new
+    {
+        schema = PluginImportStore.Schema,
+        schemaVersion = 2,
+        fileName = Path.GetFileName(fileName.Replace('\\', '/')),
+        importable = report.Importable,
+        error = report.Error,
+        plugin = report.PluginId is null ? null : new { id = report.PluginId, name = report.Name, version = report.Version },
+        checks = report.Checks.Select(check => new { id = check.Id, ok = check.Ok, text = check.Text }).ToArray()
+    };
+
+    private sealed record ImportBody(string? FileName, string? Text);
     private sealed record SwitchBody(string? Id, string? ExpectedRevision);
     private sealed record ThemeSettingBody(string? Setting);
     private sealed record DeskWriteBody(string[]? Pinned, string? Touch);

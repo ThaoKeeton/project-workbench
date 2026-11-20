@@ -39,6 +39,7 @@ function fresh() {
     insights: {},
     themeSetting: "system",
     desk: { pinned: ["upcam", "ding", "test", "runner"], recent: [] },
+    imports: [],
     notes: {
       default: { revision: "note-1", text: "只在星河" },
       aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa: { revision: "note-lamp", text: "只在灯塔" },
@@ -137,15 +138,53 @@ function pluginsBody() {
       { id: "com.projectworkbench.dingtalk-insights.v2", name: "钉钉 Insights", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/ding" },
       { id: "com.projectworkbench.testing-design.v2", name: "测试设计", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/test" },
       { id: "com.projectworkbench.test-executor", name: "自动测试", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/runner" },
+      ...state.imports.map((item) => ({ id: item.id, name: item.name, version: item.version, contract: "v2-preview", state: "Installed", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null })),
+    ],
+  };
+}
+
+function inspectImport(body) {
+  const fileName = typeof body?.fileName === "string" ? body.fileName : "";
+  let manifest;
+  try { manifest = JSON.parse(body?.text ?? ""); }
+  catch { manifest = null; }
+  if (!manifest || manifest.contract !== "workbench.plugin.v2" || manifest.contractVersion !== "2.0.0-preview.1" || typeof manifest.id !== "string" || typeof manifest.name !== "string") {
+    return { schema: "workbench.plugin-import.v2.preview", schemaVersion: 2, fileName, importable: false, error: "InvalidManifest", plugin: null, checks: [{ id: "manifest", ok: false, text: "这不是插件清单。请选择 plugin.v2.json。" }] };
+  }
+  const plugin = { id: manifest.id, name: manifest.name, version: manifest.version };
+  if (manifest.autoSend) {
+    return { schema: "workbench.plugin-import.v2.preview", schemaVersion: 2, fileName, importable: false, error: "AutoSendRejected", plugin, checks: [{ id: "autosend", ok: false, text: "这份清单要求自动发送，不能导入。" }] };
+  }
+  const taken = new Set(["com.projectworkbench.test-cases.v2", "com.projectworkbench.upcam-standup.v2", "com.projectworkbench.dingtalk-insights.v2", "com.projectworkbench.testing-design.v2", "com.projectworkbench.test-executor", ...state.imports.map((item) => item.id)]);
+  if (taken.has(manifest.id)) {
+    return { schema: "workbench.plugin-import.v2.preview", schemaVersion: 2, fileName, importable: false, error: "DuplicatePluginId", plugin, checks: [{ id: "duplicate", ok: false, text: "这台电脑上已经有这个插件。" }] };
+  }
+  const permission = Array.isArray(manifest.permissions) ? manifest.permissions[0] : null;
+  const allowed = ["project.read", "plugin.data.read", "plugin.data.write", "local.file.export"];
+  if (!permission || permission.sensitive || !allowed.includes(permission.id)) {
+    return { schema: "workbench.plugin-import.v2.preview", schemaVersion: 2, fileName, importable: false, error: "PermissionRejected", plugin, checks: [{ id: "permissions", ok: false, text: "不认识的权限，不能导入。" }] };
+  }
+  return {
+    schema: "workbench.plugin-import.v2.preview", schemaVersion: 2, fileName, importable: true, error: null, plugin,
+    checks: [
+      { id: "manifest", ok: true, text: "这是一份插件清单。" },
+      { id: "permissions", ok: true, text: `允许「${permission.id}」：${permission.reason}。不会联网。` },
+      { id: "shape", ok: true, text: "界面会嵌在这个窗口里。没有附带后端程序，所以记下后不会启用。" },
     ],
   };
 }
 
 function diagnosticsBody() {
+  const plugins = pluginsBody().plugins;
   return {
     schema: "workbench.diagnostics.v2.preview",
     service: { bind: "loopback", lanEnabled: false, autoSend: false },
-    plugins: { discovered: 2, ready: 1, invalid: 0, loaded: 1 },
+    plugins: {
+      discovered: plugins.length,
+      ready: plugins.filter((plugin) => plugin.state === "Ready").length,
+      invalid: plugins.filter((plugin) => plugin.state === "Invalid").length,
+      loaded: plugins.filter((plugin) => plugin.loaded).length,
+    },
     projects: { count: state.projects.length, activePresent: true },
     issues: [],
     nativeWindow: { minimumWidth: 1100 },
@@ -288,6 +327,16 @@ const server = createServer(async (request, response) => {
   if (request.method === "GET" && url.pathname === "/api/v2/health") return sendJson(response, 200, { status: "ok", apiVersion: "2.0.0-preview.1", bind: "loopback" });
   if (request.method === "GET" && url.pathname === "/api/v2/info") return sendJson(response, 200, infoBody());
   if (request.method === "GET" && url.pathname === "/api/v2/projects") return sendJson(response, 200, projectsBody());
+  if (request.method === "POST" && (url.pathname === "/api/v2/plugins/import/check" || url.pathname === "/api/v2/plugins/import")) {
+    const body = await jsonBody(request);
+    if (!body || typeof body.text !== "string" || typeof body.fileName !== "string") return sendJson(response, 400, { error: "InvalidImport" });
+    const report = inspectImport(body);
+    if (url.pathname === "/api/v2/plugins/import") {
+      if (!report.importable) return sendJson(response, 400, { error: report.error, report });
+      state.imports.push(report.plugin);
+    }
+    return sendJson(response, 200, report);
+  }
   if (request.method === "GET" && url.pathname === "/api/v2/plugins") return sendJson(response, 200, pluginsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/diagnostics") return sendJson(response, 200, diagnosticsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/ui/theme") {

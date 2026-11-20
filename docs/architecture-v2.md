@@ -102,6 +102,8 @@ npx electron . --smoke --user-root "$root" --ui-dist "$(pwd)/../../web/host/dist
 | GET | `/api/v2/plugins/com.projectworkbench.testing-design.v2/actions/dashboard` | 合成检查看板，人工验收保持未验收 |
 | GET/PUT | `/api/v2/ui/theme` | 界面主题 `system` / `light` / `dark`。文件是 `v2-preview/ui-theme.json`，`schemaVersion` 为 2 |
 | GET/PUT | `/api/v2/ui/desk` | 左侧固定和最近打开。只接受已经在这台电脑上的 `upcam`、`ding`、`test`、`runner`。文件是 `v2-preview/desk.json`，`schemaVersion` 为 2，不写入 schema 1。读到坏文件时 `recovered` 为 true，原文件先留着，下次成功记下才覆盖 |
+| POST | `/api/v2/plugins/import/check` | 检查本机选择的 `plugin.v2.json` 正文，不写入 |
+| POST | `/api/v2/plugins/import` | 确认后把清单记到 `v2-preview/imports`，`schemaVersion` 为 2。不加载、不启用、不联网，也不写入 schema 1 |
 
 不兼容的变更要提高 `preview` 版本，并继续留在 `/api/v2` 之外的新路径上，直到有意发布稳定的 v2。不要把新字段写进 schema 1 的目录、上下文或测试存储。
 

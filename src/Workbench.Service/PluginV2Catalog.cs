@@ -179,6 +179,97 @@ internal static partial class PluginV2Catalog
         return module;
     }
 
+    internal static PluginImportReport InspectText(string text, IReadOnlySet<string> existingIds)
+    {
+        V2Manifest manifest;
+        try { manifest = ParseManifest(text); }
+        catch (JsonException)
+        {
+            return new(false, "InvalidManifest", null, null, null, null, [new("manifest", false, "这不是插件清单。请选择 plugin.v2.json。")]);
+        }
+
+        var checks = new List<PluginImportCheck> { new("manifest", true, "这是一份插件清单。") };
+        var contractOk = AddContract(checks, manifest);
+        var idOk = AddIdentity(checks, manifest);
+        var sendOk = AddSend(checks, manifest);
+        var shapeOk = AddShape(checks, manifest);
+        var permissionsOk = AddPermissions(checks, manifest);
+        var duplicate = idOk && existingIds.Contains(manifest.Id);
+        checks.Add(new("duplicate", !duplicate, duplicate ? "这台电脑上已经有这个插件。" : "没有和已有插件撞号。"));
+        var error = ImportError(contractOk, idOk, shapeOk, sendOk, permissionsOk, duplicate, manifest.Permissions.Count);
+        var importable = error is null;
+        return new(importable, error, idOk ? manifest.Id : null, Clip(manifest.Name), Clip(manifest.Version), importable ? text : null, checks);
+    }
+
+    private static bool AddContract(List<PluginImportCheck> checks, V2Manifest manifest)
+    {
+        var ok = manifest.Contract == PluginContractV2.Name && manifest.ContractVersion == PluginContractV2.Version;
+        checks.Add(new("contract", ok, ok ? "契约是这台预览认识的版本。" : "契约版本对不上，不能导入。"));
+        return ok;
+    }
+
+    private static bool AddIdentity(List<PluginImportCheck> checks, V2Manifest manifest)
+    {
+        var ok = IsSafePluginId(manifest.Id);
+        checks.Add(new("identity", ok, ok ? $"插件是「{Clip(manifest.Name)}」，版本 {Clip(manifest.Version)}。" : "插件编号不符合要求。"));
+        return ok;
+    }
+
+    private static bool AddSend(List<PluginImportCheck> checks, V2Manifest manifest)
+    {
+        var ok = !manifest.AutoSend;
+        checks.Add(new("autosend", ok, ok ? "没有要求自动发送。" : "这份清单要求自动发送，不能导入。"));
+        return ok;
+    }
+
+    private static bool AddShape(List<PluginImportCheck> checks, V2Manifest manifest)
+    {
+        var ok = manifest.Ui.Kind == "web-package" && manifest.Ui.Mount == "embedded"
+            && IsFileName(manifest.Backend.EntryAssembly)
+            && manifest.Backend.EntryAssembly.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(manifest.Backend.EntryType);
+        checks.Add(new("shape", ok, ok
+            ? "界面会嵌在这个窗口里。没有附带后端程序，所以记下后不会启用。"
+            : "清单里的界面或后端写法不符合要求。"));
+        return ok;
+    }
+
+    private static bool AddPermissions(List<PluginImportCheck> checks, V2Manifest manifest)
+    {
+        var ok = manifest.Permissions.Count is > 0 and <= 32;
+        if (!ok) checks.Add(new("permissions", false, "权限列表为空或太长。"));
+        foreach (var permission in manifest.Permissions) ok = AddPermission(checks, permission) && ok;
+        return ok;
+    }
+
+    private static bool AddPermission(List<PluginImportCheck> checks, V2Permission permission)
+    {
+        if (string.IsNullOrWhiteSpace(permission.Id) || string.IsNullOrWhiteSpace(permission.Reason))
+        {
+            checks.Add(new("permissions", false, "有一项权限没有写清。"));
+            return false;
+        }
+        if (permission.Sensitive || !AllowedPermissions.Contains(permission.Id))
+        {
+            checks.Add(new("permissions", false, permission.Sensitive
+                ? $"权限「{permission.Id}」需要单独确认，这台预览不导入。"
+                : $"不认识的权限「{permission.Id}」，不能导入。"));
+            return false;
+        }
+        checks.Add(new("permissions", true, $"允许「{permission.Id}」：{Clip(permission.Reason)}。不会联网。"));
+        return true;
+    }
+
+    private static string? ImportError(bool contractOk, bool idOk, bool shapeOk, bool sendOk, bool permissionsOk, bool duplicate, int permissionCount)
+    {
+        if (!contractOk) return "IncompatibleContract";
+        if (!idOk || !shapeOk || permissionCount is 0 or > 32) return "InvalidManifest";
+        if (!sendOk) return "AutoSendRejected";
+        if (!permissionsOk) return "PermissionRejected";
+        if (duplicate) return "DuplicatePluginId";
+        return null;
+    }
+
     private static V2Package Invalid(string id, string code) => new()
     {
         Id = IsSafePluginId(id) ? id : "invalid",
@@ -258,3 +349,14 @@ internal static partial class PluginV2Catalog
         public bool Sensitive { get; init; }
     }
 }
+
+internal readonly record struct PluginImportCheck(string Id, bool Ok, string Text);
+
+internal sealed record PluginImportReport(
+    bool Importable,
+    string? Error,
+    string? PluginId,
+    string? Name,
+    string? Version,
+    string? ManifestText,
+    IReadOnlyList<PluginImportCheck> Checks);
