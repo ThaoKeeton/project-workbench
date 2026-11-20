@@ -1,5 +1,6 @@
 using System.Net.WebSockets;
 using System.Text;
+using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.AspNetCore.StaticFiles;
@@ -14,7 +15,11 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
 {
     public const string ApiVersion = "2.0.0-preview.1";
     private const int ActionBodyLimit = 262_144;
-    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web);
+    private static readonly JsonSerializerOptions Json = new(JsonSerializerDefaults.Web)
+    {
+        // Responses are JSON text for this host, not HTML. Chinese stays readable; control characters stay escaped.
+        Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping
+    };
     private readonly WebApplication _app;
     private readonly PluginManager _plugins;
     private readonly string _userRoot;

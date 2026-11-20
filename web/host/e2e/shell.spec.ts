@@ -214,7 +214,8 @@ for (const [theme, label] of [["dark", "深色"], ["light", "浅色"]] as const)
       await expect(page.getByText("没有可下载的更新。这些插件随工作台放在这台电脑上，这里不会从网上下载。")).toBeVisible();
       await shot(page, `updates-${theme}`);
       await page.getByRole("link", { name: "本地导入" }).click();
-      await expect(page.getByText("未请求网络访问")).toBeVisible();
+      await expect(page.getByText("选择这台电脑上的插件清单。先看对这个文件的检查，确认后才记下。不会启用，也不会联网。")).toBeVisible();
+      await expect(page.getByText("还没有选择文件。")).toBeVisible();
       await shot(page, `import-${theme}`);
     });
 
