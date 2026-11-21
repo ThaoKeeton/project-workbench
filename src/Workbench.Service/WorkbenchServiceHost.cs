@@ -192,6 +192,13 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
                 return Results.Json(new { error = result.Error, message = result.Message }, Json, statusCode: result.Status);
             return Results.Json(new { id = result.Id, enabled = true }, Json);
         });
+        app.MapPost("/api/v2/plugins/{id}/remove", async (string id, CancellationToken cancellationToken) =>
+        {
+            var result = await PluginImportStore.RemoveAsync(_userRoot, id, cancellationToken);
+            if (!result.Ok)
+                return Results.Json(new { error = result.Error, message = result.Message }, Json, statusCode: result.Status);
+            return Results.Json(new { id = result.Id, removed = true }, Json);
+        });
         app.MapGet("/api/v2/diagnostics", async (CancellationToken cancellationToken) =>
         {
             try

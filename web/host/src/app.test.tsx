@@ -186,6 +186,37 @@ describe("app shell", () => {
     expect(await screen.findByText("已在这台电脑上启用。打开的是记下的清单。没有附带后端程序，也没有从网上下载。")).toBeTruthy();
   });
 
+  it("removes a recorded plugin after confirmation and leaves the open page", async () => {
+    sessionStorage.setItem("workbench.session", "preview-session");
+    let present = true;
+    vi.stubGlobal("WebSocket", class {
+      addEventListener(type: string, handler: () => void) { if (type === "open") handler(); }
+      close() { return undefined; }
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (url.endsWith("/api/v2/info")) return json({ product: "ProjectWorkbench", apiVersion: "2", preview: true, device: { id: "local", label: "本机", kind: "loopback" }, lan: { enabled: false, availableInPreview: false }, autoSend: false, catalogSchemaVersion: 1 });
+      if (url.endsWith("/api/v2/projects")) return json(projects);
+      if (url.endsWith("/remove")) { present = false; return json({ id: "com.example.synthetic-notes", removed: true }); }
+      if (url.endsWith("/api/v2/plugins")) return json({ plugins: present ? [{ id: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: false, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugins/local/com.example.synthetic-notes" }] : [] });
+      if (url.endsWith("/api/v2/diagnostics")) return json({ schema: "workbench.diagnostics.v2.preview", service: { bind: "loopback", lanEnabled: false, autoSend: false }, plugins: { discovered: 1, ready: 1, invalid: 0, loaded: 1 }, projects: { count: 2, activePresent: true }, issues: [], nativeWindow: { minimumWidth: 1100 } });
+      if (url.endsWith("/api/v2/ui/theme")) return json({ schema: "workbench.ui-theme.v2.preview", schemaVersion: 2, setting: "system" });
+      if (url.endsWith("/api/v2/session")) return json(null, 204);
+      if (url.endsWith("/api/v2/ui/desk")) return json({ schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, pinned: ["upcam"], recent: [], recovered: false });
+      return json({ error: "NotFound" }, 404);
+    }));
+    const user = userEvent.setup();
+    render(<MemoryRouter><App /></MemoryRouter>);
+    await user.click(await screen.findByRole("link", { name: "市场" }));
+    await user.click(screen.getByRole("link", { name: "已安装" }));
+    await user.click(screen.getAllByRole("button", { name: "打开" })[0]);
+    expect(await screen.findByRole("heading", { name: "合成备忘" })).toBeTruthy();
+    await user.click(screen.getByRole("button", { name: "卸掉" }));
+    await user.click(within(screen.getByRole("dialog", { name: "卸掉「合成备忘」" })).getByRole("button", { name: "卸掉" }));
+    expect(await screen.findByRole("heading", { name: "已安装" })).toBeTruthy();
+    expect(screen.queryByText("合成备忘")).toBeNull();
+  });
+
   it("shows the missing session and offline states", async () => {
     render(<MemoryRouter><App /></MemoryRouter>);
     expect(screen.getByRole("alert").textContent).toContain("未找到本机会话");

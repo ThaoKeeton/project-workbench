@@ -105,6 +105,7 @@ npx electron . --smoke --user-root "$root" --ui-dist "$(pwd)/../../web/host/dist
 | POST | `/api/v2/plugins/import/check` | 检查本机选择的 `plugin.v2.json` 正文，不写入 |
 | POST | `/api/v2/plugins/import` | 确认后把清单记到 `v2-preview/imports`，`schemaVersion` 为 2。不加载、不启用、不联网，也不写入 schema 1 |
 | POST | `/api/v2/plugins/{id}/enable` | 再读已经记下的清单。通过才标成已启用。不联网、不下载、不加载缺失的后端。对不上时保持未启用 |
+| POST | `/api/v2/plugins/{id}/remove` | 只卸掉本地导入记下的清单。先从左侧和最近打开拿掉，再删记下的副本。不删用户当初选中的原文件，不联网。随工作台带来的插件拒绝 |
 
 不兼容的变更要提高 `preview` 版本，并继续留在 `/api/v2` 之外的新路径上，直到有意发布稳定的 v2。不要把新字段写进 schema 1 的目录、上下文或测试存储。
 

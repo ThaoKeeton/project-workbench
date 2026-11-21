@@ -68,6 +68,40 @@ internal static class PluginImportStore
         return EnableResult.Success(id);
     }
 
+    public static async Task<EnableResult> RemoveAsync(string userRoot, string id, CancellationToken cancellationToken)
+    {
+        if (!PluginV2Catalog.IsSafePluginId(id))
+            return EnableResult.Fail(404, "NotRecorded", "这不是本地导入记下的插件，没有卸掉。");
+        var current = Read(userRoot);
+        var plugin = current.FirstOrDefault(item => item.Id == id);
+        if (plugin is null)
+            return EnableResult.Fail(404, "NotRecorded", "这不是本地导入记下的插件，没有卸掉。");
+        var desk = (await UiDeskStore.ReadAsync(userRoot, cancellationToken)).State;
+        try { await UiDeskStore.ForgetAsync(userRoot, id, cancellationToken); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            return EnableResult.Fail(400, "RemoveFailed", "没有卸掉。记下的清单还在。");
+        }
+        try { await WriteIndexAsync(userRoot, current.Where(item => item.Id != id).ToArray(), cancellationToken); }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            await UiDeskStore.SaveAsync(userRoot, desk, cancellationToken);
+            return EnableResult.Fail(400, "RemoveFailed", "没有卸掉。记下的清单还在。");
+        }
+        var directory = Path.Combine(userRoot, "v2-preview", "imports", id);
+        try
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, recursive: true);
+        }
+        catch (Exception error) when (error is IOException or UnauthorizedAccessException)
+        {
+            await WriteIndexAsync(userRoot, current, cancellationToken);
+            await UiDeskStore.SaveAsync(userRoot, desk, cancellationToken);
+            return EnableResult.Fail(400, "RemoveFailed", "没有卸掉。记下的清单还在。");
+        }
+        return EnableResult.Success(id);
+    }
+
     private static async Task<EnableResult> RefuseAsync(string userRoot, IReadOnlyList<ImportedPlugin> current, ImportedPlugin plugin, string error, string message, CancellationToken cancellationToken)
     {
         if (plugin.Enabled)

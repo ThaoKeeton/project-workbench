@@ -727,6 +727,35 @@ public sealed class ServiceApiTests
         }
     }
 
+    [Fact]
+    public async Task Recorded_manifest_can_be_removed_and_imported_again()
+    {
+        var root = TempRoot();
+        await using var running = await StartAsync(root);
+        const string notes = """
+            {"contract":"workbench.plugin.v2","contractVersion":"2.0.0-preview.1","id":"com.example.synthetic-notes","name":"合成备忘","version":"0.1.0","description":"只留在本机的合成清单。","autoSend":false,"backend":{"entryAssembly":"Notes.dll","entryType":"Example.Notes"},"ui":{"kind":"web-package","module":"./ui/Notes.tsx","mount":"embedded"},"permissions":[{"id":"project.read","reason":"知道当前项目","sensitive":false}]}
+            """;
+        Assert.Equal(HttpStatusCode.OK, (await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = "notes.plugin.v2.json", text = notes })).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await running.Client.PostAsync("/api/v2/plugins/com.example.synthetic-notes/enable", null)).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await running.Client.PutAsJsonAsync("/api/v2/ui/desk", new { pinned = new[] { "ding", "com.example.synthetic-notes" }, touch = "com.example.synthetic-notes" })).StatusCode);
+        var shipped = await running.Client.PostAsync("/api/v2/plugins/com.projectworkbench.upcam-standup.v2/remove", null);
+        Assert.Equal(HttpStatusCode.NotFound, shipped.StatusCode);
+        Assert.Equal("Ready", Plugin((await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins"), "com.projectworkbench.upcam-standup.v2").GetProperty("state").GetString());
+        var removed = await running.Client.PostAsync("/api/v2/plugins/com.example.synthetic-notes/remove", null);
+        Assert.Equal(HttpStatusCode.OK, removed.StatusCode);
+        Assert.DoesNotContain("com.example.synthetic-notes", (await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins").GetRawText(), StringComparison.Ordinal);
+        var desk = await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/ui/desk");
+        Assert.DoesNotContain("com.example.synthetic-notes", desk.GetRawText(), StringComparison.Ordinal);
+        Assert.Contains("ding", desk.GetProperty("pinned").GetRawText(), StringComparison.Ordinal);
+        Assert.False(Directory.Exists(Path.Combine(root, "v2-preview", "imports", "com.example.synthetic-notes")));
+        var again = await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = "notes.plugin.v2.json", text = notes });
+        Assert.Equal(HttpStatusCode.OK, again.StatusCode);
+        var restored = Plugin((await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins"), "com.example.synthetic-notes");
+        Assert.Equal("Installed", restored.GetProperty("state").GetString());
+        Assert.False(restored.GetProperty("loaded").GetBoolean());
+        Assert.Equal(1, JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, ".workspaces", "catalog.json"))).RootElement.GetProperty("schemaVersion").GetInt32());
+    }
+
     private static JsonElement Plugin(JsonElement plugins, string id)
         => plugins.EnumerateArray().Single(item => item.GetProperty("id").GetString() == id);
 

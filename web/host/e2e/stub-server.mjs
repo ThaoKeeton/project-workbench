@@ -351,6 +351,17 @@ const server = createServer(async (request, response) => {
     item.enabled = true;
     return sendJson(response, 200, { id, enabled: true });
   }
+  const removeMatch = url.pathname.match(/^\/api\/v2\/plugins\/([^/]+)\/remove$/);
+  if (request.method === "POST" && removeMatch) {
+    const id = decodeURIComponent(removeMatch[1]);
+    const index = state.imports.findIndex((plugin) => plugin.id === id);
+    if (index < 0) return sendJson(response, 404, { error: "NotRecorded", message: "这不是本地导入记下的插件，没有卸掉。" });
+    if (String(id).endsWith("synthetic-stuck")) return sendJson(response, 400, { error: "RemoveFailed", message: "没有卸掉。记下的清单还在。" });
+    state.imports.splice(index, 1);
+    state.desk.pinned = state.desk.pinned.filter((item) => item !== id);
+    state.desk.recent = state.desk.recent.filter((item) => item.id !== id);
+    return sendJson(response, 200, { id, removed: true });
+  }
   if (request.method === "GET" && url.pathname === "/api/v2/plugins") return sendJson(response, 200, pluginsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/diagnostics") return sendJson(response, 200, diagnosticsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/ui/theme") {

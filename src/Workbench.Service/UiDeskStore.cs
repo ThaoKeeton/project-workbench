@@ -41,16 +41,30 @@ internal static class UiDeskStore
             recent = recent.Where(item => item.Id != touch).Prepend(new DeskOpen(touch, DateTimeOffset.UtcNow.ToString("O"))).Take(8).ToArray();
         }
         var next = new DeskState(pinned!, recent);
+        await SaveAsync(userRoot, next, cancellationToken);
+        return next;
+    }
+
+    public static async Task ForgetAsync(string userRoot, string id, CancellationToken cancellationToken)
+    {
+        var current = (await ReadAsync(userRoot, cancellationToken)).State;
+        var next = new DeskState(
+            current.Pinned.Where(item => !string.Equals(item, id, StringComparison.Ordinal)).ToArray(),
+            current.Recent.Where(item => !string.Equals(item.Id, id, StringComparison.Ordinal)).ToArray());
+        await SaveAsync(userRoot, next, cancellationToken);
+    }
+
+    internal static async Task SaveAsync(string userRoot, DeskState state, CancellationToken cancellationToken)
+    {
         var directory = Path.Combine(userRoot, "v2-preview");
         Directory.CreateDirectory(directory);
         var path = Path.Combine(directory, "desk.json");
-        var pins = next.Pinned.ToArray();
-        var opens = next.Recent.Select(item => new DeskOpenFile(item.Id, item.At)).ToArray();
+        var pins = state.Pinned.ToArray();
+        var opens = state.Recent.Select(item => new DeskOpenFile(item.Id, item.At)).ToArray();
         var bytes = JsonSerializer.SerializeToUtf8Bytes(new DeskFile(Schema, 2, pins, opens), Json);
         var temporary = path + "." + Guid.NewGuid().ToString("N") + ".tmp";
         await File.WriteAllBytesAsync(temporary, bytes, cancellationToken);
         File.Move(temporary, path, overwrite: true);
-        return next;
     }
 
     private static HashSet<string> Allowed(string userRoot)

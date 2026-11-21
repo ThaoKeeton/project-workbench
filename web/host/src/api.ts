@@ -120,6 +120,10 @@ export class ApiClient {
     return this.json(`/api/v2/plugins/${encodeURIComponent(id)}/enable`, { method: "POST" });
   }
 
+  removePlugin(id: string): Promise<{ id: string; removed: boolean }> {
+    return this.json(`/api/v2/plugins/${encodeURIComponent(id)}/remove`, { method: "POST" });
+  }
+
   diagnostics(): Promise<Diagnostics> {
     return this.json("/api/v2/diagnostics");
   }

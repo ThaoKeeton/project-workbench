@@ -151,6 +151,27 @@ describe("launcher pages", () => {
     expect(screen.queryByRole("button", { name: "打开" })).toBeNull();
   });
 
+  it("asks before removing a recorded plugin and keeps it when that fails", async () => {
+    const user = userEvent.setup();
+    const onRemove = vi.fn(async () => undefined);
+    const recorded = { id: "com.example.synthetic-notes", name: "合成备忘", hint: "0.1.0", icon: "folder" as const, state: "可以用", loaded: true, recorded: true };
+    const shipped = { id: "upcam", name: "UPCAM 站会日报", hint: "整理今日站会", icon: "clipboard" as const, state: "可以用", loaded: true };
+    const { unmount } = render(<MemoryRouter><InstalledPage onOpen={vi.fn()} onRemove={onRemove} plugins={[recorded, shipped]} /></MemoryRouter>);
+    expect(screen.getAllByRole("button", { name: "卸掉" }).length).toBe(2);
+    expect(screen.getByText(/本地导入记下的，可以卸掉记下的清单/)).toBeTruthy();
+    await user.click(screen.getAllByRole("button", { name: "卸掉" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "卸掉「合成备忘」" });
+    expect(within(dialog).getByText(/不会删除你当初选中的原文件/)).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "卸掉" }));
+    expect(onRemove).toHaveBeenCalledWith("com.example.synthetic-notes");
+    unmount();
+    render(<MemoryRouter><InstalledPage onOpen={vi.fn()} onRemove={async () => { throw new Error("没有卸掉。记下的清单还在。"); }} plugins={[recorded]} /></MemoryRouter>);
+    await user.click(screen.getAllByRole("button", { name: "卸掉" })[0]);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "卸掉" }));
+    expect(await screen.findByText("没有卸掉。记下的清单还在。")).toBeTruthy();
+    expect(screen.getAllByText("合成备忘").length).toBeGreaterThan(0);
+  });
+
   it("covers settings, diagnostics, pairing, offline, crash and empty states", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();

@@ -138,6 +138,7 @@ export function App() {
         state: "已安装，尚未启用",
         href: "",
         pinnable: false,
+        recorded: true,
       }];
     }
     if (!plugin.uiPath) return [];
@@ -153,6 +154,7 @@ export function App() {
       state: pluginStateLabel(plugin.loaded, plugin.uiPath),
       href: plugin.uiPath,
       pinnable: shellId !== null || local,
+      recorded: local,
     }];
   });
   const shown = locals.length > 0 ? locals : pinnedPlugins.map((plugin) => ({
@@ -171,6 +173,7 @@ export function App() {
       state: installed ? "已安装，尚未启用" : pluginStateLabel(plugin.loaded, plugin.uiPath),
       loaded: installed ? false : plugin.loaded && Boolean(plugin.uiPath),
       href: installed ? "" : plugin.uiPath ?? "",
+      recorded: installed || (plugin.uiPath?.startsWith("/plugins/local/") ?? false),
     };
   });
   const unopened = (snapshot?.plugins ?? []).filter((plugin) => !plugin.uiPath && plugin.state !== "Installed").map((plugin) => plugin.name);
@@ -206,6 +209,13 @@ export function App() {
   const enableRecorded = async (id: string) => {
     await client.enablePlugin(id);
     await reload();
+  };
+
+  const removeRecorded = async (id: string) => {
+    await client.removePlugin(id);
+    setNotice("");
+    await reload();
+    if (location.pathname.startsWith("/plugins/local/")) void navigate("/market/installed");
   };
 
   const changePin = (id: string, next: boolean) => {
@@ -284,11 +294,11 @@ export function App() {
         <Routes>
           <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} plugins={shown} pinned={desk.pinned} recent={desk.recent} onOpen={openPlugin} onPin={changePin} unopened={unopened} />} />
           <Route path="/market" element={<MarketPage onOpen={openPlugin} plugins={records} />} />
-          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} onEnable={enableRecorded} pinned={desk.pinned} onPin={changePin} plugins={shown} />} />
+          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} onEnable={enableRecorded} onRemove={removeRecorded} pinned={desk.pinned} onPin={changePin} plugins={shown} />} />
           <Route path="/market/updates" element={<UpdatesPage plugins={records} />} />
           <Route path="/market/import" element={<ImportPage onCheck={(fileName, text) => client.checkImport(fileName, text)} onCommit={async (fileName, text) => { await client.commitImport(fileName, text); await reload(); }} />} />
-          <Route path="/market/:id" element={<MarketDetail plugins={records} onOpen={openPlugin} onEnable={enableRecorded} />} />
-          <Route path="/plugins/local/:id" element={<LocalPluginRoute records={records} />} />
+          <Route path="/market/:id" element={<MarketDetail plugins={records} onOpen={openPlugin} onEnable={enableRecorded} onRemove={removeRecorded} />} />
+          <Route path="/plugins/local/:id" element={<LocalPluginRoute records={records} onRemove={removeRecorded} />} />
           <Route path="/devices" element={<PairingPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage minimumWidth={snapshot.diagnostics.nativeWindow.minimumWidth} discovered={snapshot.diagnostics.plugins.discovered} ready={snapshot.diagnostics.plugins.ready} />} />
           <Route path="/settings" element={<SettingsPage setting={setting} onChange={chooseTheme} restore={restore} onRestore={setRestore} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} />} />
@@ -322,9 +332,9 @@ function PluginEmpty({ client, remoteName }: { client: ApiClient; remoteName?: s
   return <PluginWorkspace client={client} remoteName={remoteName} empty={empty} />;
 }
 
-function LocalPluginRoute({ records }: { records: LocalPlugin[] }) {
+function LocalPluginRoute({ records, onRemove }: { records: LocalPlugin[]; onRemove: (id: string) => Promise<void> }) {
   const { id = "" } = useParams();
-  return <LocalRecordPage plugin={records.find((item) => item.id === decodeURIComponent(id))} />;
+  return <LocalRecordPage plugin={records.find((item) => item.id === decodeURIComponent(id))} onRemove={onRemove} />;
 }
 
 function messageOf(error: unknown): string {

@@ -13,6 +13,7 @@ export type LocalPlugin = {
   state: string;
   loaded: boolean;
   href: string;
+  recorded?: boolean;
 };
 
 export function MarketPage({
@@ -65,10 +66,12 @@ export function MarketDetail({
   plugins = [],
   onOpen,
   onEnable,
+  onRemove,
 }: {
   plugins?: LocalPlugin[];
   onOpen?: (id: string) => void;
   onEnable?: (id: string) => Promise<void>;
+  onRemove?: (id: string) => Promise<void>;
 }) {
   const { id = "" } = useParams();
   const plugin = plugins.find((item) => item.id === decodeURIComponent(id));
@@ -98,13 +101,48 @@ export function MarketDetail({
       </ul>
       <div className="row-actions">
         {plugin.state === "已安装，尚未启用" && onEnable ? <EnableButton name={plugin.name} onEnable={() => onEnable(plugin.id)} /> : plugin.loaded && plugin.href && onOpen ? <button type="button" className="btn-accent" onClick={() => onOpen(plugin.openId)}>打开</button> : <button type="button" className="btn" disabled>{plugin.state === "已安装，尚未启用" ? "尚未启用" : "不能打开"}</button>}
+        {plugin.recorded && onRemove ? <RemoveButton name={plugin.name} onRemove={() => onRemove(plugin.id)} /> : null}
       </div>
     </div>
   );
 }
 
-export function LocalRecordPage({ plugin }: { plugin?: LocalPlugin }) {
-  if (!plugin?.loaded) {
+function RemoveButton({ name, onRemove }: { name: string; onRemove: () => Promise<void> }) {
+  const [ask, setAsk] = useState(false);
+  const [fault, setFault] = useState("");
+  return (
+    <>
+      <button type="button" className="btn" onClick={() => { setFault(""); setAsk(true); }}>卸掉</button>
+      {fault ? <p role="status">{fault}</p> : null}
+      {ask ? (
+        <Confirm
+          title={`卸掉「${name}」`}
+          body="只会去掉这台电脑上记下的清单。如果它已经启用、正在打开，或固定在左侧、出现在最近打开里，会先拿下来。不会联网，不会下载，也不会删除你当初选中的原文件。"
+          confirmLabel="卸掉"
+          primaryFirst={false}
+          onCancel={() => setAsk(false)}
+          onConfirm={() => {
+            setAsk(false);
+            void onRemove().catch((error: unknown) => {
+              setFault(error instanceof Error && error.message ? error.message : "没有卸掉。记下的清单还在。");
+            });
+          }}
+        />
+      ) : null}
+    </>
+  );
+}
+
+export function LocalRecordPage({ plugin, onRemove }: { plugin?: LocalPlugin; onRemove?: (id: string) => Promise<void> }) {
+  if (!plugin) {
+    return (
+      <div className="page">
+        <h1>这台电脑上没有这个记下的插件</h1>
+        <p>记下的清单已经不在，所以没有打开。</p>
+      </div>
+    );
+  }
+  if (!plugin.loaded) {
     return (
       <div className="page">
         <h1>还没有启用</h1>
@@ -122,6 +160,7 @@ export function LocalRecordPage({ plugin }: { plugin?: LocalPlugin }) {
         <li><span>版本</span><strong>{plugin.version}</strong></li>
         <li><span>状态</span><strong>可以用</strong></li>
       </ul>
+      {onRemove ? <RemoveButton name={plugin.name} onRemove={() => onRemove(plugin.id)} /> : null}
     </div>
   );
 }
@@ -161,31 +200,35 @@ const installedRows = [
 export function InstalledPage({
   onOpen,
   onEnable,
+  onRemove,
   pinned = [],
   onPin,
   plugins,
 }: {
   onOpen: (id: string) => void;
   onEnable?: (id: string) => Promise<void>;
+  onRemove?: (id: string) => Promise<void>;
   pinned?: string[];
   onPin?: (id: string, pinned: boolean) => void;
-  plugins?: Array<{ id: string; name: string; hint: string; icon: IconName; state?: string; loaded?: boolean }>;
+  plugins?: Array<{ id: string; name: string; hint: string; icon: IconName; state?: string; loaded?: boolean; recorded?: boolean }>;
 }) {
   const rows = (plugins ?? installedRows.map((item) => ({
-    id: item.id, name: item.name, hint: item.summary, icon: item.icon, state: "可以用", loaded: true,
+    id: item.id, name: item.name, hint: item.summary, icon: item.icon, state: "可以用", loaded: true, recorded: false,
   })));
   const [selected, setSelected] = useState(rows[0]?.id ?? "");
   const [askId, setAskId] = useState("");
+  const [removeId, setRemoveId] = useState("");
   const [fault, setFault] = useState("");
   const current = rows.find((item) => item.id === selected) ?? rows[0];
   const asked = rows.find((item) => item.id === askId);
+  const removing = rows.find((item) => item.id === removeId);
   const held = current ? pinned.includes(current.id) : false;
   return (
     <div className="page split-page">
       <div>
         <header className="page-head">
           <h1>已安装</h1>
-          <p>这些插件已经在这台电脑上。固定后出现在左侧，关掉再打开还在。不能从这里卸掉，也不会从网上下载。</p>
+          <p>这些插件已经在这台电脑上。固定后出现在左侧，关掉再打开还在。随工作台带来的不能从这里卸掉。本地导入记下的，可以卸掉记下的清单。不会从网上下载。</p>
           <MarketNav />
         </header>
         <ul className="catalog">
@@ -200,6 +243,7 @@ export function InstalledPage({
                 </span>
               </button>
               {item.state === "已安装，尚未启用" && onEnable ? <button type="button" className="btn" onClick={() => { setSelected(item.id); setAskId(item.id); }}>启用</button> : item.loaded === false ? <button type="button" className="btn" disabled>{item.state === "已安装，尚未启用" ? "尚未启用" : "没能载入"}</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
+              {item.recorded && onRemove ? <button type="button" className="btn" onClick={() => { setSelected(item.id); setRemoveId(item.id); }}>卸掉</button> : null}
             </li>
           ))}
         </ul>
@@ -208,14 +252,31 @@ export function InstalledPage({
         <aside className="detail-card">
           <h2>{current.name}</h2>
           <p className="sub">{current.state ?? "可以用"} · {held ? "已固定在左侧" : "没有固定在左侧"}</p>
-          <p>它随工作台留在这台电脑上。这里不能把它卸掉，也不会去网上找新版本。</p>
+          <p>{current.recorded ? "这是本地导入记下的清单。卸掉只去掉记下的这一份，不会删除你当初选中的原文件，也不会联网。" : "它随工作台留在这台电脑上。这里不能把它卸掉，也不会去网上找新版本。"}</p>
           <div className="row-actions">
             {current.state === "已安装，尚未启用" && onEnable ? <button type="button" className="btn-accent" onClick={() => setAskId(current.id)}>启用</button> : <button type="button" className="btn-accent" disabled={!current.loaded} onClick={() => onOpen(current.id)}>{current.loaded ? "打开" : "不能打开"}</button>}
             {onPin && current.loaded !== false ? <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${current.name}` : `把 ${current.name} 固定到左侧`} onClick={() => onPin(current.id, !held)}>{held ? "从左侧拿下" : "固定到左侧"}</button> : null}
+            {current.recorded && onRemove ? <button type="button" className="btn" onClick={() => setRemoveId(current.id)}>卸掉</button> : null}
           </div>
           {fault ? <p role="status">{fault}</p> : null}
         </aside>
       ) : <p>没有已安装的插件。</p>}
+      {removing && onRemove ? (
+        <Confirm
+          title={`卸掉「${removing.name}」`}
+          body="只会去掉这台电脑上记下的清单。如果它已经启用、正在打开，或固定在左侧、出现在最近打开里，会先拿下来。不会联网，不会下载，也不会删除你当初选中的原文件。"
+          confirmLabel="卸掉"
+          primaryFirst={false}
+          onCancel={() => setRemoveId("")}
+          onConfirm={() => {
+            const id = removing.id;
+            setRemoveId("");
+            void onRemove(id).catch((error: unknown) => {
+              setFault(error instanceof Error && error.message ? error.message : "没有卸掉。记下的清单还在。");
+            });
+          }}
+        />
+      ) : null}
       {asked && onEnable ? (
         <Confirm
           title={`启用「${asked.name}」`}
