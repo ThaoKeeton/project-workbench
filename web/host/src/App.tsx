@@ -3,7 +3,7 @@ import { Route, Routes, useLocation, useNavigate, useParams } from "react-router
 import { ApiClient, defaultDesk, readSessionToken, type Desk, type Diagnostics, type Info, type PluginItem, type Projects } from "./api";
 import { deviceLabel, devices, pinnedPlugins, pluginStateLabel, shellPluginId, type DeviceId } from "./catalog";
 import { CommandPalette, HomePage } from "./launcher";
-import { ImportPage, InstalledPage, MarketDetail, MarketPage, UpdatesPage } from "./market";
+import { ImportPage, InstalledPage, LocalRecordPage, MarketDetail, MarketPage, UpdatesPage, type LocalPlugin } from "./market";
 import { Confirm } from "./market";
 import { ProjectDesk } from "./projects/ProjectDesk";
 import { ProjectDeskClient } from "./projects/client";
@@ -143,6 +143,7 @@ export function App() {
     if (!plugin.uiPath) return [];
     const shellId = shellPluginId(plugin.uiPath);
     const known = shellId ? pinnedPlugins.find((item) => item.id === shellId) : undefined;
+    const local = plugin.uiPath.startsWith("/plugins/local/");
     return [{
       id: shellId ?? plugin.id,
       name: plugin.name,
@@ -151,7 +152,7 @@ export function App() {
       loaded: plugin.loaded,
       state: pluginStateLabel(plugin.loaded, plugin.uiPath),
       href: plugin.uiPath,
-      pinnable: shellId !== null,
+      pinnable: shellId !== null || local,
     }];
   });
   const shown = locals.length > 0 ? locals : pinnedPlugins.map((plugin) => ({
@@ -200,6 +201,11 @@ export function App() {
       return;
     }
     go();
+  };
+
+  const enableRecorded = async (id: string) => {
+    await client.enablePlugin(id);
+    await reload();
   };
 
   const changePin = (id: string, next: boolean) => {
@@ -278,10 +284,11 @@ export function App() {
         <Routes>
           <Route path="/" element={<HomePage onOpenPalette={() => setPaletteOpen(true)} palette={palette ?? undefined} plugins={shown} pinned={desk.pinned} recent={desk.recent} onOpen={openPlugin} onPin={changePin} unopened={unopened} />} />
           <Route path="/market" element={<MarketPage onOpen={openPlugin} plugins={records} />} />
-          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} pinned={desk.pinned} onPin={changePin} plugins={shown} />} />
+          <Route path="/market/installed" element={<InstalledPage onOpen={openPlugin} onEnable={enableRecorded} pinned={desk.pinned} onPin={changePin} plugins={shown} />} />
           <Route path="/market/updates" element={<UpdatesPage plugins={records} />} />
           <Route path="/market/import" element={<ImportPage onCheck={(fileName, text) => client.checkImport(fileName, text)} onCommit={async (fileName, text) => { await client.commitImport(fileName, text); await reload(); }} />} />
-          <Route path="/market/:id" element={<MarketDetail plugins={records} onOpen={openPlugin} />} />
+          <Route path="/market/:id" element={<MarketDetail plugins={records} onOpen={openPlugin} onEnable={enableRecorded} />} />
+          <Route path="/plugins/local/:id" element={<LocalPluginRoute records={records} />} />
           <Route path="/devices" element={<PairingPage />} />
           <Route path="/diagnostics" element={<DiagnosticsPage minimumWidth={snapshot.diagnostics.nativeWindow.minimumWidth} discovered={snapshot.diagnostics.plugins.discovered} ready={snapshot.diagnostics.plugins.ready} />} />
           <Route path="/settings" element={<SettingsPage setting={setting} onChange={chooseTheme} restore={restore} onRestore={setRestore} reduceMotion={reduceMotion} onReduceMotion={setReduceMotion} />} />
@@ -313,6 +320,11 @@ function PluginEmpty({ client, remoteName }: { client: ApiClient; remoteName?: s
   const { scene = "suite" } = useParams();
   const empty = scene === "target" || scene === "agent" || scene === "key" ? scene : "suite";
   return <PluginWorkspace client={client} remoteName={remoteName} empty={empty} />;
+}
+
+function LocalPluginRoute({ records }: { records: LocalPlugin[] }) {
+  const { id = "" } = useParams();
+  return <LocalRecordPage plugin={records.find((item) => item.id === decodeURIComponent(id))} />;
 }
 
 function messageOf(error: unknown): string {

@@ -663,6 +663,70 @@ public sealed class ServiceApiTests
         }
     }
 
+    [Fact]
+    public async Task Recorded_manifest_enables_only_after_confirmation()
+    {
+        var root = TempRoot();
+        var running = await StartAsync(root);
+        var stopped = false;
+        const string notes = """
+            {"contract":"workbench.plugin.v2","contractVersion":"2.0.0-preview.1","id":"com.example.synthetic-notes","name":"合成备忘","version":"0.1.0","description":"只留在本机的合成清单。","autoSend":false,"backend":{"entryAssembly":"Notes.dll","entryType":"Example.Notes"},"ui":{"kind":"web-package","module":"./ui/Notes.tsx","mount":"embedded"},"permissions":[{"id":"project.read","reason":"知道当前项目","sensitive":false}]}
+            """;
+        try
+        {
+            var saved = await running.Client.PostAsJsonAsync("/api/v2/plugins/import", new { fileName = "notes.plugin.v2.json", text = notes });
+            Assert.Equal(HttpStatusCode.OK, saved.StatusCode);
+            var recorded = Plugin((await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins"), "com.example.synthetic-notes");
+            Assert.Equal("Installed", recorded.GetProperty("state").GetString());
+            Assert.False(recorded.GetProperty("loaded").GetBoolean());
+            var tooSoon = await running.Client.PutAsJsonAsync("/api/v2/ui/desk", new { pinned = new[] { "com.example.synthetic-notes" } });
+            Assert.Equal(HttpStatusCode.BadRequest, tooSoon.StatusCode);
+            var missing = await running.Client.PostAsync("/api/v2/plugins/com.example.missing/enable", null);
+            Assert.Equal(HttpStatusCode.NotFound, missing.StatusCode);
+            var enabled = await running.Client.PostAsync("/api/v2/plugins/com.example.synthetic-notes/enable", null);
+            Assert.Equal(HttpStatusCode.OK, enabled.StatusCode);
+            var live = Plugin((await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins"), "com.example.synthetic-notes");
+            Assert.Equal("Ready", live.GetProperty("state").GetString());
+            Assert.True(live.GetProperty("loaded").GetBoolean());
+            Assert.Equal("/plugins/local/com.example.synthetic-notes", live.GetProperty("uiPath").GetString());
+            var pinned = await running.Client.PutAsJsonAsync("/api/v2/ui/desk", new { pinned = new[] { "ding", "com.example.synthetic-notes" }, touch = "com.example.synthetic-notes" });
+            Assert.Equal(HttpStatusCode.OK, pinned.StatusCode);
+            await File.WriteAllTextAsync(Path.Combine(root, "v2-preview", "imports", "com.example.synthetic-notes", "plugin.v2.json"), "{}");
+            var refused = await running.Client.PostAsync("/api/v2/plugins/com.example.synthetic-notes/enable", null);
+            Assert.Equal(HttpStatusCode.BadRequest, refused.StatusCode);
+            var body = await refused.Content.ReadFromJsonAsync<JsonElement>();
+            Assert.Contains("没有启用", body.GetProperty("message").GetString(), StringComparison.Ordinal);
+            var rolled = Plugin((await running.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins"), "com.example.synthetic-notes");
+            Assert.Equal("Installed", rolled.GetProperty("state").GetString());
+            Assert.False(rolled.GetProperty("loaded").GetBoolean());
+            Assert.Equal(JsonValueKind.Null, rolled.GetProperty("uiPath").ValueKind);
+            Assert.Equal(1, JsonDocument.Parse(await File.ReadAllTextAsync(Path.Combine(root, ".workspaces", "catalog.json"))).RootElement.GetProperty("schemaVersion").GetInt32());
+            await File.WriteAllTextAsync(Path.Combine(root, "v2-preview", "imports", "com.example.synthetic-notes", "plugin.v2.json"), notes);
+            var restored = await running.Client.PostAsync("/api/v2/plugins/com.example.synthetic-notes/enable", null);
+            Assert.Equal(HttpStatusCode.OK, restored.StatusCode);
+            running.Client.Dispose();
+            await running.Host.DisposeAsync();
+            stopped = true;
+            var restarted = await StartAsync(root);
+            try
+            {
+                var still = Plugin((await restarted.Client.GetFromJsonAsync<JsonElement>("/api/v2/plugins"))!.GetProperty("plugins"), "com.example.synthetic-notes");
+                Assert.True(still.GetProperty("loaded").GetBoolean());
+                Assert.Equal("Ready", still.GetProperty("state").GetString());
+            }
+            finally { await restarted.DisposeAsync(); }
+        }
+        finally
+        {
+            if (!stopped)
+            {
+                running.Client.Dispose();
+                await running.Host.DisposeAsync();
+                Delete(root);
+            }
+        }
+    }
+
     private static JsonElement Plugin(JsonElement plugins, string id)
         => plugins.EnumerateArray().Single(item => item.GetProperty("id").GetString() == id);
 

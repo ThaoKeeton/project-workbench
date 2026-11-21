@@ -20,7 +20,7 @@ internal static class UiDeskStore
         {
             await using var stream = File.OpenRead(path);
             var document = await JsonSerializer.DeserializeAsync<DeskFile>(stream, Json, cancellationToken);
-            var accepted = Accept(document);
+            var accepted = Accept(document, Allowed(userRoot));
             return accepted is null ? new(Default, true) : new(accepted, false);
         }
         catch (Exception error) when (error is JsonException or IOException)
@@ -31,8 +31,9 @@ internal static class UiDeskStore
 
     public static async Task<DeskState> WriteAsync(string userRoot, IReadOnlyList<string>? pinned, string? touch, CancellationToken cancellationToken)
     {
-        if (!ValidPins(pinned)) throw new ArgumentOutOfRangeException(nameof(pinned));
-        if (touch is not null && !Known.Contains(touch)) throw new ArgumentOutOfRangeException(nameof(touch));
+        var allowed = Allowed(userRoot);
+        if (!ValidPins(pinned, allowed)) throw new ArgumentOutOfRangeException(nameof(pinned));
+        if (touch is not null && !allowed.Contains(touch)) throw new ArgumentOutOfRangeException(nameof(touch));
         var current = (await ReadAsync(userRoot, cancellationToken)).State;
         var recent = current.Recent;
         if (touch is not null)
@@ -52,13 +53,25 @@ internal static class UiDeskStore
         return next;
     }
 
-    private static bool ValidPins(IReadOnlyList<string>? pinned)
-        => pinned is { Count: <= 6 } && pinned.All(Known.Contains) && pinned.Distinct(StringComparer.Ordinal).Count() == pinned.Count;
-
-    private static DeskState? Accept(DeskFile? document)
+    private static HashSet<string> Allowed(string userRoot)
     {
-        if (document is not { Schema: Schema, SchemaVersion: 2 } || !ValidPins(document.Pinned)) return null;
-        var recent = (document.Recent ?? []).Where(item => item.Id is not null && Known.Contains(item.Id) && item.At is not null)
+        var allowed = new HashSet<string>(Known, StringComparer.Ordinal);
+        foreach (var plugin in PluginImportStore.Read(userRoot))
+            if (plugin.Enabled) allowed.Add(plugin.Id);
+        return allowed;
+    }
+
+    private static bool ValidPins(IReadOnlyList<string>? pinned, IReadOnlySet<string> allowed)
+        => pinned is { Count: <= 6 } && pinned.All(allowed.Contains) && pinned.Distinct(StringComparer.Ordinal).Count() == pinned.Count;
+
+    private static DeskState? Accept(DeskFile? document, IReadOnlySet<string> allowed)
+    {
+        if (document is not { Schema: Schema, SchemaVersion: 2, Pinned: { } pinned }) return null;
+        if (pinned.Length > 6 || pinned.Distinct(StringComparer.Ordinal).Count() != pinned.Length) return null;
+        var kept = pinned.Where(allowed.Contains).ToArray();
+        document = document with { Pinned = kept };
+        if (!ValidPins(document.Pinned, allowed)) return null;
+        var recent = (document.Recent ?? []).Where(item => item.Id is not null && allowed.Contains(item.Id) && item.At is not null)
             .Select(item => new DeskOpen(item.Id!, item.At!))
             .GroupBy(item => item.Id, StringComparer.Ordinal)
             .Select(group => group.First())

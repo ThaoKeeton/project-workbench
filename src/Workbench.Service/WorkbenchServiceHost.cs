@@ -185,6 +185,13 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
             await PluginImportStore.CommitAsync(_userRoot, report, fileName, cancellationToken);
             return Results.Json(ImportBodyOf(report, fileName), Json);
         });
+        app.MapPost("/api/v2/plugins/{id}/enable", async (string id, CancellationToken cancellationToken) =>
+        {
+            var result = await PluginImportStore.EnableAsync(_userRoot, id, KnownPluginIds(), cancellationToken);
+            if (!result.Ok)
+                return Results.Json(new { error = result.Error, message = result.Message }, Json, statusCode: result.Status);
+            return Results.Json(new { id = result.Id, enabled = true }, Json);
+        });
         app.MapGet("/api/v2/diagnostics", async (CancellationToken cancellationToken) =>
         {
             try
@@ -365,12 +372,12 @@ public sealed partial class WorkbenchServiceHost : IAsyncDisposable
             name = plugin.Name,
             version = plugin.Version,
             contract = "v2-preview",
-            state = "Installed",
+            state = plugin.Enabled ? "Ready" : "Installed",
             trusted = false,
-            loaded = false,
+            loaded = plugin.Enabled,
             diagnostics = Array.Empty<object>(),
             permissions = Array.Empty<V2PermissionView>(),
-            uiPath = (string?)null
+            uiPath = plugin.Enabled ? "/plugins/local/" + plugin.Id : null
         });
         var v2 = _v2Packages.Select(plugin => new
         {

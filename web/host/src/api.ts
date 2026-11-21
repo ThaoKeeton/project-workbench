@@ -116,6 +116,10 @@ export class ApiClient {
     return this.json("/api/v2/plugins/import", { method: "POST", body: JSON.stringify({ fileName, text }) });
   }
 
+  enablePlugin(id: string): Promise<{ id: string; enabled: boolean }> {
+    return this.json(`/api/v2/plugins/${encodeURIComponent(id)}/enable`, { method: "POST" });
+  }
+
   diagnostics(): Promise<Diagnostics> {
     return this.json("/api/v2/diagnostics");
   }
@@ -203,8 +207,9 @@ export class ApiClient {
     if (!response.ok) {
       let code = String(response.status);
       try {
-        const body = (await response.json()) as { error?: string };
-        if (body.error) code = body.error;
+        const body = (await response.json()) as { error?: string; message?: string };
+        if (body.message) code = body.message;
+        else if (body.error) code = body.error;
       } catch {
         code = String(response.status);
       }

@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter, Route, Routes } from "react-router-dom";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -130,6 +130,25 @@ describe("launcher pages", () => {
     await user.upload(screen.getByLabelText("选择文件"), new File(["{}"], "notes.plugin.v2.json", { type: "application/json" }));
     await user.click(await screen.findByRole("button", { name: "确认记在这台电脑上" }));
     expect(await screen.findByText("没有记下。请看上面的检查。")).toBeTruthy();
+  });
+
+  it("asks before enabling a recorded plugin and keeps it disabled when that fails", async () => {
+    const user = userEvent.setup();
+    const onEnable = vi.fn(async () => undefined);
+    const plugin = { id: "com.example.synthetic-notes", name: "合成备忘", hint: "0.1.0", icon: "folder" as const, state: "已安装，尚未启用", loaded: false };
+    const { unmount } = render(<MemoryRouter><InstalledPage onOpen={vi.fn()} onEnable={onEnable} plugins={[plugin]} /></MemoryRouter>);
+    await user.click(screen.getAllByRole("button", { name: "启用" })[0]);
+    const dialog = screen.getByRole("dialog", { name: "启用「合成备忘」" });
+    expect(within(dialog).getByText("只会加载这台电脑上已经记下的清单。不会联网，也不会下载。")).toBeTruthy();
+    await user.click(within(dialog).getByRole("button", { name: "启用" }));
+    expect(onEnable).toHaveBeenCalledWith("com.example.synthetic-notes");
+    unmount();
+    render(<MemoryRouter><InstalledPage onOpen={vi.fn()} onEnable={async () => { throw new Error("没有启用。记下的清单已经不在。"); }} plugins={[plugin]} /></MemoryRouter>);
+    await user.click(screen.getAllByRole("button", { name: "启用" })[0]);
+    await user.click(within(screen.getByRole("dialog")).getByRole("button", { name: "启用" }));
+    expect(await screen.findByText("没有启用。记下的清单已经不在。")).toBeTruthy();
+    expect(screen.getAllByRole("button", { name: "启用" }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole("button", { name: "打开" })).toBeNull();
   });
 
   it("covers settings, diagnostics, pairing, offline, crash and empty states", async () => {

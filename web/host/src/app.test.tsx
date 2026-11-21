@@ -1,4 +1,4 @@
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -145,6 +145,45 @@ describe("app shell", () => {
     await user.upload(screen.getByLabelText("选择文件"), new File(["{}"], "nope.json", { type: "application/json" }));
     expect(await screen.findByText("这不是插件清单。请选择 plugin.v2.json。")).toBeTruthy();
     expect((screen.getByRole("button", { name: "确认记在这台电脑上" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("enables a recorded plugin and then opens it", async () => {
+    sessionStorage.setItem("workbench.session", "preview-session");
+    let enabled = false;
+    vi.stubGlobal("WebSocket", class {
+      addEventListener(type: string, handler: () => void) { if (type === "open") handler(); }
+      close() { return undefined; }
+    });
+    vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo, init?: RequestInit) => {
+      const url = String(input);
+      if (url.endsWith("/api/v2/info")) return json({ product: "ProjectWorkbench", apiVersion: "2", preview: true, device: { id: "local", label: "本机", kind: "loopback" }, lan: { enabled: false, availableInPreview: false }, autoSend: false, catalogSchemaVersion: 1 });
+      if (url.endsWith("/api/v2/projects")) return json(projects);
+      if (url.endsWith("/enable")) { enabled = true; return json({ id: "com.example.synthetic-notes", enabled: true }); }
+      if (url.endsWith("/api/v2/plugins")) return json({ plugins: [enabled
+        ? { id: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: false, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugins/local/com.example.synthetic-notes" }
+        : { id: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0", contract: "v2-preview", state: "Installed", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null }] });
+      if (url.endsWith("/api/v2/diagnostics")) return json({ schema: "workbench.diagnostics.v2.preview", service: { bind: "loopback", lanEnabled: false, autoSend: false }, plugins: { discovered: 1, ready: 0, invalid: 0, loaded: 0 }, projects: { count: 2, activePresent: true }, issues: [], nativeWindow: { minimumWidth: 1100 } });
+      if (url.endsWith("/api/v2/ui/theme")) return json({ schema: "workbench.ui-theme.v2.preview", schemaVersion: 2, setting: "system" });
+      if (url.endsWith("/api/v2/session")) return json(null, 204);
+      if (url.endsWith("/api/v2/ui/desk") && init?.method === "PUT") {
+        const body = JSON.parse(String(init.body)) as { pinned: string[] };
+        return json({ schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, pinned: body.pinned, recent: [], recovered: false });
+      }
+      if (url.endsWith("/api/v2/ui/desk")) return json({ schema: "workbench.ui-desk.v2.preview", schemaVersion: 2, pinned: ["upcam"], recent: [], recovered: false });
+      return json({ error: "NotFound" }, 404);
+    }));
+    const user = userEvent.setup();
+    render(<MemoryRouter><App /></MemoryRouter>);
+    await user.click(await screen.findByRole("link", { name: "市场" }));
+    await user.click(screen.getByRole("link", { name: "已安装" }));
+    expect(await screen.findByText("已安装，尚未启用")).toBeTruthy();
+    await user.click(screen.getAllByRole("button", { name: "启用" })[0]);
+    await user.click(within(screen.getByRole("dialog", { name: "启用「合成备忘」" })).getByRole("button", { name: "启用" }));
+    expect((await screen.findAllByRole("button", { name: "打开" })).length).toBeGreaterThan(0);
+    await user.click(screen.getByRole("button", { name: "把 合成备忘 固定到左侧" }));
+    expect(await screen.findByText("「合成备忘」已固定到左侧。关掉再打开还在。")).toBeTruthy();
+    await user.click(screen.getAllByRole("button", { name: "打开" })[0]);
+    expect(await screen.findByText("已在这台电脑上启用。打开的是记下的清单。没有附带后端程序，也没有从网上下载。")).toBeTruthy();
   });
 
   it("shows the missing session and offline states", async () => {

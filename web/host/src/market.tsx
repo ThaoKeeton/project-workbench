@@ -64,9 +64,11 @@ export function MarketNav() {
 export function MarketDetail({
   plugins = [],
   onOpen,
+  onEnable,
 }: {
   plugins?: LocalPlugin[];
   onOpen?: (id: string) => void;
+  onEnable?: (id: string) => Promise<void>;
 }) {
   const { id = "" } = useParams();
   const plugin = plugins.find((item) => item.id === decodeURIComponent(id));
@@ -95,9 +97,58 @@ export function MarketDetail({
         <li><span>来源</span><strong>这台电脑</strong></li>
       </ul>
       <div className="row-actions">
-        {plugin.loaded && plugin.href && onOpen ? <button type="button" className="btn-accent" onClick={() => onOpen(plugin.openId)}>打开</button> : <button type="button" className="btn" disabled>{plugin.state === "已安装，尚未启用" ? "尚未启用" : "不能打开"}</button>}
+        {plugin.state === "已安装，尚未启用" && onEnable ? <EnableButton name={plugin.name} onEnable={() => onEnable(plugin.id)} /> : plugin.loaded && plugin.href && onOpen ? <button type="button" className="btn-accent" onClick={() => onOpen(plugin.openId)}>打开</button> : <button type="button" className="btn" disabled>{plugin.state === "已安装，尚未启用" ? "尚未启用" : "不能打开"}</button>}
       </div>
     </div>
+  );
+}
+
+export function LocalRecordPage({ plugin }: { plugin?: LocalPlugin }) {
+  if (!plugin?.loaded) {
+    return (
+      <div className="page">
+        <h1>还没有启用</h1>
+        <p>记下的清单还停在未启用，所以没有打开。</p>
+      </div>
+    );
+  }
+  return (
+    <div className="page narrow-page">
+      <header className="page-head">
+        <h1>{plugin.name}</h1>
+        <p>已在这台电脑上启用。打开的是记下的清单。没有附带后端程序，也没有从网上下载。</p>
+      </header>
+      <ul className="status-rows">
+        <li><span>版本</span><strong>{plugin.version}</strong></li>
+        <li><span>状态</span><strong>可以用</strong></li>
+      </ul>
+    </div>
+  );
+}
+
+function EnableButton({ name, onEnable }: { name: string; onEnable: () => Promise<void> }) {
+  const [ask, setAsk] = useState(false);
+  const [fault, setFault] = useState("");
+  return (
+    <>
+      <button type="button" className="btn-accent" onClick={() => { setFault(""); setAsk(true); }}>启用</button>
+      {fault ? <p role="status">{fault}</p> : null}
+      {ask ? (
+        <Confirm
+          title={`启用「${name}」`}
+          body="只会加载这台电脑上已经记下的清单。不会联网，也不会下载。"
+          confirmLabel="启用"
+          primaryFirst={false}
+          onCancel={() => setAsk(false)}
+          onConfirm={() => {
+            setAsk(false);
+            void onEnable().catch((error: unknown) => {
+              setFault(error instanceof Error && error.message ? error.message : "没有启用。还是停在未启用。");
+            });
+          }}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -109,11 +160,13 @@ const installedRows = [
 
 export function InstalledPage({
   onOpen,
+  onEnable,
   pinned = [],
   onPin,
   plugins,
 }: {
   onOpen: (id: string) => void;
+  onEnable?: (id: string) => Promise<void>;
   pinned?: string[];
   onPin?: (id: string, pinned: boolean) => void;
   plugins?: Array<{ id: string; name: string; hint: string; icon: IconName; state?: string; loaded?: boolean }>;
@@ -122,7 +175,10 @@ export function InstalledPage({
     id: item.id, name: item.name, hint: item.summary, icon: item.icon, state: "可以用", loaded: true,
   })));
   const [selected, setSelected] = useState(rows[0]?.id ?? "");
+  const [askId, setAskId] = useState("");
+  const [fault, setFault] = useState("");
   const current = rows.find((item) => item.id === selected) ?? rows[0];
+  const asked = rows.find((item) => item.id === askId);
   const held = current ? pinned.includes(current.id) : false;
   return (
     <div className="page split-page">
@@ -143,7 +199,7 @@ export function InstalledPage({
                   <small>{item.state === "已安装，尚未启用" ? "还没有启用" : item.loaded === false ? "没能载入" : pinned.includes(item.id) ? "已固定在左侧" : "没有固定在左侧"}</small>
                 </span>
               </button>
-              {item.loaded === false ? <button type="button" className="btn" disabled>{item.state === "已安装，尚未启用" ? "尚未启用" : "没能载入"}</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
+              {item.state === "已安装，尚未启用" && onEnable ? <button type="button" className="btn" onClick={() => { setSelected(item.id); setAskId(item.id); }}>启用</button> : item.loaded === false ? <button type="button" className="btn" disabled>{item.state === "已安装，尚未启用" ? "尚未启用" : "没能载入"}</button> : <button type="button" className="btn" onClick={() => onOpen(item.id)}>打开</button>}
             </li>
           ))}
         </ul>
@@ -154,11 +210,28 @@ export function InstalledPage({
           <p className="sub">{current.state ?? "可以用"} · {held ? "已固定在左侧" : "没有固定在左侧"}</p>
           <p>它随工作台留在这台电脑上。这里不能把它卸掉，也不会去网上找新版本。</p>
           <div className="row-actions">
-            <button type="button" className="btn-accent" disabled={current.state === "已安装，尚未启用"} onClick={() => onOpen(current.id)}>{current.state === "已安装，尚未启用" ? "尚未启用" : "打开"}</button>
+            {current.state === "已安装，尚未启用" && onEnable ? <button type="button" className="btn-accent" onClick={() => setAskId(current.id)}>启用</button> : <button type="button" className="btn-accent" disabled={!current.loaded} onClick={() => onOpen(current.id)}>{current.loaded ? "打开" : "不能打开"}</button>}
             {onPin && current.loaded !== false ? <button type="button" className="btn" aria-pressed={held} aria-label={held ? `从左侧拿下 ${current.name}` : `把 ${current.name} 固定到左侧`} onClick={() => onPin(current.id, !held)}>{held ? "从左侧拿下" : "固定到左侧"}</button> : null}
           </div>
+          {fault ? <p role="status">{fault}</p> : null}
         </aside>
       ) : <p>没有已安装的插件。</p>}
+      {asked && onEnable ? (
+        <Confirm
+          title={`启用「${asked.name}」`}
+          body="只会加载这台电脑上已经记下的清单。不会联网，也不会下载。"
+          confirmLabel="启用"
+          primaryFirst={false}
+          onCancel={() => setAskId("")}
+          onConfirm={() => {
+            const id = asked.id;
+            setAskId("");
+            void onEnable(id).catch((error: unknown) => {
+              setFault(error instanceof Error && error.message ? error.message : "没有启用。还是停在未启用。");
+            });
+          }}
+        />
+      ) : null}
     </div>
   );
 }

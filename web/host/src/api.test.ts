@@ -19,6 +19,7 @@ describe("api client", () => {
     if (init?.method === "POST" && String(_input).endsWith("/export")) return new Response("suite", { status: 200 });
       if (init?.method === "POST" && String(_input).endsWith("/session")) return new Response(null, { status: 204 });
       if (init?.method === "PUT") return new Response(JSON.stringify(body ?? { setting: "dark" }), { status: 200 });
+      if (String(_input).endsWith("/enable")) return new Response(JSON.stringify({ id: "com.example.synthetic-notes", enabled: true }), { status: 200 });
       if (String(_input).includes("/import")) {
         return new Response(JSON.stringify({ importable: true, error: null, fileName: body.fileName, plugin: { id: "com.example.synthetic-notes", name: "合成备忘", version: "0.1.0" }, checks: [] }), { status: 200 });
       }
@@ -34,6 +35,7 @@ describe("api client", () => {
     expect((await client.plugins())[0].id).toBe("sample");
     expect((await client.checkImport("notes.plugin.v2.json", "{}")).plugin?.name).toBe("合成备忘");
     expect((await client.commitImport("notes.plugin.v2.json", "{}")).importable).toBe(true);
+    expect((await client.enablePlugin("com.example.synthetic-notes")).enabled).toBe(true);
     await client.diagnostics();
     await client.cases();
     await client.saveCases({ schema: "workbench.test-cases.v2.preview", schemaVersion: 2, suiteName: "本地", rows: [] });

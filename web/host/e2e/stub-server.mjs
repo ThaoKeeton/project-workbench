@@ -138,7 +138,7 @@ function pluginsBody() {
       { id: "com.projectworkbench.dingtalk-insights.v2", name: "钉钉 Insights", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/ding" },
       { id: "com.projectworkbench.testing-design.v2", name: "测试设计", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/test" },
       { id: "com.projectworkbench.test-executor", name: "自动测试", version: "0.1.0", contract: "v2-preview", state: "Ready", trusted: true, loaded: true, diagnostics: [], permissions: [], uiPath: "/plugin/runner" },
-      ...state.imports.map((item) => ({ id: item.id, name: item.name, version: item.version, contract: "v2-preview", state: "Installed", trusted: false, loaded: false, diagnostics: [], permissions: [], uiPath: null })),
+      ...state.imports.map((item) => ({ id: item.id, name: item.name, version: item.version, contract: "v2-preview", state: item.enabled ? "Ready" : "Installed", trusted: false, loaded: Boolean(item.enabled), diagnostics: [], permissions: [], uiPath: item.enabled ? `/plugins/local/${item.id}` : null })),
     ],
   };
 }
@@ -333,9 +333,23 @@ const server = createServer(async (request, response) => {
     const report = inspectImport(body);
     if (url.pathname === "/api/v2/plugins/import") {
       if (!report.importable) return sendJson(response, 400, { error: report.error, report });
-      state.imports.push(report.plugin);
+      state.imports.push({ ...report.plugin, enabled: false, text: body.text, gap: String(report.plugin.id).endsWith("synthetic-gap") });
     }
     return sendJson(response, 200, report);
+  }
+  const enableMatch = url.pathname.match(/^\/api\/v2\/plugins\/([^/]+)\/enable$/);
+  if (request.method === "POST" && enableMatch) {
+    const id = decodeURIComponent(enableMatch[1]);
+    const item = state.imports.find((plugin) => plugin.id === id);
+    if (!item) return sendJson(response, 404, { error: "NotRecorded", message: "这台电脑上没有这份记下的清单，没有启用。" });
+    let manifest = null;
+    try { manifest = JSON.parse(item.text ?? ""); } catch { manifest = null; }
+    if (item.gap || !manifest || manifest.id !== id) {
+      item.enabled = false;
+      return sendJson(response, 400, { error: "InvalidManifest", message: "没有启用。记下的清单已经不在。" });
+    }
+    item.enabled = true;
+    return sendJson(response, 200, { id, enabled: true });
   }
   if (request.method === "GET" && url.pathname === "/api/v2/plugins") return sendJson(response, 200, pluginsBody());
   if (request.method === "GET" && url.pathname === "/api/v2/diagnostics") return sendJson(response, 200, diagnosticsBody());
@@ -347,7 +361,7 @@ const server = createServer(async (request, response) => {
   }
   if (request.method === "PUT" && url.pathname === "/api/v2/ui/desk") {
     const body = JSON.parse(await readBody(request));
-    const known = ["upcam", "ding", "test", "runner"];
+    const known = ["upcam", "ding", "test", "runner", ...state.imports.filter((item) => item.enabled).map((item) => item.id)];
     const pinned = Array.isArray(body.pinned) ? body.pinned : null;
     if (!pinned || pinned.length > 6 || pinned.some((id) => !known.includes(id)) || new Set(pinned).size !== pinned.length) {
       return sendJson(response, 400, { error: "InvalidDesk" });
