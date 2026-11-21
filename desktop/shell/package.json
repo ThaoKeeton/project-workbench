@@ -1,0 +1,23 @@
+{
+  "name": "workbench-v2-electron-shell",
+  "private": true,
+  "version": "0.5.0-preview.1",
+  "description": "Electron window for the v2 preview. It hosts the existing React UI and starts the loopback .NET service.",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "start": "npm run build && electron .",
+    "test": "vitest run --coverage",
+    "typecheck": "tsc -p tsconfig.json --noEmit --pretty false"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^22.19.0",
+    "@vitest/coverage-v8": "^5.1.0",
+    "electron": "45.3.0",
+    "typescript": "^5.9.3",
+    "vitest": "^5.1.0"
+  }
+}

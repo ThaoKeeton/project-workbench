@@ -1,0 +1,24 @@
+{
+  "schema": "workbench.testing.dashboard.v2.preview",
+  "schemaVersion": 2,
+  "autoSend": false,
+  "label": "合成检查，不替代人工验收",
+  "notice": "这些用例和运行记录来自合成样本。合成检查通过不代表已经人工验收。",
+  "humanAcceptance": false,
+  "cases": [
+    { "id": "SYN-TC-001", "title": "打开合成站会记录", "suite": "界面" },
+    { "id": "SYN-TC-002", "title": "今日事项含编号、标题、负责人和状态", "suite": "站会" },
+    { "id": "SYN-TC-003", "title": "摘要草稿只写入本机", "suite": "站会" },
+    { "id": "SYN-TC-004", "title": "聊天导出可按需分析", "suite": "沟通" },
+    { "id": "SYN-TC-005", "title": "发送动作保持关闭", "suite": "沟通" },
+    { "id": "SYN-TC-006", "title": "看板标明不替代人工验收", "suite": "验收" }
+  ],
+  "runs": [
+    { "id": "SYN-RUN-001", "caseId": "SYN-TC-001", "status": "通过", "kind": "合成检查", "humanAcceptance": "未验收" },
+    { "id": "SYN-RUN-002", "caseId": "SYN-TC-002", "status": "通过", "kind": "合成检查", "humanAcceptance": "未验收" },
+    { "id": "SYN-RUN-003", "caseId": "SYN-TC-003", "status": "通过", "kind": "合成检查", "humanAcceptance": "未验收" },
+    { "id": "SYN-RUN-004", "caseId": "SYN-TC-004", "status": "通过", "kind": "合成检查", "humanAcceptance": "未验收" },
+    { "id": "SYN-RUN-005", "caseId": "SYN-TC-005", "status": "通过", "kind": "合成检查", "humanAcceptance": "未验收" },
+    { "id": "SYN-RUN-006", "caseId": "SYN-TC-006", "status": "通过", "kind": "合成检查", "humanAcceptance": "未验收" }
+  ]
+}

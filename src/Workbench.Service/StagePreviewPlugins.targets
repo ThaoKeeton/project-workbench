@@ -1,0 +1,19 @@
+<Project>
+  <Target Name="StagePreviewPlugins" AfterTargets="Build">
+    <PropertyGroup>
+      <_StageRoot>$(TargetDir)preview-plugins\</_StageRoot>
+      <_V2>$(MSBuildThisFileDirectory)..\..\plugins\v2\</_V2>
+      <_Cfg>$(Configuration)</_Cfg>
+    </PropertyGroup>
+    <MakeDir Directories="$(_StageRoot)com.projectworkbench.test-cases.v2;$(_StageRoot)com.projectworkbench.upcam-standup.v2;$(_StageRoot)com.projectworkbench.dingtalk-insights.v2;$(_StageRoot)com.projectworkbench.testing-design.v2;$(_StageRoot)com.projectworkbench.test-executor" />
+    <ItemGroup>
+      <_ExecutorFiles Include="$(_V2)Workbench.TestExecutor\bin\$(_Cfg)\net10.0\*.dll" />
+      <_ExecutorFiles Include="$(_V2)Workbench.TestExecutor\bin\$(_Cfg)\net10.0\*.json" />
+    </ItemGroup>
+    <Copy SourceFiles="$(_V2)Workbench.TestCases.V2\bin\$(_Cfg)\net10.0\Workbench.TestCases.V2.dll;$(_V2)Workbench.TestCases.V2\bin\$(_Cfg)\net10.0\Workbench.TestCases.V2.deps.json;$(_V2)Workbench.TestCases.V2\plugin.v2.json" DestinationFolder="$(_StageRoot)com.projectworkbench.test-cases.v2\" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_V2)Workbench.UpcamStandup.V2\bin\$(_Cfg)\net10.0\Workbench.UpcamStandup.V2.dll;$(_V2)Workbench.UpcamStandup.V2\bin\$(_Cfg)\net10.0\Workbench.UpcamStandup.V2.deps.json;$(_V2)Workbench.UpcamStandup.V2\plugin.v2.json" DestinationFolder="$(_StageRoot)com.projectworkbench.upcam-standup.v2\" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_V2)Workbench.DingTalkInsights.V2\bin\$(_Cfg)\net10.0\Workbench.DingTalkInsights.V2.dll;$(_V2)Workbench.DingTalkInsights.V2\bin\$(_Cfg)\net10.0\Workbench.DingTalkInsights.V2.deps.json;$(_V2)Workbench.DingTalkInsights.V2\plugin.v2.json" DestinationFolder="$(_StageRoot)com.projectworkbench.dingtalk-insights.v2\" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="$(_V2)Workbench.TestingDesign.V2\bin\$(_Cfg)\net10.0\Workbench.TestingDesign.V2.dll;$(_V2)Workbench.TestingDesign.V2\bin\$(_Cfg)\net10.0\Workbench.TestingDesign.V2.deps.json;$(_V2)Workbench.TestingDesign.V2\plugin.v2.json" DestinationFolder="$(_StageRoot)com.projectworkbench.testing-design.v2\" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_ExecutorFiles)" DestinationFolder="$(_StageRoot)com.projectworkbench.test-executor\" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

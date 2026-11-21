@@ -1,0 +1,40 @@
+{
+  "contract": "workbench.plugin.v2",
+  "contractVersion": "2.0.0-preview.1",
+  "id": "com.projectworkbench.test-cases.v2",
+  "name": "测试用例 · 示例",
+  "version": "0.1.0",
+  "description": "从进程内示例插件迁出的预览：可编辑的预置用例与本地 CSV。不执行测试，不连接网络，不发送消息。",
+  "autoSend": false,
+  "backend": {
+    "entryAssembly": "Workbench.TestCases.V2.dll",
+    "entryType": "Workbench.TestCases.V2.TestCasesModule"
+  },
+  "ui": {
+    "kind": "web-package",
+    "module": "./ui/TestCasesPanel.tsx",
+    "mount": "embedded"
+  },
+  "permissions": [
+    {
+      "id": "project.read",
+      "reason": "按当前项目隔离示例用例",
+      "sensitive": false
+    },
+    {
+      "id": "plugin.data.read",
+      "reason": "读取本插件自己的示例草稿",
+      "sensitive": false
+    },
+    {
+      "id": "plugin.data.write",
+      "reason": "保存本插件自己的示例草稿",
+      "sensitive": false
+    },
+    {
+      "id": "local.file.export",
+      "reason": "把示例用例写成插件目录内的本地 CSV",
+      "sensitive": false
+    }
+  ]
+}

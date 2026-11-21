@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64" role="img" aria-labelledby="title description">
+  <title id="title">Project Workbench</title>
+  <desc id="description">Three modular panels on a rounded navy work surface.</desc>
+  <!-- Original Workbench artwork. No external images, fonts or licensed brand elements.
+       ICO source: this 64-unit geometry, sampled at 4x per output pixel in SVG paint order;
+       round-rectangle coverage uses nearest-point distance to each corner circle.
+       Straight-alpha RGBA PNG entries, sizes 16/24/32/48/64/256, zlib level 9,
+       area-averaged premultiplied RGB, ties rounded upward, zero RGB when alpha is zero. -->
+  <rect x="2" y="2" width="60" height="60" rx="14" fill="#17334A" />
+  <rect x="14" y="14" width="16" height="16" rx="3" fill="#65DFC1" />
+  <rect x="14" y="34" width="16" height="16" rx="3" fill="#65DFC1" />
+  <rect x="34" y="14" width="16" height="36" rx="3" fill="#F5FAFF" />
+</svg>

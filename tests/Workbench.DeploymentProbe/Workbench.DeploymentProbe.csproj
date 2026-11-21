@@ -1,0 +1,18 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <SonarQubeTestProject>true</SonarQubeTestProject>
+    <OutputType>Exe</OutputType>
+    <RuntimeIdentifier>$(NETCoreSdkRuntimeIdentifier)</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishAot>false</PublishAot>
+    <PublishSingleFile>false</PublishSingleFile>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="../../src/Workbench.App/HostRuntime.cs" Link="Host/HostRuntime.cs" />
+    <Compile Include="../../src/Workbench.App/WorkspaceRootLease.cs" Link="Host/WorkspaceRootLease.cs" />
+    <ProjectReference Include="../../src/Workbench.Core/Workbench.Core.csproj" />
+    <ProjectReference Include="../Workbench.HostTestDependency/Workbench.HostTestDependency.csproj" />
+  </ItemGroup>
+</Project>

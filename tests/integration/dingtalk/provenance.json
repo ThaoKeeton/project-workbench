@@ -1,0 +1,86 @@
+{
+  "schemaVersion": 1,
+  "pluginId": "com.projectworkbench.dingtalk-insights",
+  "version": "0.3.2",
+  "packageFile": "package.zip",
+  "sha256": "38d7a8f30ce6d4d5c6f6e26c757cbb6b9fc9f812546bf1db2ecdbadb9b578200",
+  "packageBytes": 179239,
+  "sourceRepository": "ThaoKeeton/dingtalk-insights",
+  "sourceCommit": "c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf",
+  "sourceUrl": "https://github.com/ThaoKeeton/dingtalk-insights/tree/c0c1d3303ae8b59c36dd7c4c1de85ddc6578abcf",
+  "workflowRunId": 42295585483,
+  "workflowUrl": "https://github.com/ThaoKeeton/dingtalk-insights/actions/runs/42295585483",
+  "workflowConclusion": "success",
+  "workflowJobId": 128159848406,
+  "artifactId": 13542127319,
+  "artifactSha256": "31d157c5165fd157ab9a39bb1df0b118a95461938b9cefd5aca1f07bd89356ca",
+  "transport": "publisher-root-manifest-zip",
+  "manifest": {
+    "id": "com.projectworkbench.dingtalk-insights",
+    "name": "钉钉沟通事项",
+    "version": "0.3.2",
+    "apiVersion": 1,
+    "minimumHostVersion": "0.2.0",
+    "entryAssembly": "DingTalkInsights.Workbench.dll",
+    "entryType": "DingTalkInsights.Workbench.InsightPlugin",
+    "description": "原生监控、搜索、待核实事项、历史与设置。默认模拟；连接、采集、模型及人工发送分别确认。SDK1 停用和退出均撤销恢复，重新启用后须明确开始。",
+    "capabilities": [
+      "native-views",
+      "settings",
+      "local-files",
+      "explicit-dws-polling",
+      "explicit-model-upload",
+      "manual-webhook"
+    ]
+  },
+  "fileCount": 8,
+  "expandedBytes": 426906,
+  "files": [
+    {
+      "path": "build-info.json",
+      "bytes": 10263,
+      "sha256": "a89c733ea7c767dbbb902cf39d17a9fb09cdef9ffa3d16146e7d9020d14329a3"
+    },
+    {
+      "path": "DingTalkInsights.Core.dll",
+      "bytes": 166912,
+      "sha256": "0570f7bb14ac048fd029aeb57b2a25253dea15dbb901fbd4eda43e2002f120e2"
+    },
+    {
+      "path": "DingTalkInsights.Runtime.dll",
+      "bytes": 105472,
+      "sha256": "0a6b8c4e6288a1337b6b14b698f43aff69a3a1bf2e2ad69dbeba5c12e8302d9d"
+    },
+    {
+      "path": "DingTalkInsights.Workbench.Bridge.dll",
+      "bytes": 52736,
+      "sha256": "3e70788a08878439d96b88cc828a7913bd26278e648a1d2c9bc3e7d407e2a0df"
+    },
+    {
+      "path": "DingTalkInsights.Workbench.deps.json",
+      "bytes": 14916,
+      "sha256": "4311892bf2c2999237084eaf3a67ec13eee5800f427d298fb4926d374a26f68b"
+    },
+    {
+      "path": "DingTalkInsights.Workbench.dll",
+      "bytes": 75264,
+      "sha256": "be3fd9bb0c6c2d01e91da270fbf655c420625f4fca3d0dbc312bfa275739137f"
+    },
+    {
+      "path": "inventory.json",
+      "bytes": 710,
+      "sha256": "616b6c7e7bad40743b42081740d4fb9bc0272a1b4721231dfaca3b9d2cfd22f2"
+    },
+    {
+      "path": "plugin.json",
+      "bytes": 633,
+      "sha256": "81e1159818af77b520f3f7dbb3f5e0fb9e752113f56149c44965b611b98fcd85"
+    }
+  ],
+  "hostSdkSourceCommit": "27154465c08d132798c8ea7b637f137f7340a90b",
+  "coverageBoundary": "Production local demo Core and real MonitorSupervisor. Native synthetic model-only host Save/Cancel, approval reads credentials.commit/revision, revoke/Delete and unapproved retained ciphertext. Model-key value Read/provider dispatch unexecuted; no Webhook values, purpose or send.",
+  "sourceBranch": "codex/workbench-plugin",
+  "publisherPackageFile": "workbench-plugin/DingTalkInsights.Workbench-0.3.2-win-x64.zip",
+  "workflowRunAttempt": 1,
+  "hostCredentialProviderImplementation": "Four definitions and async complete-batch provider implemented upstream; selected model-key value Read occurs immediately before actual model dispatch."
+}

@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <IsTestProject>true</IsTestProject>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="18.0.1" />
+    <PackageReference Include="xunit" Version="2.9.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="3.1.5">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <ProjectReference Include="../../src/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
+    <ProjectReference Include="../../plugins/v2/Workbench.TestExecutor/Workbench.TestExecutor.csproj" />
+    <ProjectReference Include="../../src/Workbench.Service.Abstractions/Workbench.Service.Abstractions.csproj" />
+    <ProjectReference Include="../fixtures/TestExecutor.SyntheticCdp/TestExecutor.SyntheticCdp.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="StageSyntheticCdp" AfterTargets="Build">
+    <PropertyGroup>
+      <_SynthDir>$(MSBuildThisFileDirectory)../fixtures/TestExecutor.SyntheticCdp/bin/$(Configuration)/net10.0/</_SynthDir>
+    </PropertyGroup>
+    <ItemGroup>
+      <_Synth Include="$(_SynthDir)**/*" />
+      <_Synth Include="$(_SynthDir)TestExecutor.SyntheticCdp" Condition="Exists('$(_SynthDir)TestExecutor.SyntheticCdp')" />
+      <_Synth Include="$(_SynthDir)TestExecutor.SyntheticCdp.exe" Condition="Exists('$(_SynthDir)TestExecutor.SyntheticCdp.exe')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_Synth)" DestinationFolder="$(TargetDir)synthetic-cdp/" SkipUnchangedFiles="true" />
+  </Target>
+</Project>

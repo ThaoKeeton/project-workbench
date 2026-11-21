@@ -1,0 +1,23 @@
+{
+  "contract": "workbench.plugin.v2",
+  "contractVersion": "2.0.0-preview.1",
+  "id": "com.projectworkbench.dingtalk-insights.v2",
+  "name": "钉钉 Insights",
+  "version": "0.1.0",
+  "description": "分析已导入的合成聊天导出，按需生成带原文证据的洞察。不连接钉钉，不配置 webhook，发送保持关闭。",
+  "autoSend": false,
+  "backend": {
+    "entryAssembly": "Workbench.DingTalkInsights.V2.dll",
+    "entryType": "Workbench.DingTalkInsights.V2.DingTalkInsightsModule"
+  },
+  "ui": {
+    "kind": "web-package",
+    "module": "./ui/DingPanel.tsx",
+    "mount": "embedded"
+  },
+  "permissions": [
+    { "id": "project.read", "reason": "按当前项目隔离聊天导出", "sensitive": false },
+    { "id": "plugin.data.read", "reason": "读取本插件自己的导出和洞察", "sensitive": false },
+    { "id": "plugin.data.write", "reason": "把导出和洞察写入本插件自己的目录", "sensitive": false }
+  ]
+}

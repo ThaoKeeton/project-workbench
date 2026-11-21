@@ -1,0 +1,68 @@
+{
+  "schema": "workbench.test-executor.suite.v2.preview",
+  "schemaVersion": 2,
+  "id": "synthetic-window",
+  "name": "合成窗口",
+  "stopOnFirstFailure": false,
+  "maskPasswordControls": true,
+  "application": {
+    "processName": "TestExecutor.SampleApp",
+    "windowTitle": "合成被测窗口"
+  },
+  "masks": [
+    { "kind": "selector", "automationId": "sample-secret" },
+    { "kind": "rectangle", "x": 0, "y": 0, "width": 4, "height": 4 }
+  ],
+  "cases": [
+    {
+      "id": "CASE-NAME",
+      "name": "写入名称并读取结果",
+      "allowFallback": true,
+      "steps": [
+        {
+          "id": "type-name",
+          "type": "flaui",
+          "action": "set-value",
+          "target": { "automationId": "sample-name" },
+          "input": "合成值",
+          "expected": "名称框接受输入"
+        },
+        {
+          "id": "press-ok",
+          "type": "flaui",
+          "action": "invoke",
+          "target": { "name": "确定" },
+          "expected": "结果标签更新"
+        },
+        {
+          "id": "read-value",
+          "type": "flaui",
+          "action": "read",
+          "target": { "automationId": "sample-value" },
+          "expected": "合成值"
+        },
+        {
+          "id": "wait-secret",
+          "type": "flaui",
+          "action": "wait-for",
+          "target": { "automationId": "sample-secret" },
+          "expected": "密码框出现"
+        }
+      ]
+    },
+    {
+      "id": "CASE-REVIEW",
+      "name": "主观核对需要人工复核",
+      "allowFallback": false,
+      "steps": [
+        {
+          "id": "judge-layout",
+          "type": "ai",
+          "action": "read",
+          "expected": "布局看起来完整",
+          "sensitive": true
+        }
+      ]
+    }
+  ]
+}

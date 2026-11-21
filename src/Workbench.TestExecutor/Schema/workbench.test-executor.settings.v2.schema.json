@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "workbench.test-executor.settings.v2.preview",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema", "schemaVersion"],
+  "properties": {
+    "schema": { "const": "workbench.test-executor.settings.v2.preview" },
+    "schemaVersion": { "const": 2 },
+    "computerUseEnabled": { "type": "boolean" },
+    "localOnly": { "type": "boolean" },
+    "export": { "enum": ["ask", "local", "push"] },
+    "linearTeamId": { "type": "string", "maxLength": 80, "pattern": "^$|^[A-Za-z0-9-]{1,80}$" },
+    "linearProjectId": { "type": "string", "maxLength": 80, "pattern": "^$|^[A-Za-z0-9-]{1,80}$" },
+    "computerUseModel": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "locatorRepairEnabled": { "type": "boolean" },
+    "locatorRepairModel": { "type": "string", "minLength": 1, "maxLength": 64, "pattern": "^[A-Za-z0-9][A-Za-z0-9._-]*$" },
+    "runTokenCap": { "type": "integer", "minimum": 0, "maximum": 100000000 },
+    "dailyTokenCap": { "type": "integer", "minimum": 0, "maximum": 100000000 },
+    "runCostCap": { "type": "number", "minimum": 0, "maximum": 100000 },
+    "dailyCostCap": { "type": "number", "minimum": 0, "maximum": 100000 },
+    "costPerThousandTokens": { "type": "number", "minimum": 0, "maximum": 1000 }
+  }
+}
