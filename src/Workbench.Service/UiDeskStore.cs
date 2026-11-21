@@ -61,10 +61,10 @@ internal static class UiDeskStore
         return allowed;
     }
 
-    private static bool ValidPins(IReadOnlyList<string>? pinned, IReadOnlySet<string> allowed)
+    private static bool ValidPins(IReadOnlyList<string>? pinned, HashSet<string> allowed)
         => pinned is { Count: <= 6 } && pinned.All(allowed.Contains) && pinned.Distinct(StringComparer.Ordinal).Count() == pinned.Count;
 
-    private static DeskState? Accept(DeskFile? document, IReadOnlySet<string> allowed)
+    private static DeskState? Accept(DeskFile? document, HashSet<string> allowed)
     {
         if (document is not { Schema: Schema, SchemaVersion: 2, Pinned: { } pinned }) return null;
         if (pinned.Length > 6 || pinned.Distinct(StringComparer.Ordinal).Count() != pinned.Length) return null;
